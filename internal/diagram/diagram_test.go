@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akinfemi/loadlore/internal/design"
+	"github.com/akinfemi/load-lore/internal/design"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")

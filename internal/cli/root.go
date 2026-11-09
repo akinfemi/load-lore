@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/akinfemi/loadlore/internal/version"
+	"github.com/akinfemi/load-lore/internal/version"
 )
 
 // Exit codes. Scripts and the AI skill rely on these.

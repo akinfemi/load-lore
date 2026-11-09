@@ -4,7 +4,7 @@ package main
 import (
 	"os"
 
-	"github.com/akinfemi/loadlore/internal/cli"
+	"github.com/akinfemi/load-lore/internal/cli"
 )
 
 func main() {

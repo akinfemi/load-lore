@@ -1,5 +1,5 @@
 BIN       := bin/loadl
-PKG       := github.com/akinfemi/loadlore
+PKG       := github.com/akinfemi/load-lore
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS   := -s -w -X $(PKG)/internal/version.Version=$(VERSION) -X $(PKG)/internal/version.Commit=$(COMMIT)

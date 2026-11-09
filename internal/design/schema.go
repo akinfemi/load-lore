@@ -7,7 +7,7 @@ import (
 )
 
 // SchemaID identifies the generated schema.
-const SchemaID = "https://github.com/akinfemi/loadlore/schema/design-v1.json"
+const SchemaID = "https://github.com/akinfemi/load-lore/schema/design-v1.json"
 
 // JSONSchema generates the design file's JSON Schema from the Go types.
 func JSONSchema() *jsonschema.Schema {

@@ -3,7 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/akinfemi/loadlore/internal/design"
+	"github.com/akinfemi/load-lore/internal/design"
 )
 
 func newSchemaCmd(g *globalOpts) *cobra.Command {

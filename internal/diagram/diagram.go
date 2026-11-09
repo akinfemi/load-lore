@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akinfemi/loadlore/internal/design"
-	"github.com/akinfemi/loadlore/internal/mermaid"
+	"github.com/akinfemi/load-lore/internal/design"
+	"github.com/akinfemi/load-lore/internal/mermaid"
 )
 
 // LoadNode is the id of the load generator node.

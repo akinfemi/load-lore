@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/akinfemi/loadlore/internal/version"
+	"github.com/akinfemi/load-lore/internal/version"
 )
 
 func newVersionCmd(g *globalOpts) *cobra.Command {

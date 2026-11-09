@@ -1,4 +1,4 @@
-module github.com/akinfemi/loadlore
+module github.com/akinfemi/load-lore
 
 go 1.27.0
 

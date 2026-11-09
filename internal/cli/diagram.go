@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/akinfemi/loadlore/internal/diagram"
+	"github.com/akinfemi/load-lore/internal/diagram"
 )
 
 func newDiagramCmd(g *globalOpts) *cobra.Command {

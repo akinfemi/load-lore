@@ -7,7 +7,7 @@ import (
 	madiagram "github.com/AlexanderGrooff/mermaid-ascii/pkg/diagram"
 	"github.com/AlexanderGrooff/mermaid-ascii/pkg/render"
 
-	"github.com/akinfemi/loadlore/internal/mermaid"
+	"github.com/akinfemi/load-lore/internal/mermaid"
 )
 
 // ASCII renders the flowchart for a terminal with box-drawing characters.
