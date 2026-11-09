@@ -19,6 +19,16 @@ jobs:
       - run: go build ./...
       - run: go test -race ./...
 
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go test -race -tags integration -timeout 15m ./...
+      - run: docker build -f cmd/synthetic/Dockerfile -t loadlore/synthetic:ci .
+
   lint:
     runs-on: ubuntu-latest
     steps:

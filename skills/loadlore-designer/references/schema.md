@@ -78,7 +78,7 @@ Call fields:
 | `mode` | `sync` | `sync` waits for the result; `async` fires and continues |
 | `on_miss` | none | Calls to run on a cache miss (`get` only) |
 | `ttl_s` | none | For `set` only |
-| `query` | `point` | `point` (by key), `range` (`rows` rows), `scan` (full table); `read` only |
+| `query` | `point` | `point` (one row by key), `range` (`rows` rows by key order), `scan` (filter on `user_id`: a full table scan unless `user_id` is indexed); `read` only |
 | `rows` | `10` | Rows per `range` read |
 
 Resilience fields apply to every outbound call of the service:
@@ -90,8 +90,8 @@ Resilience fields apply to every outbound call of the service:
 | `retries.backoff` | `none` | `none` (retry immediately), `constant`, `exponential` |
 | `retries.base_ms` | `100` | First delay for `constant` and `exponential` |
 | `retries.jitter` | `false` | Randomize each delay (full jitter); not with `none` |
-| `circuit_breaker` | none | `error_rate` (0–1), `window_s`, `open_s`, all required |
-| `bulkhead` | none | `max_concurrent`, required |
+| `circuit_breaker` | none | Per target. `error_rate` (0–1), `window_s`, `open_s`, all required. Opens once the window holds at least 20 calls; after `open_s`, one trial call decides |
+| `bulkhead` | none | Per target. `max_concurrent`, required; calls beyond it are rejected, not queued |
 
 ### Datastores and infrastructure (`kind`)
 
