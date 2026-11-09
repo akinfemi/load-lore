@@ -1,0 +1,8 @@
+flowchart LR
+    load(["load<br/>up to 4,000 rps"])
+    api["api ×2<br/>1 CPU · 512m"]
+    cache[("cache<br/>redis 8<br/>0.5 CPU · 256m")]
+    db[("db<br/>postgres 17<br/>1 CPU · 1g")]
+    load -->|"90% read · 10% write"| api
+    api -->|"get on reads, set on miss, del on writes<br/>pool 50"| cache
+    api -->|"read on miss, write on writes<br/>pool 20"| db

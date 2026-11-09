@@ -1,0 +1,36 @@
+version: 1
+name: gateway-orders
+services:
+  gateway:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: orders, op: http }
+        - { target: audit, op: http, mode: async, when: write }
+  orders:
+    image: loadlore/synthetic
+    replicas: 3
+    concurrency: { model: event-loop }
+    behavior:
+      cpu_ms: 2
+      calls:
+        - { target: pgb, op: read, query: range, rows: 50 }
+        - { target: pgb, op: write, count: 2, when: write }
+  audit:
+    image: ghcr.io/example/audit:1.4
+  pgb:
+    kind: pgbouncer
+    target: orders-db
+    default_pool_size: 30
+  orders-db:
+    kind: postgres
+    version: "16"
+    dataset: { rows: 200000, indexes: [user_id] }
+workload:
+  entry: gateway
+  profile:
+    - ramp: { from: 0, to: 1500, over: 3m }
+  mix: { read: 0.7 }

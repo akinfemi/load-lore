@@ -23,8 +23,8 @@
 | Write to DB, then delete cache key | `{ target: db, op: write, when: write }`, `{ target: cache, op: del, when: write }` |
 | HTTP or gRPC call to another internal service | `{ target: <service>, op: http }` plus a synthetic service for the target |
 | Third-party API (payments, email) | A synthetic service with `cpu_ms: 0` standing in for it; latency faults model its behavior. Record as an assumption. |
-| Publishing to a queue | `{ target: <queue>, op: publish, mode: async }` |
-| Background consumer | A separate service with `role: worker` and `consume` |
+| Publishing to a queue | Not supported yet (queues are planned for phase 2). Tell the user and leave it out, or model the producer side only. |
+| Background consumer | Not supported yet (workers are planned for phase 2). Tell the user. |
 | Auth middleware calling an auth service on every request | A call at the start of `calls`, `when: always` |
 
 When a request's behavior depends on data (feature flags, branches), model the common path and mention the others to the user.

@@ -1,0 +1,6 @@
+flowchart LR
+    load(["load<br/>up to 5,000 rps"])
+    api["api ×4<br/>1 CPU · 512m"]
+    db[("db<br/>postgres 17<br/>1 CPU · 1g")]
+    load -->|"90% read · 10% write"| api
+    api -->|"read ×3, write on writes<br/>pool 24"| db

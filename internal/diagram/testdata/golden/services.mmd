@@ -1,0 +1,12 @@
+flowchart LR
+    load(["load<br/>up to 1,500 rps"])
+    gateway["gateway ×2<br/>0.5 CPU · 256m"]
+    orders["orders ×3<br/>1 CPU · 512m"]
+    audit["audit<br/>ghcr.io/example/audit:1.4<br/>1 CPU · 512m"]
+    pgb("pgb<br/>pgbouncer · transaction<br/>1 CPU · 512m")
+    orders_db[("orders-db<br/>postgres 16<br/>1 CPU · 512m")]
+    load -->|"70% read · 30% write"| gateway
+    gateway -->|"http<br/>pool 10"| orders
+    gateway -.->|"http on writes<br/>pool 10"| audit
+    orders -->|"read range 50, write ×2 on writes<br/>pool 10"| pgb
+    pgb -->|"pool 30"| orders_db

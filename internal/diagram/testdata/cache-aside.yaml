@@ -1,0 +1,27 @@
+version: 1
+name: cache-aside
+services:
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    behavior:
+      cpu_ms: 1
+      calls:
+        - { target: cache, op: get, when: read, on_miss: [ { target: db, op: read }, { target: cache, op: set, ttl_s: 300 } ] }
+        - { target: db, op: write, when: write }
+        - { target: cache, op: del, when: write }
+    pools: { db: 20, cache: 50 }
+  cache:
+    kind: redis
+    resources: { cpu: 0.5, memory: 256m }
+    config: { maxmemory: 200mb, maxmemory-policy: allkeys-lru }
+  db:
+    kind: postgres
+    resources: { cpu: 1, memory: 1g }
+    dataset: { rows: 1000000 }
+workload:
+  entry: api
+  profile:
+    - hold: { rps: 1000, for: 2m }
+    - spike: { to: 4000, for: 30s }
+  keys: { distribution: hotspot }
