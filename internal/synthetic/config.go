@@ -93,11 +93,13 @@ const (
 	KindHTTP     = "http"
 )
 
-// Target is how to reach one dependency. Addr is usually a Toxiproxy listener.
+// Target is how to reach one dependency. Addrs are usually Toxiproxy
+// listeners: one for a datastore, one per replica for an application
+// service, which the HTTP client round-robins across.
 type Target struct {
-	Kind string `json:"kind"`
-	Addr string `json:"addr"` // host:port
-	Pool int    `json:"pool"` // connections per replica
+	Kind  string   `json:"kind"`
+	Addrs []string `json:"addrs"` // host:port
+	Pool  int      `json:"pool"`  // connections per replica
 
 	// Postgres.
 	Database       string `json:"database,omitempty"`
@@ -163,8 +165,10 @@ func (c *Config) Validate() error {
 		switch {
 		case !slices.Contains([]string{KindPostgres, KindRedis, KindHTTP}, t.Kind):
 			bad("target %s: kind %q", name, t.Kind)
-		case t.Addr == "":
-			bad("target %s: no addr", name)
+		case len(t.Addrs) == 0:
+			bad("target %s: no addrs", name)
+		case t.Kind != KindHTTP && len(t.Addrs) != 1:
+			bad("target %s: a %s target has exactly one addr", name, t.Kind)
 		case t.Pool < 1:
 			bad("target %s: pool %d", name, t.Pool)
 		case t.Kind == KindPostgres && (t.Rows < 1 || t.RowBytes < 1):

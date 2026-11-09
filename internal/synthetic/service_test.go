@@ -53,9 +53,9 @@ func baseConfig() *Config {
 		Concurrency: Concurrency{Model: "threads", Max: 0},
 		Resilience:  Resilience{TimeoutMs: 1000},
 		Targets: map[string]Target{
-			"db":    {Kind: KindPostgres, Addr: "127.0.0.1:1", Pool: 2, Rows: 100, RowBytes: 100, Database: "x", User: "x"},
-			"cache": {Kind: KindRedis, Addr: "127.0.0.1:1", Pool: 2},
-			"other": {Kind: KindHTTP, Addr: "127.0.0.1:1", Pool: 2},
+			"db":    {Kind: KindPostgres, Addrs: []string{"127.0.0.1:1"}, Pool: 2, Rows: 100, RowBytes: 100, Database: "x", User: "x"},
+			"cache": {Kind: KindRedis, Addrs: []string{"127.0.0.1:1"}, Pool: 2},
+			"other": {Kind: KindHTTP, Addrs: []string{"127.0.0.1:1"}, Pool: 2},
 		},
 	}
 }
@@ -507,8 +507,8 @@ func TestConfigValidation(t *testing.T) {
 		"unknown target": func(c *Config) { c.Calls = []Call{call("nope", "read")} },
 		"op mismatch":    func(c *Config) { c.Calls = []Call{call("cache", "read")} },
 		"zero count":     func(c *Config) { c.Calls = []Call{call("db", "read", func(c *Call) { c.Count = 0 })} },
-		"pool zero":      func(c *Config) { c.Targets["x"] = Target{Kind: KindRedis, Addr: "a:1"} },
-		"pg no rows":     func(c *Config) { c.Targets["x"] = Target{Kind: KindPostgres, Addr: "a:1", Pool: 1} },
+		"pool zero":      func(c *Config) { c.Targets["x"] = Target{Kind: KindRedis, Addrs: []string{"a:1"}} },
+		"pg no rows":     func(c *Config) { c.Targets["x"] = Target{Kind: KindPostgres, Addrs: []string{"a:1"}, Pool: 1} },
 		"bad retries":    func(c *Config) { c.Resilience.Retries = &Retries{Max: 1, Backoff: "exponential"} },
 		"nested": func(c *Config) {
 			c.Calls = []Call{call("cache", "get", func(c *Call) { c.OnMiss = []Call{call("db", "get")} })}

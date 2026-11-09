@@ -89,7 +89,7 @@ func startRedis(t *testing.T) string {
 }
 
 func pgTarget(env pgEnv, pool int) Target {
-	return Target{Kind: KindPostgres, Addr: env.addr, Pool: pool, Database: "lab", User: "lab", Password: "lab", Rows: testSpec.Rows, RowBytes: testSpec.RowBytes}
+	return Target{Kind: KindPostgres, Addrs: []string{env.addr}, Pool: pool, Database: "lab", User: "lab", Password: "lab", Rows: testSpec.Rows, RowBytes: testSpec.RowBytes}
 }
 
 func newService(t *testing.T, cfg *Config) *Service {
@@ -163,7 +163,7 @@ func TestIntegrationCacheAside(t *testing.T) {
 		Resilience: Resilience{TimeoutMs: 5000},
 		Targets: map[string]Target{
 			"db":    pgTarget(env, 2),
-			"cache": {Kind: KindRedis, Addr: redisAddr, Pool: 2, RowBytes: 256},
+			"cache": {Kind: KindRedis, Addrs: []string{redisAddr}, Pool: 2, RowBytes: 256},
 		},
 		Calls: []Call{call("cache", "get", func(c *Call) {
 			c.OnMiss = []Call{call("db", "read"), call("cache", "set", func(c *Call) { c.TTLS = 60 })}

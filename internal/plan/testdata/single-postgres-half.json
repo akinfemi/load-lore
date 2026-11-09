@@ -1,0 +1,290 @@
+{
+  "run_id": "test-run",
+  "name": "single-postgres-breaking-point",
+  "scale": 0.5,
+  "seed": 1,
+  "duration": 420000000000,
+  "services": [
+    {
+      "name": "api",
+      "kind": "app",
+      "image": "",
+      "containers": [
+        "api-0",
+        "api-1",
+        "api-2",
+        "api-3"
+      ],
+      "cpu": 0.5,
+      "memory": 268435456,
+      "port": 8080,
+      "synthetic": [
+        {
+          "service": "api",
+          "replica": 0,
+          "listen": ":8080",
+          "concurrency": {
+            "model": "threads",
+            "max": 200
+          },
+          "cpu_ms": 0.5,
+          "cpu_jitter": 0.1,
+          "alloc_kb": 0,
+          "calls": [
+            {
+              "target": "db",
+              "op": "read",
+              "count": 3,
+              "when": "always",
+              "mode": "sync",
+              "query": "point"
+            },
+            {
+              "target": "db",
+              "op": "write",
+              "count": 1,
+              "when": "write",
+              "mode": "sync"
+            }
+          ],
+          "resilience": {
+            "timeout_ms": 5000
+          },
+          "targets": {
+            "db": {
+              "kind": "postgres",
+              "addrs": [
+                "lore-toxiproxy:20000"
+              ],
+              "pool": 24,
+              "database": "lab",
+              "user": "loadlore",
+              "password": "loadlore",
+              "rows": 2500000,
+              "row_bytes": 512
+            }
+          }
+        },
+        {
+          "service": "api",
+          "replica": 1,
+          "listen": ":8080",
+          "concurrency": {
+            "model": "threads",
+            "max": 200
+          },
+          "cpu_ms": 0.5,
+          "cpu_jitter": 0.1,
+          "alloc_kb": 0,
+          "calls": [
+            {
+              "target": "db",
+              "op": "read",
+              "count": 3,
+              "when": "always",
+              "mode": "sync",
+              "query": "point"
+            },
+            {
+              "target": "db",
+              "op": "write",
+              "count": 1,
+              "when": "write",
+              "mode": "sync"
+            }
+          ],
+          "resilience": {
+            "timeout_ms": 5000
+          },
+          "targets": {
+            "db": {
+              "kind": "postgres",
+              "addrs": [
+                "lore-toxiproxy:20000"
+              ],
+              "pool": 24,
+              "database": "lab",
+              "user": "loadlore",
+              "password": "loadlore",
+              "rows": 2500000,
+              "row_bytes": 512
+            }
+          }
+        },
+        {
+          "service": "api",
+          "replica": 2,
+          "listen": ":8080",
+          "concurrency": {
+            "model": "threads",
+            "max": 200
+          },
+          "cpu_ms": 0.5,
+          "cpu_jitter": 0.1,
+          "alloc_kb": 0,
+          "calls": [
+            {
+              "target": "db",
+              "op": "read",
+              "count": 3,
+              "when": "always",
+              "mode": "sync",
+              "query": "point"
+            },
+            {
+              "target": "db",
+              "op": "write",
+              "count": 1,
+              "when": "write",
+              "mode": "sync"
+            }
+          ],
+          "resilience": {
+            "timeout_ms": 5000
+          },
+          "targets": {
+            "db": {
+              "kind": "postgres",
+              "addrs": [
+                "lore-toxiproxy:20000"
+              ],
+              "pool": 24,
+              "database": "lab",
+              "user": "loadlore",
+              "password": "loadlore",
+              "rows": 2500000,
+              "row_bytes": 512
+            }
+          }
+        },
+        {
+          "service": "api",
+          "replica": 3,
+          "listen": ":8080",
+          "concurrency": {
+            "model": "threads",
+            "max": 200
+          },
+          "cpu_ms": 0.5,
+          "cpu_jitter": 0.1,
+          "alloc_kb": 0,
+          "calls": [
+            {
+              "target": "db",
+              "op": "read",
+              "count": 3,
+              "when": "always",
+              "mode": "sync",
+              "query": "point"
+            },
+            {
+              "target": "db",
+              "op": "write",
+              "count": 1,
+              "when": "write",
+              "mode": "sync"
+            }
+          ],
+          "resilience": {
+            "timeout_ms": 5000
+          },
+          "targets": {
+            "db": {
+              "kind": "postgres",
+              "addrs": [
+                "lore-toxiproxy:20000"
+              ],
+              "pool": 24,
+              "database": "lab",
+              "user": "loadlore",
+              "password": "loadlore",
+              "rows": 2500000,
+              "row_bytes": 512
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "kind": "postgres",
+      "image": "postgres:17.11",
+      "containers": [
+        "db"
+      ],
+      "cpu": 0.5,
+      "memory": 536870912,
+      "port": 5432,
+      "version": "17",
+      "config": {
+        "max_connections": "100",
+        "shared_buffers": "131072kB"
+      },
+      "dataset": {
+        "Rows": 2500000,
+        "RowBytes": 512,
+        "Indexes": null
+      }
+    }
+  ],
+  "proxies": [
+    {
+      "name": "api--db",
+      "from": "api",
+      "to": "db",
+      "upstream": "db:5432",
+      "listen": 20000
+    }
+  ],
+  "workload": {
+    "entry": "api",
+    "urls": [
+      "http://api-0:8080",
+      "http://api-1:8080",
+      "http://api-2:8080",
+      "http://api-3:8080"
+    ],
+    "start_rate": 50,
+    "stages": [
+      {
+        "target": 2500,
+        "duration": "5m0s"
+      },
+      {
+        "target": 2500,
+        "duration": "2m0s"
+      }
+    ],
+    "peak_rate": 2500,
+    "read_share": 0.9,
+    "keys": {
+      "distribution": "zipf",
+      "count": 2500000,
+      "skew": 1.1
+    },
+    "payload_bytes": 1024,
+    "max_vus": 4000,
+    "pre_vus": 625,
+    "timeout": "10s"
+  },
+  "faults": null,
+  "infra": {
+    "load_cpu": 1,
+    "load_memory": 2147483648,
+    "proxy_cpu": 1,
+    "proxy_memory": 268435456,
+    "prometheus_cpu": 1,
+    "prometheus_memory": 1073741824,
+    "cadvisor_cpu": 0.5,
+    "cadvisor_memory": 268435456,
+    "exporter_cpu": 0.25,
+    "exporter_memory": 134217728,
+    "expected_proxied_ops": 7750,
+    "synthetic_image": "loadlore/synthetic:dev"
+  },
+  "notes": [
+    "scale 0.5: CPU, memory, memory settings, dataset rows, the keyspace and request rates are multiplied by 0.5; replicas, pool sizes, connection limits and per-request work are not",
+    "db: shared_buffers scaled from 256MB to 131072kB",
+    "Loadlore's own containers get fixed budgets: load generator 1 CPU (peak 2500 rps), Toxiproxy 1 CPU (about 7750 proxied calls/s at peak), Prometheus 1, cAdvisor 0.5, exporters 0.25 each"
+  ]
+}

@@ -50,7 +50,7 @@ func TestHTTPTargetPoolWait(t *testing.T) {
 		Service:     "front",
 		Concurrency: Concurrency{Model: "threads"},
 		Resilience:  Resilience{TimeoutMs: 5000},
-		Targets:     map[string]Target{"back": {Kind: KindHTTP, Addr: strings.TrimPrefix(srv.URL, "http://"), Pool: 1}},
+		Targets:     map[string]Target{"back": {Kind: KindHTTP, Addrs: []string{strings.TrimPrefix(srv.URL, "http://")}, Pool: 1}},
 		Calls:       []Call{call("back", "http")},
 	}
 	front, err := New(frontCfg)

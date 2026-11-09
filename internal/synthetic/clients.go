@@ -63,7 +63,7 @@ func newPGClient(name string, t Target, m *metrics) (*pgClient, error) {
 	u := url.URL{
 		Scheme:   "postgres",
 		User:     url.UserPassword(t.User, t.Password),
-		Host:     t.Addr,
+		Host:     t.Addrs[0],
 		Path:     "/" + t.Database,
 		RawQuery: "sslmode=disable&application_name=loadlore-synthetic",
 	}
@@ -170,7 +170,7 @@ type redisClient struct {
 
 func newRedisClient(name string, t Target, timeout time.Duration) *redisClient {
 	opts := &redis.Options{
-		Addr:     t.Addr,
+		Addr:     t.Addrs[0],
 		PoolSize: t.Pool,
 		// No hidden retries: retries come only from the design's resilience
 		// settings, so they show up in the metrics.
@@ -240,7 +240,8 @@ func (c *redisClient) close()                         { _ = c.rdb.Close() }
 
 type httpClient struct {
 	name    string
-	base    string
+	bases   []string
+	next    atomic.Uint64
 	hc      *http.Client
 	m       *metrics
 	pool    int
@@ -256,7 +257,11 @@ func newHTTPClient(name string, t Target, m *metrics) *httpClient {
 		IdleConnTimeout:     90 * time.Second,
 		DisableCompression:  true,
 	}
-	return &httpClient{name: name, base: "http://" + t.Addr, hc: &http.Client{Transport: tr}, m: m, pool: t.Pool}
+	bases := make([]string, len(t.Addrs))
+	for i, a := range t.Addrs {
+		bases[i] = "http://" + a
+	}
+	return &httpClient{name: name, bases: bases, hc: &http.Client{Transport: tr}, m: m, pool: t.Pool}
 }
 
 func (h *httpClient) do(ctx context.Context, _ *Call, r request) (bool, error) {
@@ -271,7 +276,8 @@ func (h *httpClient) do(ctx context.Context, _ *Call, r request) (bool, error) {
 			h.m.poolWait.WithLabelValues(h.name).Observe(time.Since(waitStart).Seconds())
 		},
 	}
-	u := fmt.Sprintf("%s/r?type=%s&key=%d", h.base, r.typ, r.key)
+	base := h.bases[(h.next.Add(1)-1)%uint64(len(h.bases))] // round-robin across replicas
+	u := fmt.Sprintf("%s/r?type=%s&key=%d", base, r.typ, r.key)
 	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), http.MethodGet, u, nil)
 	if err != nil {
 		return false, err
@@ -302,17 +308,19 @@ func (h *httpClient) snapshot() poolSnapshot {
 }
 
 func (h *httpClient) ping(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.base+"/healthz", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := h.hc.Do(req)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: %s", h.name, resp.Status)
+	for _, base := range h.bases {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/healthz", nil)
+		if err != nil {
+			return err
+		}
+		resp, err := h.hc.Do(req)
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s at %s: %s", h.name, base, resp.Status)
+		}
 	}
 	return nil
 }

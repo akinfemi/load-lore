@@ -1,0 +1,36 @@
+# A one-minute design that exercises the local driver end to end: a seeded
+# Postgres, a cache, a latency fault and a replica kill.
+version: 1
+name: smoke
+services:
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 1
+      calls:
+        - { target: cache, op: get, when: read, on_miss: [ { target: db, op: read }, { target: cache, op: set, ttl_s: 60 } ] }
+        - { target: db, op: write, when: write }
+      resilience: { timeout_ms: 1000 }
+    pools: { db: 10, cache: 10 }
+  cache:
+    kind: redis
+    resources: { cpu: 0.5, memory: 128m }
+  db:
+    kind: postgres
+    resources: { cpu: 1, memory: 512m }
+    dataset: { rows: 20000, row_bytes: 256 }
+workload:
+  entry: api
+  profile:
+    - ramp: { from: 50, to: 300, over: 30s }
+    - hold: { rps: 300, for: 30s }
+  mix: { read: 0.9, write: 0.1 }
+  keys: { distribution: zipf, skew: 1.1 }
+scenario:
+  - { at: 20s, inject: latency, target: db, add_ms: 50, for: 10s }
+  - { at: 45s, inject: kill, target: "api[1]" }
+expect:
+  - p99_ms < 200 until load_rps >= 250
+  - cache.hit_rate > 50% after 30s

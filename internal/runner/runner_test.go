@@ -1,0 +1,202 @@
+package runner
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/akinfemi/load-lore/internal/driver"
+	"github.com/akinfemi/load-lore/internal/plan"
+	"github.com/akinfemi/load-lore/internal/rundir"
+)
+
+// fakeDriver records calls. Load lasts loadFor unless ctx ends first.
+type fakeDriver struct {
+	mu       sync.Mutex
+	calls    []string
+	upErr    error
+	loadFor  time.Duration
+	injected []string
+	undone   []string
+}
+
+func (f *fakeDriver) log(s string) { f.mu.Lock(); f.calls = append(f.calls, s); f.mu.Unlock() }
+
+func (f *fakeDriver) Preflight(context.Context, *plan.Plan) (*driver.Preflight, error) {
+	f.log("preflight")
+	return &driver.Preflight{Host: driver.Host{Driver: "fake", CPUs: 64}}, nil
+}
+
+func (f *fakeDriver) Up(_ context.Context, _ *plan.Plan, dir *rundir.Dir, _ func(string)) error {
+	f.log("up")
+	_ = dir.Write("compose.yaml", []byte("fake"))
+	return f.upErr
+}
+
+func (f *fakeDriver) RunLoad(ctx context.Context, started func(time.Time)) (*driver.LoadResult, error) {
+	f.log("load")
+	started(time.Now())
+	select {
+	case <-time.After(f.loadFor):
+		return &driver.LoadResult{Requests: 10}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (f *fakeDriver) Inject(_ context.Context, fl *plan.Fault) (func(context.Context) error, error) {
+	f.mu.Lock()
+	f.injected = append(f.injected, fl.Inject)
+	f.mu.Unlock()
+	return func(context.Context) error {
+		f.mu.Lock()
+		f.undone = append(f.undone, fl.Inject)
+		f.mu.Unlock()
+		return nil
+	}, nil
+}
+
+func (f *fakeDriver) Sample(context.Context, time.Duration) (*driver.Sample, error) {
+	return &driver.Sample{}, nil
+}
+
+func (f *fakeDriver) Collect(_ context.Context, dir *rundir.Dir, _, _ time.Time) error {
+	f.log("collect")
+	return dir.Write("metrics/x.json", []byte("{}"))
+}
+
+func (f *fakeDriver) Down(context.Context) error { f.log("down"); return nil }
+
+const designSrc = `
+version: 1
+name: fake
+services:
+  api: { image: loadlore/synthetic, behavior: { calls: [ { target: db, op: read } ] } }
+  db: { kind: postgres, dataset: { rows: 100 } }
+workload:
+  entry: api
+  profile: [ { hold: { rps: 10, for: 1s } } ]
+scenario:
+  - { at: 0s, inject: latency, target: db, add_ms: 5, for: 100ms }
+  - { at: 0s, inject: pause, target: db, for: 10m }
+`
+
+func init() { scrapeSettle = 0 }
+
+func runFake(t *testing.T, f *fakeDriver, ctx context.Context, opt Options) (*Result, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "design.yaml")
+	if err := os.WriteFile(path, []byte(designSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opt.DesignPath = path
+	opt.Root = filepath.Join(t.TempDir(), "runs")
+	return Run(ctx, opt, func(context.Context) (driver.Driver, error) { return f, nil })
+}
+
+func TestCompletedRunTearsDownAndRecords(t *testing.T) {
+	f := &fakeDriver{loadFor: 300 * time.Millisecond}
+	res, err := runFake(t, f, context.Background(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.calls, ","); got != "preflight,up,load,collect,down" {
+		t.Errorf("calls %s", got)
+	}
+	if res.Status != StatusCompleted || res.LoadStarted == nil || res.LoadEnded == nil {
+		t.Errorf("result %+v", res)
+	}
+	// The short fault ended on time; the long one was ended with the load.
+	if len(f.injected) != 2 || len(f.undone) != 2 || f.undone[0] != "latency" {
+		t.Errorf("injected %v, undone %v", f.injected, f.undone)
+	}
+	for _, name := range []string{"design.yaml", "plan.json", "run.json", "events.jsonl", "compose.yaml", "metrics/x.json"} {
+		if _, err := os.Stat(filepath.Join(res.Dir, name)); err != nil {
+			t.Errorf("missing %s", name)
+		}
+	}
+	b, _ := os.ReadFile(filepath.Join(res.Dir, "events.jsonl"))
+	for _, kind := range []string{"run_start", "load_start", "fault_start", "fault_end", "load_end", "teardown", "run_end"} {
+		if !strings.Contains(string(b), `"kind":"`+kind+`"`) {
+			t.Errorf("events.jsonl lacks %s", kind)
+		}
+	}
+	var rj Result
+	b, _ = os.ReadFile(filepath.Join(res.Dir, "run.json"))
+	if err := json.Unmarshal(b, &rj); err != nil || rj.Status != StatusCompleted {
+		t.Errorf("run.json: %v %s", err, b)
+	}
+}
+
+func TestFailedUpStillTearsDown(t *testing.T) {
+	f := &fakeDriver{upErr: errors.New("boom")}
+	res, err := runFake(t, f, context.Background(), Options{})
+	if err == nil || res.Status != StatusFailed || !strings.Contains(res.Error, "boom") {
+		t.Fatalf("err %v, result %+v", err, res)
+	}
+	if got := strings.Join(f.calls, ","); got != "preflight,up,down" {
+		t.Errorf("calls %s", got)
+	}
+}
+
+func TestInterruptedRunTearsDown(t *testing.T) {
+	f := &fakeDriver{loadFor: time.Hour}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel)
+	res, err := runFake(t, f, ctx, Options{})
+	if err == nil || res.Status != StatusInterrupted {
+		t.Fatalf("err %v, status %s", err, res.Status)
+	}
+	if !strings.HasSuffix(strings.Join(f.calls, ","), "down") {
+		t.Errorf("calls %v", f.calls)
+	}
+}
+
+func TestTimedOutRunTearsDown(t *testing.T) {
+	f := &fakeDriver{loadFor: time.Hour}
+	res, err := runFake(t, f, context.Background(), Options{Timeout: 200 * time.Millisecond})
+	if err == nil || res.Status != StatusTimedOut {
+		t.Fatalf("err %v, status %s", err, res.Status)
+	}
+	if !strings.HasSuffix(strings.Join(f.calls, ","), "down") {
+		t.Errorf("calls %v", f.calls)
+	}
+}
+
+func TestKeepSkipsTeardown(t *testing.T) {
+	f := &fakeDriver{loadFor: 10 * time.Millisecond}
+	res, err := runFake(t, f, context.Background(), Options{Keep: true})
+	if err != nil || !res.Kept {
+		t.Fatal(err, res)
+	}
+	for _, c := range f.calls {
+		if c == "down" {
+			t.Error("--keep still tore down")
+		}
+	}
+}
+
+func TestInvalidDesignCreatesNothing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "design.yaml")
+	if err := os.WriteFile(path, []byte("version: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "runs")
+	_, err := Run(context.Background(), Options{DesignPath: path, Root: root}, func(context.Context) (driver.Driver, error) {
+		t.Fatal("driver created for an invalid design")
+		return nil, nil
+	})
+	var inv *InvalidDesignError
+	if !errors.As(err, &inv) {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Error("a run folder was created for an invalid design")
+	}
+}

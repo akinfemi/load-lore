@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +20,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck())
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "synthetic:", err)
 		os.Exit(1)
@@ -59,4 +63,28 @@ func run() error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdown)
+}
+
+// healthcheck is the container health check: the image has no shell or
+// curl, so the binary checks itself. Healthy means every dependency answers.
+func healthcheck() int {
+	addr := ":8080"
+	if cfg, err := synthetic.LoadConfig(); err == nil {
+		addr = cfg.Listen
+	}
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://" + addr + "/readyz")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintln(os.Stderr, resp.Status)
+		return 1
+	}
+	return 0
 }

@@ -1,0 +1,90 @@
+package local
+
+import (
+	"flag"
+	"os"
+	"strings"
+	"testing"
+
+	"go.yaml.in/yaml/v3"
+
+	"github.com/akinfemi/load-lore/internal/design"
+	"github.com/akinfemi/load-lore/internal/plan"
+)
+
+var update = flag.Bool("update", false, "rewrite golden files")
+
+func smokePlan(t *testing.T) *plan.Plan {
+	t.Helper()
+	d, diags, err := design.LoadFile("../../../examples/smoke.yaml")
+	if err != nil || diags.HasErrors() {
+		t.Fatal(err, diags)
+	}
+	p, err := plan.Build(d, plan.Options{RunID: "test-run", Seed: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestGoldenCompose(t *testing.T) {
+	p := smokePlan(t)
+	got, err := buildCompose(p, stackInput{Project: "loadlore-test-run", K6Script: []byte("// script\n"), DataVols: map[string]string{"db": "loadlore-test-run-db-data"}, Synthetic: "loadlore/synthetic:dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const path = "testdata/smoke-compose.yaml"
+	if *update {
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v (run go test -update)", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("%s differs; run go test -update after checking the change", path)
+	}
+
+	var cf composeFile
+	if err := yaml.Unmarshal(got, &cf); err != nil {
+		t.Fatal(err)
+	}
+	for name, s := range cf.Services {
+		if s.Labels[LabelOwner] != "1" || s.Labels[LabelRun] != "test-run" {
+			t.Errorf("%s isn't labeled for teardown: %v", name, s.Labels)
+		}
+		if s.CPUs <= 0 || s.MemLimit == "" {
+			t.Errorf("%s has no resource limits", name)
+		}
+		if s.Restart != "no" {
+			t.Errorf("%s restarts on its own", name)
+		}
+	}
+	if cf.Services["lore-k6"].Profiles[0] != "load" {
+		t.Error("k6 would start with the stack")
+	}
+	var prom map[string]any
+	if err := yaml.Unmarshal([]byte(cf.Configs["prometheus"].Content), &prom); err != nil {
+		t.Errorf("prometheus.yml doesn't parse: %v", err)
+	}
+	if !strings.Contains(cf.Configs["toxiproxy"].Content, `"upstream": "db:5432"`) {
+		t.Errorf("toxiproxy config: %s", cf.Configs["toxiproxy"].Content)
+	}
+}
+
+func TestComposeVersion(t *testing.T) {
+	for v, want := range map[string]bool{"2.23.0": true, "2.22.9": false, "5.1.1": true, "v2.30.1-desktop.1": true, "1.29.2": false, "junk": false} {
+		if got := composeNewEnough(v); got != want {
+			t.Errorf("%s: %v", v, got)
+		}
+	}
+}
+
+func TestPGDataPath(t *testing.T) {
+	if pgDataPath("17") != "/var/lib/postgresql/data" || pgDataPath("18") != "/var/lib/postgresql" {
+		t.Error("wrong data path")
+	}
+}
