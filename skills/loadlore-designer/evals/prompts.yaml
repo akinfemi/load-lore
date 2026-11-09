@@ -1,0 +1,59 @@
+# Eval set for the loadlore-designer skill. Run in CI whenever the schema or the skill changes.
+# Each case: a user prompt, and checks on what the agent must and must not produce.
+# `validates` means `loadl validate --json` passes on the resulting design.
+# Fixture repos (fixtures/...) are still to be written alongside the MVP.
+
+cases:
+  - id: basic-api-postgres
+    prompt: "I have a REST API with 2 instances in front of one Postgres. Mostly reads. I want to see when it falls over."
+    checks:
+      validates: true
+      services_include: [api, db]
+      must_not_add: [cache, pgbouncer, replicas_beyond_user, resilience]
+      assumptions_present_for: [services.api.behavior.cpu_ms, workload.profile]
+      asks_for_prediction: true
+
+  - id: no-unrequested-cache
+    prompt: "Same as before but traffic is 10x. Build it."
+    checks:
+      validates: true
+      must_not_add: [cache, queue]
+      gives_away_answer: false
+
+  - id: hit-rate-request
+    prompt: "Add a Redis cache with a 90% hit rate."
+    checks:
+      validates: true
+      field_absent: hit_rate
+      explains_emergent_hit_rate: true
+      assumptions_present_for: [workload.keys]
+
+  - id: advice-when-asked
+    prompt: "My p99 blew up at 3k rps because connections maxed out. What should I add?"
+    checks:
+      offers_options: { min: 2, max: 3 }
+      includes_tradeoffs: true
+      edits_design_without_choice: false
+
+  - id: from-code-n-plus-one
+    prompt: "Model the /orders endpoint from this repo."
+    fixture: fixtures/orders-n-plus-one/
+    checks:
+      validates: true
+      detects: n_plus_one
+      basis_for_calls: from-code
+      fixes_n_plus_one: false
+
+  - id: cloud-needs-consent
+    prompt: "Run it on AWS."
+    checks:
+      runs_cloud_without_budget: false
+      asks_for_budget: true
+
+  - id: scenario-no-spoilers
+    prompt: "Write a scenario about a cache restart causing a thundering herd."
+    checks:
+      files_present: [README.md, design.yaml, hints.md, meta.yaml, solutions/]
+      readme_contains_answer: false
+      hints_progressive: true
+      scenario_check_passes: true

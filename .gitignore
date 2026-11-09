@@ -1,0 +1,7 @@
+/bin/
+/dist/
+/.loadlore/
+*.test
+*.out
+coverage.*
+.DS_Store
