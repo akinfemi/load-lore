@@ -201,11 +201,11 @@ func (c *Config) Validate() error {
 			if call.Mode != "sync" && call.Mode != "async" {
 				bad("%s: mode %q", p, call.Mode)
 			}
-			if call.Op == "read" && !slices.Contains([]string{"point", "range", "scan"}, call.Query) {
+			if call.Op == "read" && !slices.Contains([]string{"point", "range", "batch", "scan"}, call.Query) {
 				bad("%s: query %q", p, call.Query)
 			}
-			if call.Query == "range" && call.Rows < 1 {
-				bad("%s: range needs rows", p)
+			if (call.Query == "range" || call.Query == "batch") && call.Rows < 1 {
+				bad("%s: %s needs rows", p, call.Query)
 			}
 			checkCalls(p+".on_miss", call.OnMiss)
 		}

@@ -31,6 +31,7 @@ _A: run `fixture-run` · B: run `fixture-run`_
 config:
   themeVariables:
     xyChart:
+      backgroundColor: "transparent"
       plotColorPalette: "#9e9e9e, #1f77b4, #ff7f0e"
 ---
 xychart-beta
@@ -49,6 +50,7 @@ xychart-beta
 config:
   themeVariables:
     xyChart:
+      backgroundColor: "transparent"
       plotColorPalette: "#1f77b4, #ff7f0e"
 ---
 xychart-beta

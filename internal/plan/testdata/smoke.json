@@ -337,9 +337,9 @@
       "why": "evict the least recently used keys when the cache is full, as managed Redis usually does"
     },
     {
-      "field": "load generator timeout",
+      "field": "workload.timeout_ms",
       "value": "10s",
-      "why": "k6 gives up on a request after this long and counts it as failed"
+      "why": "the default; k6 gives up on a request after this long and counts it as failed"
     },
     {
       "field": "services.lb timeouts",

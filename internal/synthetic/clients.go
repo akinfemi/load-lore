@@ -116,6 +116,21 @@ func (p *pgClient) do(ctx context.Context, c *Call, r request) (bool, error) {
 			rows.Close()
 			err = rows.Err()
 		}
+	case c.Query == "batch":
+		// The request's key and the ones after it, as a page of items
+		// fetched by id in one statement.
+		keys := make([]int64, c.Rows)
+		for i := range keys {
+			keys[i] = clampKey(r.key+int64(i), p.spec.Rows)
+		}
+		var rows pgx.Rows
+		rows, err = conn.Query(ctx, dataset.BatchRead, keys)
+		if err == nil {
+			for rows.Next() {
+			}
+			rows.Close()
+			err = rows.Err()
+		}
 	case c.Query == "scan":
 		var n, maxLen *int64
 		err = conn.QueryRow(ctx, dataset.ScanRead, p.spec.UserFor(key)).Scan(&n, &maxLen)

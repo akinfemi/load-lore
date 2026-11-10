@@ -82,8 +82,8 @@ type Call struct {
 	Mode   string  `yaml:"mode,omitempty" json:"mode,omitempty" jsonschema:"enum=sync,enum=async,default=sync" jsonschema_description:"sync waits for the result; async fires and continues."`
 	OnMiss []*Call `yaml:"on_miss,omitempty" json:"on_miss,omitempty" jsonschema_description:"Calls run on a cache miss. get only."`
 	TTLS   *int    `yaml:"ttl_s,omitempty" json:"ttl_s,omitempty" jsonschema:"minimum=0" jsonschema_description:"Key TTL in seconds. set only."`
-	Query  string  `yaml:"query,omitempty" json:"query,omitempty" jsonschema:"enum=point,enum=range,enum=scan,default=point" jsonschema_description:"Shape of a read: point (by key), range (rows), scan (full table)."`
-	Rows   *int    `yaml:"rows,omitempty" json:"rows,omitempty" jsonschema:"minimum=1,default=10" jsonschema_description:"Rows returned by a range read."`
+	Query  string  `yaml:"query,omitempty" json:"query,omitempty" jsonschema:"enum=point,enum=range,enum=batch,enum=scan,default=point" jsonschema_description:"Shape of a read: point (one row by key), range (rows in key order), batch (rows by key in one statement), scan (full table)."`
+	Rows   *int    `yaml:"rows,omitempty" json:"rows,omitempty" jsonschema:"minimum=1,default=10" jsonschema_description:"Rows returned by a range read, or keys fetched by a batch read."`
 }
 
 // Resilience settings apply to every outbound call of the service.
@@ -134,6 +134,7 @@ type Workload struct {
 	Mix       *Mix     `yaml:"mix,omitempty" json:"mix,omitempty"`
 	Keys      *Keys    `yaml:"keys,omitempty" json:"keys,omitempty"`
 	PayloadKB *float64 `yaml:"payload_kb,omitempty" json:"payload_kb,omitempty" jsonschema:"minimum=0,default=1"`
+	TimeoutMs *int     `yaml:"timeout_ms,omitempty" json:"timeout_ms,omitempty" jsonschema:"minimum=1,default=10000" jsonschema_description:"How long the load generator waits for a response before counting the request as failed."`
 }
 
 // Step is one stage of the load profile. Exactly one field is set.

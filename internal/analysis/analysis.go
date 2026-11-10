@@ -85,9 +85,12 @@ type Window struct {
 	Pools    []*PoolWindow             `json:"pools"`
 	Edges    []*EdgeWindow             `json:"edges"`
 
-	// Loadlore's own containers, as a fraction of their CPU budgets.
-	LoadCPU  *float64 `json:"load_generator_cpu"`
-	ProxyCPU *float64 `json:"proxy_cpu"`
+	// Loadlore's own containers, as a fraction of their CPU budgets, and
+	// the share of CFS periods in which each hit its quota and was stalled.
+	LoadCPU        *float64 `json:"load_generator_cpu"`
+	ProxyCPU       *float64 `json:"proxy_cpu"`
+	LoadThrottled  *float64 `json:"load_generator_throttled_periods"`
+	ProxyThrottled *float64 `json:"proxy_throttled_periods"`
 }
 
 // ServiceWindow is one design service in one window.
@@ -442,6 +445,8 @@ func (b *builder) window(i int) *Window {
 	}
 	w.LoadCPU = b.toolCPU("lore-k6", b.p.Infra.LoadCPU, wa, wb)
 	w.ProxyCPU = b.toolCPU(plan.ProxyHost, b.p.Infra.ProxyCPU, wa, wb)
+	w.LoadThrottled = b.throttledPeriods("lore-k6", wa, wb)
+	w.ProxyThrottled = b.throttledPeriods(plan.ProxyHost, wa, wb)
 	return w
 }
 
@@ -485,6 +490,21 @@ func (b *builder) cpu(m matcher, limit float64, wa, wb float64) (util, throttled
 		throttled = num(th, true)
 	}
 	return util, throttled, replicas
+}
+
+// throttledPeriods is the share of a container's CFS periods in which it
+// used up its quota and was stalled until the next period. A 10 s average
+// CPU can sit well under the limit while bursts are throttled.
+func (b *builder) throttledPeriods(service string, wa, wb float64) *float64 {
+	periods, ok := b.st.increase("container_cpu_cfs_periods_total", eq("service", service), wa, wb)
+	if !ok || periods <= 0 {
+		return nil
+	}
+	th, ok := b.st.increase("container_cpu_cfs_throttled_periods_total", eq("service", service), wa, wb)
+	if !ok {
+		return nil
+	}
+	return num(th/periods, true)
 }
 
 func (b *builder) toolCPU(service string, budget, wa, wb float64) *float64 {
@@ -597,29 +617,30 @@ func (b *builder) appEdges(w *Window, s *plan.Service, wa, wb float64) {
 
 // Metric sources, cited wherever a number appears.
 const (
-	SrcOffered     = "the load profile in plan.json (offered arrival rate)"
-	SrcRPS         = `k6_http_reqs_total{expected_response="true"} (k6: successful responses)`
-	SrcCompleted   = "k6_http_reqs_total (k6: all responses)"
-	SrcErrors      = `k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6)`
-	SrcDropped     = "k6_dropped_iterations_total (k6: arrivals it couldn't start)"
-	SrcK6Latency   = "k6_http_req_duration_seconds (k6 histogram, end to end)"
-	SrcCPU         = "container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit"
-	SrcThrottled   = "container_cpu_cfs_throttled_seconds_total (cAdvisor)"
-	SrcMemory      = "container_memory_working_set_bytes (cAdvisor) ÷ the container's memory limit"
-	SrcAppLatency  = "loadlore_request_duration_seconds (the service's own histogram)"
-	SrcAppErrors   = `loadlore_requests_total{code!="200"} ÷ loadlore_requests_total`
-	SrcInflight    = "loadlore_requests_inflight (summed over replicas)"
-	SrcCallLatency = "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
-	SrcCalls       = "loadlore_calls_total (the caller's outbound call attempts)"
-	SrcPoolInUse   = `loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections`
-	SrcPoolPending = "loadlore_pool_pending (callers waiting for a connection)"
-	SrcPoolWait    = "loadlore_pool_wait_seconds (time to get a connection)"
-	SrcPGConns     = "pg_stat_activity_count and pg_settings_max_connections (postgres_exporter)"
-	SrcHitRate     = "redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter)"
-	SrcLBRequests  = "haproxy_backend_http_requests_total (HAProxy)"
-	SrcLBHealthy   = "haproxy_backend_active_servers (HAProxy)"
-	SrcLoadCPU     = "container_cpu_usage_seconds_total{service=\"lore-k6\"} ÷ the load generator's CPU budget"
-	SrcProxyCPU    = "container_cpu_usage_seconds_total{service=\"lore-toxiproxy\"} ÷ Toxiproxy's CPU budget"
+	SrcOffered          = "the load profile in plan.json (offered arrival rate)"
+	SrcRPS              = `k6_http_reqs_total{expected_response="true"} (k6: successful responses)`
+	SrcCompleted        = "k6_http_reqs_total (k6: all responses)"
+	SrcErrors           = `k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6)`
+	SrcDropped          = "k6_dropped_iterations_total (k6: arrivals it couldn't start)"
+	SrcK6Latency        = "k6_http_req_duration_seconds (k6 histogram, end to end)"
+	SrcCPU              = "container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit"
+	SrcThrottled        = "container_cpu_cfs_throttled_seconds_total (cAdvisor)"
+	SrcMemory           = "container_memory_working_set_bytes (cAdvisor) ÷ the container's memory limit"
+	SrcAppLatency       = "loadlore_request_duration_seconds (the service's own histogram)"
+	SrcAppErrors        = `loadlore_requests_total{code!="200"} ÷ loadlore_requests_total`
+	SrcInflight         = "loadlore_requests_inflight (summed over replicas)"
+	SrcCallLatency      = "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+	SrcCalls            = "loadlore_calls_total (the caller's outbound call attempts)"
+	SrcPoolInUse        = `loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections`
+	SrcPoolPending      = "loadlore_pool_pending (callers waiting for a connection)"
+	SrcPoolWait         = "loadlore_pool_wait_seconds (time to get a connection)"
+	SrcPGConns          = "pg_stat_activity_count and pg_settings_max_connections (postgres_exporter)"
+	SrcHitRate          = "redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter)"
+	SrcLBRequests       = "haproxy_backend_http_requests_total (HAProxy)"
+	SrcLBHealthy        = "haproxy_backend_active_servers (HAProxy)"
+	SrcLoadCPU          = "container_cpu_usage_seconds_total{service=\"lore-k6\"} ÷ the load generator's CPU budget"
+	SrcProxyCPU         = "container_cpu_usage_seconds_total{service=\"lore-toxiproxy\"} ÷ Toxiproxy's CPU budget"
+	SrcThrottledPeriods = "container_cpu_cfs_throttled_periods_total ÷ container_cpu_cfs_periods_total (cAdvisor)"
 )
 
 // Clock formats seconds from the start of the load as m:ss.

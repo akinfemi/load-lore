@@ -25,6 +25,10 @@ type Evidence struct {
 	Source string `json:"source"`
 }
 
+// RuleIDs are the diagnosis rules this version runs, by the id a
+// Diagnosis carries in Rule.
+var RuleIDs = []string{"pool-exhausted", "queueing-knee"}
+
 // Rule thresholds. Rules are deterministic and versioned with the code.
 const (
 	PoolFullShare     = 0.95 // in use / pool size

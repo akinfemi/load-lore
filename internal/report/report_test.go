@@ -67,7 +67,7 @@ func TestReport(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## Verdict", "**Broke.**", "## Diagram at 0:40", "```mermaid\nflowchart LR", "class api hot", "class db ok",
-		"xychart-beta", "Shaded bars mark 0:30 latency +20 ms on connections into db for 10s; 0:40 break",
+		"xychart-beta", "Pink spikes mark 0:30 latency +20 ms on connections into db for 10s; 0:40 break",
 		"### 1. Connection pool exhausted (api → db), from 0:40", "**Try next:** Add PgBouncer",
 		"| `error_rate < 1%` | **held** |", "## Thresholds", "## Per-window data", "## Design file",
 	} {

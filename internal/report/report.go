@@ -118,6 +118,9 @@ func verdictSection(d *doc, a *analysis.Analysis) {
 		}
 		d.line("")
 	}
+	for _, c := range v.Caveats {
+		d.p("Caveat: %s.", c)
+	}
 	var src []string
 	if v.Break != nil || v.Kind == analysis.VerdictHeld || v.Kind == analysis.VerdictInconclusive {
 		src = append(src, "offered load: "+analysis.SrcOffered, "served: "+analysis.SrcRPS, "p99: "+analysis.SrcK6Latency, "errors: "+analysis.SrcErrors)
@@ -307,12 +310,19 @@ func chartsSection(d *doc, a *analysis.Analysis) {
 	// Points are evenly spaced from XMin to XMax, so each sits at its
 	// window's start.
 	xMax := float64(max(1, len(ws)-1) * analysis.WindowSeconds)
-	markerLine := func(yMax float64) []float64 {
-		bars := make([]float64, len(ws))
-		for _, m := range ms {
-			bars[m.window] = yMax
+	// Markers are a line that spikes to the top of the chart at each
+	// marked window. Mermaid draws a bar at least a few pixels tall even at
+	// 0, and as wide as the axis's tick spacing rather than one window, so
+	// bars would smear across neighbouring windows.
+	mark := func(c *mermaid.XYChart) {
+		if len(ms) == 0 {
+			return
 		}
-		return bars
+		spikes := make([]float64, len(ws))
+		for _, m := range ms {
+			spikes[m.window] = c.YMax
+		}
+		c.Line(colMarker, spikes)
 	}
 	var labels []string
 	for _, m := range ms {
@@ -320,7 +330,7 @@ func chartsSection(d *doc, a *analysis.Analysis) {
 	}
 	markNote := ""
 	if len(ms) > 0 {
-		markNote = " Shaded bars mark " + strings.Join(labels, "; ") + "."
+		markNote = " Pink spikes mark " + strings.Join(labels, "; ") + "."
 	}
 	series := func(get func(*analysis.Window) *float64, scale float64) ([]float64, bool) {
 		out := make([]float64, len(ws))
@@ -353,9 +363,7 @@ func chartsSection(d *doc, a *analysis.Analysis) {
 	served, gaps := series(func(w *analysis.Window) *float64 { return w.RPS }, 1)
 	yMax := niceCeil(math.Max(maxOf(offered), maxOf(served)) * 1.05)
 	c := &mermaid.XYChart{Title: "Throughput", XLabel: "seconds", XMax: xMax, YLabel: "requests/s", YMax: yMax}
-	if len(ms) > 0 {
-		c.Bar(colMarker, markerLine(yMax))
-	}
+	mark(c)
 	c.Line(colOffered, offered)
 	c.Line(colServed, served)
 	chart(d, c, "Grey: offered load ("+analysis.SrcOffered+"). Blue: successful responses ("+analysis.SrcRPS+")."+markNote+gapNote(gaps))
@@ -366,9 +374,7 @@ func chartsSection(d *doc, a *analysis.Analysis) {
 	p99, g3 := series(func(w *analysis.Window) *float64 { return w.P99 }, 1)
 	yMax = niceCeil(maxOf(p99) * 1.05)
 	c = &mermaid.XYChart{Title: "Latency, end to end", XLabel: "seconds", XMax: xMax, YLabel: "ms", YMax: yMax}
-	if len(ms) > 0 {
-		c.Bar(colMarker, markerLine(yMax))
-	}
+	mark(c)
 	c.Line(colP50, p50)
 	c.Line(colP95, p95)
 	c.Line(colP99, p99)
@@ -378,18 +384,17 @@ func chartsSection(d *doc, a *analysis.Analysis) {
 	errs, g := series(func(w *analysis.Window) *float64 { return w.ErrorRate }, 100)
 	yMax = niceCeil(math.Max(maxOf(errs)*1.05, 1))
 	c = &mermaid.XYChart{Title: "Errors", XLabel: "seconds", XMax: xMax, YLabel: "% of requests", YMax: yMax}
-	if len(ms) > 0 {
-		c.Bar(colMarker, markerLine(yMax))
-	}
+	mark(c)
 	c.Line(colErrors, errs)
 	chart(d, c, "Failed requests as a share of all responses ("+analysis.SrcErrors+"), timeouts included."+markNote+gapNote(g))
 
 	// CPU.
 	c = &mermaid.XYChart{Title: "CPU against each limit", XLabel: "seconds", XMax: xMax, YLabel: "% of limit", YMax: 100}
-	if len(ms) > 0 {
-		c.Bar(colMarker, markerLine(100))
-	}
 	var legend []string
+	var lines []struct {
+		col  string
+		vals []float64
+	}
 	gaps = false
 	cpuMax := 0.0
 	for i, s := range a.Plan.Services {
@@ -404,13 +409,20 @@ func chartsSection(d *doc, a *analysis.Analysis) {
 			continue
 		}
 		col := cpuColors[i%len(cpuColors)]
-		c.Line(col, vals)
+		lines = append(lines, struct {
+			col  string
+			vals []float64
+		}{col, vals})
 		cpuMax = math.Max(cpuMax, maxOf(vals))
 		legend = append(legend, colorName(col)+": "+name)
 		gaps = gaps || g
 	}
 	if cpuMax > 100.5 {
 		c.YMax = niceCeil(cpuMax * 1.05)
+	}
+	mark(c)
+	for _, l := range lines {
+		c.Line(l.col, l.vals)
 	}
 	chart(d, c, strings.Join(legend, ". ")+" ("+analysis.SrcCPU+", mean over the window)."+markNote+gapNote(gaps))
 }
@@ -588,7 +600,7 @@ func thresholdsSection(d *doc) {
 	d.line("## Thresholds")
 	d.line("")
 	d.line("- **Broke:** two windows in a row with p99 at least %s, at least %s of requests failing, or successful responses below %s of the offered rate.", lat, analysis.Pct(analysis.BreakErrorRate), analysis.Pct(analysis.BreakShortfall))
-	d.line("- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than %s of a window's arrivals, or the load generator or Toxiproxy used %s or more of its CPU budget.", analysis.Pct(analysis.DroppedShareLimit), analysis.Pct(analysis.ToolCPULimit))
+	d.line("- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than %s of a window's arrivals, or the load generator or Toxiproxy used %s or more of its CPU budget, or was stalled at its CPU limit in %s or more of its scheduling periods (from %s it's noted as a caveat).", analysis.Pct(analysis.DroppedShareLimit), analysis.Pct(analysis.ToolCPULimit), analysis.Pct(analysis.ToolThrottleLimit), analysis.Pct(analysis.ToolThrottleNote))
 	d.line("- **Connection pool exhausted:** for two windows in a row, a pool at %s or more of its size with callers waiting, while the target's CPU stayed below %s and the caller's below %s.", analysis.Pct(analysis.PoolFullShare), analysis.Pct(analysis.PoolTargetCPUMax), analysis.Pct(analysis.PoolCallerCPUMax))
 	d.line("- **Queueing knee:** for %d windows in a row, p99 at least %gx the low-load p99 and %g ms above it, with a CPU or pool at %s or more.", analysis.KneeWindows, analysis.KneeLatencyFactor, analysis.KneeLatencyMinMs, analysis.Pct(analysis.KneeUtilization))
 	d.line("")
@@ -734,6 +746,9 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 	cols = append(cols,
 		col{"k6 CPU", func(w *analysis.Window) string { return opt(w.LoadCPU, analysis.Pct) }},
 		col{"Toxiproxy CPU", func(w *analysis.Window) string { return opt(w.ProxyCPU, analysis.Pct) }},
+		col{"k6 / Toxiproxy stalled", func(w *analysis.Window) string {
+			return opt(w.LoadThrottled, analysis.Pct) + " / " + opt(w.ProxyThrottled, analysis.Pct)
+		}},
 	)
 
 	d.line("## Per-window data")

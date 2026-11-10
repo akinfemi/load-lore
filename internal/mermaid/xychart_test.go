@@ -10,6 +10,7 @@ func TestXYChart(t *testing.T) {
 config:
   themeVariables:
     xyChart:
+      backgroundColor: "transparent"
       plotColorPalette: "#eee, #123"
 ---
 xychart-beta

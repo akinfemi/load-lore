@@ -200,6 +200,8 @@ func opLabel(c *design.Call, onMiss bool) string {
 	switch c.Query {
 	case "range":
 		l += fmt.Sprintf(" range %d", deref(c.Rows))
+	case "batch":
+		l += fmt.Sprintf(" batch %d", deref(c.Rows))
 	case "scan":
 		l += " scan"
 	}

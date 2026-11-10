@@ -137,6 +137,31 @@ func TestInconclusiveWhenTheLoadGeneratorDrops(t *testing.T) {
 	}
 }
 
+// A tool can be throttled in bursts while its 10 s average CPU looks fine.
+func TestThrottledToolIsInconclusive(t *testing.T) {
+	w := analysistest.Healthy()
+	w.K6Throttled = func(t float64) float64 { return 0.08 * boolF(t > 40 && t <= 50) }
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.Verdict.Kind != VerdictInconclusive || !strings.Contains(a.Verdict.Inconclusive[0], "at 0:40 the load generator hit its CPU limit and was stalled in 8.0%") {
+		t.Errorf("heavy: %s %v", a.Verdict.Kind, a.Verdict.Inconclusive)
+	}
+
+	// Light throttling is a caveat, not a reason.
+	w.K6Throttled = func(t float64) float64 { return 0.02 * boolF(t > 40 && t <= 50) }
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.Verdict.Kind != VerdictHeld || len(a.Verdict.Caveats) != 1 || !strings.Contains(a.Verdict.Caveats[0], "2.0% of its scheduling periods") {
+		t.Errorf("light: %s %v", a.Verdict.Kind, a.Verdict.Caveats)
+	}
+
+	// After the break it's a consequence, not a cause.
+	w.K6Throttled = func(t float64) float64 { return 0.5 * boolF(t > 80) }
+	w.P99 = func(t float64) float64 { return 0.005 + 2*boolF(t > 60) }
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.Verdict.Kind != VerdictBroke || len(a.Verdict.Caveats) != 0 {
+		t.Errorf("after the break: %s %v %v", a.Verdict.Kind, a.Verdict.Inconclusive, a.Verdict.Caveats)
+	}
+}
+
 func TestErrorsBreak(t *testing.T) {
 	w := analysistest.Healthy()
 	w.Failed = func(t float64) float64 { return 0.2 * boolF(t > 70) }

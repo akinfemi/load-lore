@@ -30,6 +30,8 @@ const (
 	BaselineShare      = 0.25
 	DroppedShareLimit  = 0.01 // the load generator dropped >1% of a window's arrivals
 	ToolCPULimit       = 0.9  // a tool used >=90% of its CPU budget
+	ToolThrottleLimit  = 0.05 // a tool was stalled by CFS in >=5% of its periods
+	ToolThrottleNote   = 0.01 // ... or in >=1%: noted, since it can still move p99
 )
 
 // Verdict says whether and where the system broke.
@@ -38,6 +40,7 @@ type Verdict struct {
 	Summary      string      `json:"summary"`
 	Break        *Break      `json:"break,omitempty"`
 	Inconclusive []string    `json:"inconclusive,omitempty"`
+	Caveats      []string    `json:"caveats,omitempty"` // tooling strain too small to make the run inconclusive
 	BaselineP99  *float64    `json:"baseline_p99_ms,omitempty"`
 	MaxRPS       *float64    `json:"max_rps,omitempty"`
 	MaxRPSAt     float64     `json:"max_rps_at_s"`
@@ -104,7 +107,7 @@ func verdict(a *Analysis) Verdict {
 		v.Break = &Break{Window: breakAt, At: w.Start, Offered: w.Offered, RPS: w.RPS, P99: w.P99, ErrorRate: w.ErrorRate,
 			Signals: sig[breakAt], Saturation: saturation(a, w)}
 	}
-	v.Inconclusive = inconclusive(ws, breakAt)
+	v.Inconclusive, v.Caveats = inconclusive(ws, breakAt)
 	if a.Cutoff != "" && breakAt < 0 {
 		v.Inconclusive = append([]string{"before the system broke, " + a.Cutoff}, v.Inconclusive...)
 	}
@@ -271,13 +274,20 @@ func MostSaturated(ss []Saturation) (Saturation, bool) {
 // inconclusive finds signs that Loadlore's own tooling, not the system, set
 // the limit before the break (or anywhere, if nothing broke). Dropped
 // arrivals in the break window itself are a consequence of the break.
-func inconclusive(ws []*Window, breakAt int) []string {
+func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string) {
 	end := len(ws)
 	if breakAt >= 0 {
 		end = breakAt + 1
 	}
-	var reasons []string
 	var drop, load, proxy *Window
+	tools := []struct {
+		name  string
+		get   func(*Window) *float64
+		worst *Window
+	}{
+		{"the load generator", func(w *Window) *float64 { return w.LoadThrottled }, nil},
+		{"Toxiproxy", func(w *Window) *float64 { return w.ProxyThrottled }, nil},
+	}
 	for i, w := range ws[:end] {
 		if i < end-1 || breakAt < 0 {
 			if w.Dropped != nil && w.Offered > 0 && *w.Dropped/(w.Offered*WindowSeconds) > DroppedShareLimit && drop == nil {
@@ -290,6 +300,12 @@ func inconclusive(ws []*Window, breakAt int) []string {
 		if w.ProxyCPU != nil && *w.ProxyCPU >= ToolCPULimit && proxy == nil {
 			proxy = w
 		}
+		for i := range tools {
+			t := &tools[i]
+			if v := t.get(w); v != nil && *v >= ToolThrottleNote && (t.worst == nil || *v > *t.get(t.worst)) {
+				t.worst = w
+			}
+		}
 	}
 	if drop != nil {
 		reasons = append(reasons, fmt.Sprintf("at %s the load generator dropped %s arrivals, %s of what the profile offered in that window (%s), before the system showed strain: it couldn't start requests fast enough, so the offered load was lower than the profile",
@@ -301,7 +317,19 @@ func inconclusive(ws []*Window, breakAt int) []string {
 	if proxy != nil {
 		reasons = append(reasons, fmt.Sprintf("at %s Toxiproxy, which carries every connection between services, used %s of its CPU budget (%s), so it may have added latency of its own", Clock(proxy.Start), Pct(*proxy.ProxyCPU), SrcProxyCPU))
 	}
-	return reasons
+	for _, t := range tools {
+		if t.worst == nil {
+			continue
+		}
+		share := *t.get(t.worst)
+		s := fmt.Sprintf("at %s %s hit its CPU limit and was stalled in %s of its scheduling periods (%s)", Clock(t.worst.Start), t.name, Pct(share), SrcThrottledPeriods)
+		if share >= ToolThrottleLimit {
+			reasons = append(reasons, s+", so it was short of CPU in bursts even if its average use looked fine")
+		} else {
+			caveats = append(caveats, s+"; work caught in a stall waits for the next 100 ms period, which can show up in p99")
+		}
+	}
+	return reasons, caveats
 }
 
 func (v *Verdict) summary(a *Analysis) string {

@@ -49,9 +49,12 @@ type World struct {
 	APICPU   func(t float64) float64 // fraction of limit
 	DBCPU    func(t float64) float64
 	K6CPU    func(t float64) float64
-	InUse    func(t float64) float64
-	Pending  func(t float64) float64
-	WaitS    func(t float64) float64 // mean pool wait per acquire
+	// K6Throttled is the share of k6's CFS periods stalled at its quota;
+	// nil leaves the series out.
+	K6Throttled func(t float64) float64
+	InUse       func(t float64) float64
+	Pending     func(t float64) float64
+	WaitS       func(t float64) float64 // mean pool wait per acquire
 
 	// Events are written to events.jsonl at their time into the load.
 	Events []Event
@@ -146,6 +149,8 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 	apiCPU := newC(counters, "container_cpu_usage_seconds_total", map[string]string{"service": "api", "role": "app", "name": "api-0"})
 	dbCPU := newC(counters, "container_cpu_usage_seconds_total", map[string]string{"service": "db", "role": "datastore", "name": "db"})
 	k6CPU := newC(counters, "container_cpu_usage_seconds_total", map[string]string{"service": "lore-k6", "role": "load", "name": "k6"})
+	k6Periods := newC(counters, "container_cpu_cfs_periods_total", map[string]string{"service": "lore-k6", "role": "load", "name": "k6"})
+	k6Throttled := newC(counters, "container_cpu_cfs_throttled_periods_total", map[string]string{"service": "lore-k6", "role": "load", "name": "k6"})
 	waitSum := newC(counters, "loadlore_pool_wait_seconds_sum", map[string]string{"service": "api", "target": "db"})
 	waitCnt := newC(counters, "loadlore_pool_wait_seconds_count", map[string]string{"service": "api", "target": "db"})
 	inUse := newC(gauges, "loadlore_pool_connections", map[string]string{"service": "api", "target": "db", "state": "in_use"})
@@ -177,6 +182,10 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			add(apiCPU, w.APICPU(el)*p.Service("api").CPU)
 			add(dbCPU, w.DBCPU(el)*p.Service("db").CPU)
 			add(k6CPU, w.K6CPU(el)*p.Infra.LoadCPU)
+			if w.K6Throttled != nil {
+				add(k6Periods, 10) // one 100 ms period per tenth of a second
+				add(k6Throttled, 10*w.K6Throttled(el))
+			}
 			add(waitSum, w.WaitS(el)*ok)
 			add(waitCnt, ok)
 			set(inUse, w.InUse(el))

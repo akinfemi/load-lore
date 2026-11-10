@@ -71,6 +71,9 @@ func newRootCmd() *cobra.Command {
 		newRunCmd(g),
 		newReportCmd(g),
 		newCompareCmd(g),
+		newScenariosCmd(g),
+		newHintCmd(g),
+		newScenarioCmd(g),
 		newDownCmd(g),
 		newVersionCmd(g),
 	)

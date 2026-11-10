@@ -1,0 +1,20 @@
+title: When does one Postgres fall over?
+level: 1
+concepts: [saturation, queueing knee, connection pools]
+minutes: 45
+
+# Available to Docker at --scale 1, Loadlore's own containers included: the
+# design and its tooling add up to 7.8 CPUs. Smaller hosts need a smaller
+# --scale (loadl run warns and suggests one).
+host: { cpus: 8, memory: 8g }
+
+# What `loadl scenario check` verifies, at --scale 1. At small scales the
+# 0.25-CPU-or-less Postgres stalls under CPU throttling and breaks early.
+check:
+  problem:
+    verdict: broke
+    diagnoses: [queueing-knee]
+  solutions:
+    # helps: holds, or serves min_gain x the starting design's peak
+    # throughput or more. Measured at --scale 1: 3,422 rps against 2,791.
+    one-query-per-page: { min_gain: 1.15 }

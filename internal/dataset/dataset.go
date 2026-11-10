@@ -66,6 +66,10 @@ const (
 	PointRead = `SELECT payload FROM items WHERE id = $1`
 	// RangeRead fetches $2 rows starting at an id, through the primary key.
 	RangeRead = `SELECT id, payload FROM items WHERE id >= $1 ORDER BY id LIMIT $2`
+	// BatchRead fetches the rows whose ids are in $1, through the primary
+	// key. Unlike a range, the planner needs no estimate of where in the
+	// index the keys fall, so the plan is generic and cached.
+	BatchRead = `SELECT id, payload FROM items WHERE id = ANY($1)`
 	// ScanRead filters on user_id: a full table scan unless user_id is indexed.
 	ScanRead = `SELECT count(*), max(length(payload)) FROM items WHERE user_id = $1`
 	// Write updates one row's payload by primary key.

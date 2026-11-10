@@ -1,0 +1,57 @@
+# When does one Postgres fall over?
+
+Level 1 · about 45 minutes · teaches saturation, the queueing knee and connection pools
+
+## The story
+
+You run a feed service. Every request returns a page of three items from one Postgres database, and one request in ten also updates an item. Four api replicas sit behind a load balancer. Traffic is growing, and someone asks the question every team gets eventually: how much more can this take, and what gives out first?
+
+You're going to find out by ramping the load from 100 to 5,000 requests per second over five minutes, then holding it for two.
+
+```mermaid
+flowchart LR
+    load(["load<br/>up to 5,000 rps"])
+    lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m"}}
+    api["api ×4<br/>0.8 CPU · 512m"]
+    db[("db<br/>postgres 17<br/>0.5 CPU · 1g")]
+    load -->|"90% read · 10% write"| lb
+    lb -->|"round-robin<br/>checks every 2s, out after 3"| api
+    api -->|"read ×3, write on writes<br/>pool 24"| db
+```
+
+The table has 5 million rows of 512 bytes, and requests pick keys from a zipf distribution, so some items are much more popular than others. Each api replica keeps a pool of up to 24 connections to Postgres.
+
+## The question
+
+Before you run anything, write down your answers:
+
+1. At what load does it break: requests per second, and minutes into the ramp?
+2. Which component gives out first?
+3. What does it look like from outside: slow responses, errors, or both?
+
+Put them in the `expect` block at the bottom of `design.yaml`. The report scores each one against what the run measured. The two lines already there are examples; the grammar is in the [design file reference](../../skills/loadlore-designer/references/schema.md).
+
+## Run it
+
+```sh
+loadl run scenarios/single-postgres-breaking-point/design.yaml
+loadl report latest --print | less
+```
+
+The run takes about 8 minutes, plus about a minute the first time to seed the 5-million-row table.
+
+It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers (load generator, Toxiproxy, Prometheus, cAdvisor, exporter) add up to 7.8 CPUs. On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. Scale shrinks CPU, memory, the dataset and the load together, but Loadlore's own containers don't shrink much, and a database with a fraction of a CPU stalls under CPU throttling. This scenario is checked at `--scale 1`; at `--scale 0.25` its Postgres gets 0.125 CPU and breaks at the very start of the ramp instead, which is a different lesson.
+
+Stuck? `loadl hint` reveals one hint at a time.
+
+## What to try next
+
+When you know why it broke, change one thing and run it again. Write a new `expect` line for where you think it will break this time, then compare the two runs:
+
+```sh
+loadl compare <first-run> latest -o compare.md
+```
+
+Some directions: the database's resources, the work each request asks of it, the pool sizes, or keeping requests away from the database. They don't all help, and finding out which ones don't is part of the lesson.
+
+`solutions/` has one worked answer with its report. It gives the game away, so try your own first.

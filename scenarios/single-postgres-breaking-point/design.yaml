@@ -1,0 +1,43 @@
+version: 1
+name: single-postgres-breaking-point
+
+# A feed service: every request returns a page of three items from Postgres,
+# and one request in ten also updates an item.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 4
+    resources: { cpu: 0.8, memory: 512m }
+    behavior:
+      cpu_ms: 0.5
+      calls:
+        - { target: db, op: read,  count: 3 }              # the page's three items, one query each
+        - { target: db, op: write, count: 1, when: write }
+    pools: { db: 24 }          # 4 replicas x 24 = 96 connections, under max_connections
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 0.5, memory: 1g }
+    config: { max_connections: 100, shared_buffers: 256MB }
+    dataset: { rows: 5000000, row_bytes: 512 }
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 100, to: 5000, over: 5m }
+    - hold: { rps: 5000, for: 2m }
+  mix: { read: 0.9, write: 0.1 }
+  keys: { distribution: zipf, skew: 1.1, count: 5000000 }
+
+# Your predictions, scored in the report. Replace these with your own
+# before you run it.
+expect:
+  - p99_ms < 300 until load_rps >= 3000
+  - error_rate < 1% throughout

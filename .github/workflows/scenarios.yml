@@ -1,0 +1,121 @@
+name: scenarios
+
+# Every push checks each scenario folder without running it: files, designs,
+# the README's diagram and the check claims.
+#
+# The full check runs every scenario and its solutions on real containers
+# and verifies they still behave as meta.yaml claims. It needs the host
+# resources each meta.yaml states, Loadlore's own containers included (the
+# first scenario: 8 CPUs at --scale 1). Standard GitHub-hosted runners are
+# too small: Loadlore's containers alone take 2-2.6 CPUs, and at a --scale
+# that fits 4 vCPUs (0.25), a 0.125-CPU Postgres stalls under CFS throttling
+# and breaks differently. Start it by hand on a larger runner.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scenarios/**"
+      - "internal/**"
+      - "cmd/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/scenarios.yml"
+  pull_request:
+    paths:
+      - "scenarios/**"
+      - "internal/**"
+      - "cmd/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/scenarios.yml"
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "runs-on label for the full check (needs the CPUs meta.yaml states, times --scale, plus headroom)"
+        default: "ubuntu-latest"
+      scale:
+        description: "--scale for every run"
+        default: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scenarios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: make build
+      - name: Check every scenario folder
+        run: |
+          status=0
+          for dir in scenarios/*/; do
+            ./bin/loadl scenario check "$dir" --static || status=1
+          done
+          exit $status
+
+  full:
+    if: github.event_name == 'workflow_dispatch'
+    needs: static
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 90
+    env:
+      SCALE: ${{ inputs.scale }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build loadl and the synthetic image
+        run: make build image
+
+      - name: Docker
+        run: |
+          docker info --format 'Docker {{.ServerVersion}}: {{.NCPU}} CPUs, {{.MemTotal}} bytes, cgroup v{{.CgroupVersion}}, {{.OperatingSystem}}'
+          docker compose version
+
+      - name: Check every scenario
+        run: |
+          status=0
+          for dir in scenarios/*/; do
+            name=$(basename "$dir")
+            ./bin/loadl scenario check "$dir" --scale "$SCALE" --json > "check-$name.json" || status=1
+          done
+          exit $status
+
+      - name: Summary
+        if: always()
+        run: |
+          for f in check-*.json; do
+            [ -s "$f" ] || continue
+            jq -r --arg scale "$SCALE" '
+              "### \(.scenario) at --scale \($scale): \(if .ok then "ok" else "FAILED" end)\n",
+              (.lint[] | "- \(.file): \(if .warning then "warning" else "error" end): \(.message)"),
+              ([.problem] + .solutions | .[] | select(. != null) |
+                "\n**\(if .name == "problem" then "starting design" else "solution " + .name end)** (\(.run_dir // "no run"))\n",
+                (.claims[] | "- \(if .ok then "ok" else "FAIL" end) \(.claim): \(.detail)"))
+            ' "$f" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Keep the runs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: scenario-runs
+          path: |
+            check-*.json
+            .loadlore/runs/
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        run: ./bin/loadl down --all

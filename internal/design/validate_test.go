@@ -395,6 +395,7 @@ func TestDefaults(t *testing.T) {
 		{"hotspot fraction", *d.Workload.Keys.Fraction, DefaultHotspotFraction},
 		{"keyspace", *d.Workload.Keys.Count, int64(1000)},
 		{"payload", *d.Workload.PayloadKB, DefaultPayloadKB},
+		{"client timeout", *d.Workload.TimeoutMs, DefaultClientTimeoutMs},
 		{"scale", *d.Modes.Local.Scale, DefaultScale},
 	}
 	for _, c := range checks {

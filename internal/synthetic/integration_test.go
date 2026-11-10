@@ -114,6 +114,7 @@ func TestIntegrationPostgresOps(t *testing.T) {
 		Calls: []Call{
 			call("db", "read"),
 			call("db", "read", func(c *Call) { c.Query = "range"; c.Rows = 25 }),
+			call("db", "read", func(c *Call) { c.Query = "batch"; c.Rows = 3 }),
 			call("db", "read", func(c *Call) { c.Query = "scan" }),
 			call("db", "write", func(c *Call) { c.When = "write" }),
 		},
@@ -128,8 +129,8 @@ func TestIntegrationPostgresOps(t *testing.T) {
 			t.Fatalf("request %d: %v", i, err)
 		}
 	}
-	if n := metricValue(t, s, "loadlore_calls_total", map[string]string{"target": "db", "op": "read", "outcome": "ok"}); n != 60 {
-		t.Errorf("%v successful reads, want 60", n)
+	if n := metricValue(t, s, "loadlore_calls_total", map[string]string{"target": "db", "op": "read", "outcome": "ok"}); n != 80 {
+		t.Errorf("%v successful reads, want 80", n)
 	}
 	if n := metricValue(t, s, "loadlore_calls_total", map[string]string{"target": "db", "op": "write", "outcome": "ok"}); n != 5 {
 		t.Errorf("%v successful writes, want 5", n)

@@ -316,3 +316,50 @@ func TestRedisMemoryDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestClientTimeout(t *testing.T) {
+	raw, _ := os.ReadFile("../../examples/smoke.yaml")
+	src := strings.Replace(string(raw), "workload:\n", "workload:\n  timeout_ms: 2500\n", 1)
+	p, err := Build(load(t, src), Options{RunID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Workload.Timeout.D(); got != 2500*time.Millisecond {
+		t.Errorf("timeout %v", got)
+	}
+	for _, a := range p.Assumptions {
+		if a.Field == "workload.timeout_ms" {
+			if a.Value != "2.5s" || !strings.HasPrefix(a.Why, "set in the design") {
+				t.Errorf("assumption %+v", a)
+			}
+			return
+		}
+	}
+	t.Error("the client timeout isn't an assumption")
+}
+
+// Scaling shrinks memory but not connection counts, so memory stays above
+// what the connections need, and never above the design's own value.
+func TestConnectionMemory(t *testing.T) {
+	d := loadFile(t, "../../examples/single-postgres.yaml") // db 1g, shared_buffers 256MB, 100 connections; lb 256m
+	p, err := Build(d, Options{RunID: "r", Scale: 0.25})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 64MB of shared_buffers after scaling + 100 x 2 MiB + 64 MiB.
+	if got := p.Service("db").Memory; got != 328<<20 {
+		t.Errorf("db: %s", sizeStr(got))
+	}
+	// 2,500 VUs (peak 1,250 rps) x 40 KiB + 32 MiB, rounded up.
+	if got := p.Service("lb").Memory; got != 130<<20 {
+		t.Errorf("lb: %s", sizeStr(got))
+	}
+	if notes := strings.Join(p.Notes, "\n"); !strings.Contains(notes, "db: memory kept at 328m instead of 256m: shared_buffers 64m plus about 2m for each of 100 connections") {
+		t.Errorf("notes:\n%s", notes)
+	}
+	// Tiny scales stop at the design's value.
+	p, _ = Build(d, Options{RunID: "r", Scale: 0.05})
+	if got := p.Service("lb").Memory; got > 256<<20 {
+		t.Errorf("lb above the design: %s", sizeStr(got))
+	}
+}

@@ -37,72 +37,76 @@ One point per 10-second window, at the window's start; x is seconds from the sta
 config:
   themeVariables:
     xyChart:
+      backgroundColor: "transparent"
       plotColorPalette: "#f4cccc, #9e9e9e, #1f77b4"
 ---
 xychart-beta
     title "Throughput"
     x-axis "seconds" 0 --> 90
     y-axis "requests/s" 0 --> 1000
-    bar [0, 0, 0, 1000, 1000, 0, 0, 0, 0, 0]
+    line [0, 0, 0, 1000, 1000, 0, 0, 0, 0, 0]
     line [50, 150, 250, 350, 450, 550, 650, 750, 850, 950]
     line [50, 150, 250, 350, 450, 550, 650, 750, 850, 950]
 ```
 
-<sub>Grey: offered load (the load profile in plan.json (offered arrival rate)). Blue: successful responses (k6_http_reqs_total{expected_response="true"} (k6: successful responses)). Shaded bars mark 0:30 latency +20 ms on connections into db for 10s; 0:40 break.</sub>
+<sub>Grey: offered load (the load profile in plan.json (offered arrival rate)). Blue: successful responses (k6_http_reqs_total{expected_response="true"} (k6: successful responses)). Pink spikes mark 0:30 latency +20 ms on connections into db for 10s; 0:40 break.</sub>
 
 ```mermaid
 ---
 config:
   themeVariables:
     xyChart:
+      backgroundColor: "transparent"
       plotColorPalette: "#f4cccc, #2ca02c, #ff7f0e, #d62728"
 ---
 xychart-beta
     title "Latency, end to end"
     x-axis "seconds" 0 --> 90
     y-axis "ms" 0 --> 1200
-    bar [0, 0, 0, 1200, 1200, 0, 0, 0, 0, 0]
+    line [0, 0, 0, 1200, 1200, 0, 0, 0, 0, 0]
     line [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
     line [2.009, 2.009, 2.009, 2.009, 2.009, 2.009, 2.009, 2.009, 2.009, 2.009]
     line [5, 5, 5, 5, 119.73, 319.121, 518.392, 717.592, 916.745, 1115.866]
 ```
 
-<sub>Green: p50. Orange: p95. Red: p99 (k6_http_req_duration_seconds (k6 histogram, end to end)). Shaded bars mark 0:30 latency +20 ms on connections into db for 10s; 0:40 break.</sub>
+<sub>Green: p50. Orange: p95. Red: p99 (k6_http_req_duration_seconds (k6 histogram, end to end)). Pink spikes mark 0:30 latency +20 ms on connections into db for 10s; 0:40 break.</sub>
 
 ```mermaid
 ---
 config:
   themeVariables:
     xyChart:
+      backgroundColor: "transparent"
       plotColorPalette: "#f4cccc, #d62728"
 ---
 xychart-beta
     title "Errors"
     x-axis "seconds" 0 --> 90
     y-axis "% of requests" 0 --> 1
-    bar [0, 0, 0, 1, 1, 0, 0, 0, 0, 0]
+    line [0, 0, 0, 1, 1, 0, 0, 0, 0, 0]
     line [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 ```
 
-<sub>Failed requests as a share of all responses (k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6)), timeouts included. Shaded bars mark 0:30 latency +20 ms on connections into db for 10s; 0:40 break.</sub>
+<sub>Failed requests as a share of all responses (k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6)), timeouts included. Pink spikes mark 0:30 latency +20 ms on connections into db for 10s; 0:40 break.</sub>
 
 ```mermaid
 ---
 config:
   themeVariables:
     xyChart:
+      backgroundColor: "transparent"
       plotColorPalette: "#f4cccc, #1f77b4, #ff7f0e"
 ---
 xychart-beta
     title "CPU against each limit"
     x-axis "seconds" 0 --> 90
     y-axis "% of limit" 0 --> 100
-    bar [0, 0, 0, 100, 100, 0, 0, 0, 0, 0]
+    line [0, 0, 0, 100, 100, 0, 0, 0, 0, 0]
     line [2.2, 6.2, 10.2, 14.2, 18.2, 22.2, 26.2, 30.2, 34.2, 38.2]
     line [2.75, 7.75, 12.75, 17.75, 22.75, 27.75, 32.75, 37.75, 42.75, 47.75]
 ```
 
-<sub>Blue: api. Orange: db (container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window). Shaded bars mark 0:30 latency +20 ms on connections into db for 10s; 0:40 break.</sub>
+<sub>Blue: api. Orange: db (container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window). Pink spikes mark 0:30 latency +20 ms on connections into db for 10s; 0:40 break.</sub>
 
 ## Diagnosis
 
@@ -163,7 +167,7 @@ The design lists no assumptions.
 
 | Field | Value | Why |
 | --- | --- | --- |
-| load generator timeout | 10s | k6 gives up on a request after this long and counts it as failed |
+| workload.timeout_ms | 10s | the default; k6 gives up on a request after this long and counts it as failed |
 
 ### How the run was planned
 
@@ -172,7 +176,7 @@ The design lists no assumptions.
 ## Thresholds
 
 - **Broke:** two windows in a row with p99 at least 10x the low-load p99 (the median p99 of windows offered at most 25% of the peak) and at least 100 ms, at least 1.0% of requests failing, or successful responses below 90% of the offered rate.
-- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than 1.0% of a window's arrivals, or the load generator or Toxiproxy used 90% or more of its CPU budget.
+- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than 1.0% of a window's arrivals, or the load generator or Toxiproxy used 90% or more of its CPU budget, or was stalled at its CPU limit in 5.0% or more of its scheduling periods (from 1.0% it's noted as a caveat).
 - **Connection pool exhausted:** for two windows in a row, a pool at 95% or more of its size with callers waiting, while the target's CPU stayed below 80% and the caller's below 90%.
 - **Queueing knee:** for 3 windows in a row, p99 at least 3x the low-load p99 and 10 ms above it, with a CPU or pool at 70% or more.
 
@@ -187,18 +191,18 @@ The design lists no assumptions.
 
 <details><summary>10 windows of 10 seconds</summary>
 
-| t | offered | served | dropped | errors | p50 | p99 | api CPU | db CPU | db conns | api→db pool | wait | k6 CPU | Toxiproxy CPU |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0:00 | 50 | 50 | 0 | 0% | 2.0 ms | 5.0 ms | 2.2% | 2.8% | – | 4/10 | 0.1 ms | 20% | – |
-| 0:10 | 150 | 150 | 0 | 0% | 2.0 ms | 5.0 ms | 6.2% | 7.7% | – | 6/10 | 0.1 ms | 20% | – |
-| 0:20 | 250 | 250 | 0 | 0% | 2.0 ms | 5.0 ms | 10% | 13% | – | 8/10 | 0.1 ms | 20% | – |
-| 0:30 | 350 | 350 | 0 | 0% | 2.0 ms | 5.0 ms | 14% | 18% | – | 10/10 | 0.1 ms | 20% | – |
-| 0:40 | 450 | 450 | 0 | 0% | 2.0 ms | 120 ms | 18% | 23% | – | 10/10 +27 | 28 ms | 20% | – |
-| 0:50 | 550 | 550 | 0 | 0% | 2.0 ms | 319 ms | 22% | 28% | – | 10/10 +57 | 78 ms | 20% | – |
-| 1:00 | 650 | 650 | 0 | 0% | 2.0 ms | 518 ms | 26% | 33% | – | 10/10 +87 | 128 ms | 20% | – |
-| 1:10 | 750 | 750 | 0 | 0% | 2.0 ms | 718 ms | 30% | 38% | – | 10/10 +117 | 178 ms | 20% | – |
-| 1:20 | 850 | 850 | 0 | 0% | 2.0 ms | 917 ms | 34% | 43% | – | 10/10 +147 | 228 ms | 20% | – |
-| 1:30 | 950 | 950 | 0 | 0% | 2.0 ms | 1.12 s | 38% | 48% | – | 10/10 +177 | 278 ms | 20% | – |
+| t | offered | served | dropped | errors | p50 | p99 | api CPU | db CPU | db conns | api→db pool | wait | k6 CPU | Toxiproxy CPU | k6 / Toxiproxy stalled |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0:00 | 50 | 50 | 0 | 0% | 2.0 ms | 5.0 ms | 2.2% | 2.8% | – | 4/10 | 0.1 ms | 20% | – | – / – |
+| 0:10 | 150 | 150 | 0 | 0% | 2.0 ms | 5.0 ms | 6.2% | 7.7% | – | 6/10 | 0.1 ms | 20% | – | – / – |
+| 0:20 | 250 | 250 | 0 | 0% | 2.0 ms | 5.0 ms | 10% | 13% | – | 8/10 | 0.1 ms | 20% | – | – / – |
+| 0:30 | 350 | 350 | 0 | 0% | 2.0 ms | 5.0 ms | 14% | 18% | – | 10/10 | 0.1 ms | 20% | – | – / – |
+| 0:40 | 450 | 450 | 0 | 0% | 2.0 ms | 120 ms | 18% | 23% | – | 10/10 +27 | 28 ms | 20% | – | – / – |
+| 0:50 | 550 | 550 | 0 | 0% | 2.0 ms | 319 ms | 22% | 28% | – | 10/10 +57 | 78 ms | 20% | – | – / – |
+| 1:00 | 650 | 650 | 0 | 0% | 2.0 ms | 518 ms | 26% | 33% | – | 10/10 +87 | 128 ms | 20% | – | – / – |
+| 1:10 | 750 | 750 | 0 | 0% | 2.0 ms | 718 ms | 30% | 38% | – | 10/10 +117 | 178 ms | 20% | – | – / – |
+| 1:20 | 850 | 850 | 0 | 0% | 2.0 ms | 917 ms | 34% | 43% | – | 10/10 +147 | 228 ms | 20% | – | – / – |
+| 1:30 | 950 | 950 | 0 | 0% | 2.0 ms | 1.12 s | 38% | 48% | – | 10/10 +177 | 278 ms | 20% | – | – / – |
 
 Columns: offered is the load profile in plan.json (offered arrival rate); served is k6_http_reqs_total{expected_response="true"} (k6: successful responses); dropped is k6_dropped_iterations_total (k6: arrivals it couldn't start); errors are k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6); p50 and p99 are from k6_http_req_duration_seconds (k6 histogram, end to end); CPU is container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window; conns are pg_stat_activity_count and pg_settings_max_connections (postgres_exporter); hit rate is from redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter); up is haproxy_backend_active_servers (HAProxy); pools are loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections (peak in use/size, +peak waiting), wait is the mean from loadlore_pool_wait_seconds (time to get a connection); k6 and Toxiproxy CPU are against their budgets.
 

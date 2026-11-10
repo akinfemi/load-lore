@@ -222,21 +222,30 @@ type Options struct {
 // broke, it went from 17 MB to over 245 MB as requests queued, and was
 // OOM-killed at a 256 MB limit. It gets 1 GiB.
 const (
-	k6RatePerCPU     = 4500.0
-	proxyOpsPerCPU   = 15000.0
-	proxyMemory      = 1 << 30
-	minLoadCPU       = 1.0
-	maxLoadCPU       = 4.0
-	minProxyCPU      = 0.5
-	maxProxyCPU      = 4.0
-	promCPU          = 0.25
-	cadvisorCPU      = 0.25
-	exporterCPU      = 0.1
-	requestTimeout   = 10 * time.Second
-	maxVUsCap        = 4000
-	minMemoryApp     = 32 << 20
-	minMemoryPG      = 128 << 20
-	minMemoryRedis   = 32 << 20
+	k6RatePerCPU   = 4500.0
+	proxyOpsPerCPU = 15000.0
+	proxyMemory    = 1 << 30
+	minLoadCPU     = 1.0
+	maxLoadCPU     = 4.0
+	minProxyCPU    = 0.5
+	maxProxyCPU    = 4.0
+	promCPU        = 0.25
+	cadvisorCPU    = 0.25
+	exporterCPU    = 0.1
+	maxVUsCap      = 4000
+	minMemoryApp   = 32 << 20
+	minMemoryPG    = 128 << 20
+	minMemoryRedis = 32 << 20
+	// Memory each connection holds, which --scale doesn't shrink because
+	// connection counts don't scale. A Postgres backend measured about
+	// 1.5 MiB (97 backends, 145 MiB RSS, in the first scenario at scale 1);
+	// an HAProxy connection holds two 16 KiB buffers by default.
+	pgBackendMemory  = 2 << 20
+	pgBaseMemory     = 64 << 20
+	pgDefaultConns   = 100
+	pgDefaultBuffers = 128 << 20
+	lbConnMemory     = 40 << 10
+	lbBaseMemory     = 32 << 20
 	defaultPGImage   = "postgres:%s"
 	defaultRedisImg  = "redis:%s"
 	pinnedPG17       = "postgres:17.11"
@@ -283,6 +292,9 @@ func Build(d *design.Design, opt Options) (*Plan, error) {
 	}
 	p.lbs(d, byName)
 	p.workload(d, byName, scale)
+	if scale < 1 {
+		p.connectionMemory(d)
+	}
 	if err := p.faults(d, byName); err != nil {
 		return nil, err
 	}
@@ -375,6 +387,58 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 		p.redisMemory(name, s)
 	}
 	return s, nil
+}
+
+// connectionMemory keeps scaled-down memory above what the unscaled
+// connections need, never above the design's own value. Without it a
+// scaled Postgres with a full set of connections, or an lb holding every
+// client connection, is OOM-killed: a failure the full-size design
+// doesn't have.
+func (p *Plan) connectionMemory(d *design.Design) {
+	for _, s := range p.Services {
+		var need int64
+		var why string
+		switch s.Kind {
+		case "postgres":
+			conns := int64(pgDefaultConns)
+			if v, ok := s.Config["max_connections"]; ok {
+				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+					conns = n
+				}
+			}
+			buffers := int64(pgDefaultBuffers)
+			if v, ok := s.Config["shared_buffers"]; ok {
+				if b, ok := pgBytes(v); ok {
+					buffers = b
+				}
+			}
+			need = buffers + conns*pgBackendMemory + pgBaseMemory
+			why = fmt.Sprintf("shared_buffers %s plus about %s for each of %d connections, which don't scale", sizeStr(buffers), sizeStr(pgBackendMemory), conns)
+		case "lb":
+			conns := int64(p.Workload.MaxVUs)
+			need = conns*lbConnMemory + lbBaseMemory
+			why = fmt.Sprintf("about %s for each of up to %d client connections, which don't scale", sizeStr(lbConnMemory), conns)
+		default:
+			continue
+		}
+		need = (need + 1<<20 - 1) >> 20 << 20
+		full := d.Services[s.Name].Resources.Memory.Bytes()
+		if need = min(need, full); s.Memory < need {
+			p.note("%s: memory kept at %s instead of %s: %s", s.Name, sizeStr(need), sizeStr(s.Memory), why)
+			s.Memory = need
+		}
+	}
+}
+
+// pgBytes reads a Postgres memory setting such as 256MB or 65536kB.
+func pgBytes(v string) (int64, bool) {
+	for _, u := range pgUnits {
+		if num, ok := strings.CutSuffix(v, u.suffix); ok {
+			f, err := strconv.ParseFloat(strings.TrimSpace(num), 64)
+			return int64(f * u.mult), err == nil
+		}
+	}
+	return 0, false
 }
 
 // redisMemory caps Redis below its container limit and evicts least
@@ -575,7 +639,7 @@ func convertCalls(calls []*design.Call) []synthetic.Call {
 func (p *Plan) workload(d *design.Design, byName map[string]*Service, scale float64) {
 	w := d.Workload
 	entry := byName[w.Entry]
-	pw := Workload{Entry: w.Entry, ReadShare: *w.Mix.Read, PayloadBytes: int(*w.PayloadKB * 1024), Timeout: Dur(requestTimeout)}
+	pw := Workload{Entry: w.Entry, ReadShare: *w.Mix.Read, PayloadBytes: int(*w.PayloadKB * 1024), Timeout: Dur(time.Duration(*w.TimeoutMs) * time.Millisecond)}
 	if xs := p.proxiesInto(loadGeneratorKey, w.Entry); len(xs) > 0 {
 		for _, x := range xs {
 			pw.URLs = append(pw.URLs, "http://"+x.Addr())
@@ -754,9 +818,12 @@ func (p *Plan) proxiedOps(d *design.Design, rate float64) float64 {
 // assume records the values Loadlore chose for the run that the design
 // didn't state and that results depend on.
 func (p *Plan) assume(d *design.Design) {
+	why := "the default; k6 gives up on a request after this long and counts it as failed"
+	if d.Workload.TimeoutMs != nil && *d.Workload.TimeoutMs != design.DefaultClientTimeoutMs {
+		why = "set in the design; k6 gives up on a request after this long and counts it as failed"
+	}
 	p.Assumptions = append(p.Assumptions, Assumption{
-		Field: "load generator timeout", Value: requestTimeout.String(),
-		Why: "k6 gives up on a request after this long and counts it as failed",
+		Field: "workload.timeout_ms", Value: p.Workload.Timeout.D().String(), Why: why,
 	})
 	for _, name := range d.ServiceNames() {
 		if s := d.Services[name]; s.Kind == "lb" {

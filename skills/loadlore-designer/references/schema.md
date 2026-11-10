@@ -78,8 +78,8 @@ Call fields:
 | `mode` | `sync` | `sync` waits for the result; `async` fires and continues |
 | `on_miss` | none | Calls to run on a cache miss (`get` only) |
 | `ttl_s` | none | For `set` only |
-| `query` | `point` | `point` (one row by key), `range` (`rows` rows by key order), `scan` (filter on `user_id`: a full table scan unless `user_id` is indexed); `read` only |
-| `rows` | `10` | Rows per `range` read |
+| `query` | `point` | `point` (one row by key), `range` (`rows` rows in key order from the key: `id >= key ORDER BY id LIMIT rows`), `batch` (the key and the `rows - 1` keys after it in one statement: `id = ANY(keys)`), `scan` (filter on `user_id`: a full table scan unless `user_id` is indexed); `read` only |
+| `rows` | `10` | Rows per `range` read, or keys per `batch` read |
 
 Resilience fields apply to every outbound call of the service:
 
@@ -145,6 +145,7 @@ workload:
   mix: { read: 0.9, write: 0.1 }          # default 0.9 / 0.1; give one and the other is the rest
   keys: { distribution: zipf, skew: 1.1, count: 5000000 }
   payload_kb: 2                           # default 1
+  timeout_ms: 10000                       # default 10000: the load generator's request timeout
 ```
 
 Each profile step has exactly one of `ramp`, `hold` or `spike`. Load is open-model: the rate is what arrives, whether or not the system keeps up.
@@ -159,6 +160,8 @@ Each profile step has exactly one of `ramp`, `hold` or `spike`. Load is open-mod
 | `count` | see below | Distinct keys the workload touches |
 
 `hotspot` example: `{ distribution: hotspot, share: 0.8, fraction: 0.01 }` means 80% of requests hit 1% of keys.
+
+Client timeout: `timeout_ms` is how long the load generator waits for a response before counting the request as failed. It decides how long requests to a dead or overloaded service hang, so it shapes every failure. Every report prints it as an assumption, next to any lb's own timeouts.
 
 Keyspace: `count` defaults to the `dataset.rows` of the datastore the entry path reads. Validation requires it when that is ambiguous (several datasets of different sizes, or none), and it can't exceed that row count.
 
@@ -249,7 +252,7 @@ modes:
   local: { scale: 0.5 }
 ```
 
-`scale` (default `1`) shrinks resources and load together in local mode. The `--scale` flag overrides it.
+`scale` (default `1`) shrinks resources and load together in local mode. The `--scale` flag overrides it. It multiplies CPU, memory, memory settings, dataset rows, the keyspace and request rates; replicas, pool sizes, connection limits and per-request work stay as written. Because connection counts don't shrink, memory doesn't shrink below what they need: a Postgres keeps its scaled `shared_buffers` plus about 2 MiB per allowed connection and 64 MiB, and an `lb` keeps about 40 KiB per possible client connection plus 32 MiB, never more than the design's own value. The run's notes say when this applies.
 
 ## Planned
 

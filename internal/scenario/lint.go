@@ -1,0 +1,150 @@
+package scenario
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/akinfemi/load-lore/internal/analysis"
+	"github.com/akinfemi/load-lore/internal/design"
+	"github.com/akinfemi/load-lore/internal/diagram"
+)
+
+// Problem is something wrong with a scenario folder.
+type Problem struct {
+	File    string `json:"file"`
+	Message string `json:"message"`
+	Warning bool   `json:"warning,omitempty"`
+}
+
+func (p Problem) String() string {
+	kind := "error"
+	if p.Warning {
+		kind = "warning"
+	}
+	return fmt.Sprintf("%s: %s: %s", p.File, kind, p.Message)
+}
+
+// Lint checks a scenario folder without running anything: every file is
+// there, every design validates, the README's diagram matches its design,
+// and the claims name real solutions and rules.
+func (s *Scenario) Lint() []Problem {
+	var ps []Problem
+	bad := func(file, format string, args ...any) {
+		ps = append(ps, Problem{File: file, Message: fmt.Sprintf(format, args...)})
+	}
+	warn := func(file, format string, args ...any) {
+		ps = append(ps, Problem{File: file, Message: fmt.Sprintf(format, args...), Warning: true})
+	}
+
+	m := s.Meta
+	if strings.TrimSpace(m.Title) == "" {
+		bad(MetaFile, "title is required")
+	}
+	if m.Level < 1 || m.Level > 3 {
+		bad(MetaFile, "level must be 1, 2 or 3, not %d", m.Level)
+	}
+	if len(m.Concepts) == 0 {
+		bad(MetaFile, "concepts must list at least one concept the scenario teaches")
+	}
+	if m.Minutes <= 0 {
+		bad(MetaFile, "minutes (a rough time to work through it) is required")
+	}
+	if m.Host.CPUs <= 0 || m.Host.Memory <= 0 {
+		bad(MetaFile, "host.cpus and host.memory are required: what Docker needs available at --scale 1, Loadlore's own containers included")
+	}
+	if v := m.Check.Problem.Verdict; v != "broke" && v != "held" {
+		bad(MetaFile, "check.problem.verdict must be broke or held, not %q", v)
+	}
+	claims := map[string]Claim{"check.problem": m.Check.Problem}
+	for name, c := range m.Check.Solutions {
+		claims["check.solutions."+name] = c
+		if !slices.Contains(s.Solutions, name) {
+			bad(MetaFile, "check.solutions.%s: there's no solutions/%s folder", name, name)
+		}
+	}
+	for at, c := range claims {
+		for _, r := range c.Diagnoses {
+			if !slices.Contains(analysis.RuleIDs, r) {
+				bad(MetaFile, "%s.diagnoses: no rule %q; this version has %s", at, r, strings.Join(analysis.RuleIDs, ", "))
+			}
+		}
+		if c.Verdict != "" && c.Verdict != "broke" && c.Verdict != "held" {
+			bad(MetaFile, "%s.verdict must be broke or held, not %q", at, c.Verdict)
+		}
+		if c.MinGain != nil && *c.MinGain <= 1 {
+			bad(MetaFile, "%s.min_gain must be above 1", at)
+		}
+	}
+
+	d := s.lintDesign(DesignFile, s.Name, &ps)
+	readme, err := s.ReadFile(ReadmeFile)
+	switch {
+	case err != nil:
+		bad(ReadmeFile, "missing")
+	case d != nil:
+		if want := diagram.Flowchart(d).String(); !strings.Contains(string(readme), "```mermaid\n"+want+"```") {
+			bad(ReadmeFile, "its Mermaid diagram doesn't match design.yaml; paste the output of `loadl diagram %s` into a ```mermaid block", DesignFile)
+		}
+	}
+	if _, err := s.ReadFile(HintsFile); err != nil {
+		bad(HintsFile, "missing")
+	} else if len(s.Hints) == 0 {
+		bad(HintsFile, `no hints: start each one with a "## " heading`)
+	}
+
+	if len(s.Solutions) == 0 {
+		bad(SolutionsDir, "at least one solution is required, as solutions/<name>/design.yaml")
+	}
+	for _, name := range s.Solutions {
+		s.lintDesign(SolutionDesign(name), "", &ps)
+		if _, err := s.ReadFile(SolutionsDir + "/" + name + "/" + ReadmeFile); err != nil {
+			bad(SolutionsDir+"/"+name+"/"+ReadmeFile, "missing: say what changed and why it helps")
+		}
+		if _, err := s.ReadFile(SolutionsDir + "/" + name + "/" + ReportFile); err != nil {
+			warn(SolutionsDir+"/"+name+"/"+ReportFile, "no reference report; copy one from a run of this design")
+		}
+	}
+	slices.SortStableFunc(ps, func(a, b Problem) int { return strings.Compare(a.File, b.File) })
+	return ps
+}
+
+// lintDesign loads one design and records its errors. name, when set, is
+// the name the design must have.
+func (s *Scenario) lintDesign(file, name string, ps *[]Problem) *design.Design {
+	raw, err := s.ReadFile(file)
+	if err != nil {
+		*ps = append(*ps, Problem{File: file, Message: "missing"})
+		return nil
+	}
+	d, diags := design.Load(raw)
+	for _, e := range diags.Errors() {
+		*ps = append(*ps, Problem{File: file, Message: diagText(e)})
+	}
+	if diags.HasErrors() {
+		return nil
+	}
+	for _, w := range diags.Warnings() {
+		*ps = append(*ps, Problem{File: file, Message: diagText(w), Warning: true})
+	}
+	if name != "" && d.Name != name {
+		*ps = append(*ps, Problem{File: file, Message: fmt.Sprintf("name is %q; a scenario's design is named after its folder, %q", d.Name, name)})
+	}
+	return d
+}
+
+// HasErrors reports whether any problem isn't a warning.
+func HasErrors(ps []Problem) bool {
+	return slices.ContainsFunc(ps, func(p Problem) bool { return !p.Warning })
+}
+
+func diagText(d design.Diagnostic) string {
+	loc := ""
+	if d.Line > 0 {
+		loc = fmt.Sprintf("line %d: ", d.Line)
+	}
+	if d.Path != "" {
+		loc += d.Path + ": "
+	}
+	return loc + d.Message
+}

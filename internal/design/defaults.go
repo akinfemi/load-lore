@@ -27,6 +27,7 @@ const (
 	DefaultHotspotShare    = 0.8
 	DefaultHotspotFraction = 0.01
 	DefaultPayloadKB       = 1.0
+	DefaultClientTimeoutMs = 10000
 	DefaultScale           = 1.0
 	DefaultLBCPU           = 0.5
 	DefaultLBMemory        = Size(256 << 20)
@@ -173,7 +174,7 @@ func defaultApp(s *Service, services map[string]*Service) {
 		if c.Op == "read" && c.Query == "" {
 			c.Query = "point"
 		}
-		if c.Query == "range" {
+		if c.Query == "range" || c.Query == "batch" {
 			setDefault(&c.Rows, DefaultRangeRows)
 		}
 		if _, known := services[c.Target]; known {
@@ -212,6 +213,7 @@ func defaultWorkload(w *Workload) {
 		setDefault(&w.Keys.Fraction, DefaultHotspotFraction)
 	}
 	setDefault(&w.PayloadKB, DefaultPayloadKB)
+	setDefault(&w.TimeoutMs, DefaultClientTimeoutMs)
 }
 
 // walkCalls visits every call, including on_miss calls, depth first.

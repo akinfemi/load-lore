@@ -46,7 +46,11 @@ Use this when the user points at their own repo and asks to "test my app" or "se
 
 ### D. Write a scenario
 
-Follow `references/scenario-authoring.md`. In short: a folder with `README.md` (the story and the question), `design.yaml` (the starting point), `hints.md` (progressive, never the answer in hint 1), `meta.yaml`, and at least one entry in `solutions/`. Run `loadl scenario check <folder>` before handing it over.
+Follow `references/scenario-authoring.md`. In short: a folder with `README.md` (the story, the question and the diagram), `design.yaml` (the starting point, named after the folder), `hints.md` (one `## ` section per hint, never the answer in hint 1), `meta.yaml` (including the `check` claims), and at least one folder in `solutions/`. Run `loadl scenario check <folder> --static` while writing, and the full `loadl scenario check <folder>` before handing it over.
+
+### F. A learner working through a library scenario
+
+`loadl scenarios --json` lists them. The learner runs the scenario's `design.yaml`; `loadl hint` reveals the next hint for it. Ground rule 4 applies with extra force: don't reveal hints or the `solutions/` folder ahead of `loadl hint`, unless the learner asks you to.
 
 ### E. After a run
 
@@ -82,8 +86,9 @@ Then offer the command to run it: `loadl run design.yaml` (local mode).
 | `loadl schema --json` | Exact schema for the installed version |
 | `loadl validate <file> --json` | The validate loop |
 | `loadl diagram <file> [--ascii]` | Showing the design |
-| `loadl scenarios --json` | Finding a library scenario to start from |
-| `loadl scenario check <folder>` | Checking a new scenario |
+| `loadl scenarios [search] --json` | Finding a library scenario to start from |
+| `loadl hint [scenario] --json` | The next hint for the scenario of the latest run, one at a time |
+| `loadl scenario check <folder> [--static] [--scale s]` | Checking a new scenario: files, diagram, claims, then a run of each design |
 | `loadl run <file> [--mode local]` | Running, when the user asks. `--scale` shrinks it for small hosts; `--seed` makes the workload repeatable; `--reuse-data` skips the fresh dataset copy (the report then says the data drifted) |
 | `loadl report <run-id> --json` | Explaining a run: verdict, diagnoses with evidence, scored predictions, per-window numbers. `latest` names the newest run |
 | `loadl compare <run-a> <run-b>` | Before and after a design change, side by side |
@@ -93,4 +98,4 @@ Then offer the command to run it: `loadl run design.yaml` (local mode).
 
 - `references/schema.md`: every field, its default, and an example. Read before writing any design.
 - `references/synthetic-service.md`: how to map real service behavior onto `loadlore/synthetic`, with rough starting numbers.
-- `references/scenario-authoring.md`: how to write a scenario for the library.
+- `references/scenario-authoring.md`: how to write a scenario for the library, including `meta.yaml` and its check claims.

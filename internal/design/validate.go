@@ -269,8 +269,8 @@ func (v *validator) call(caller, p string, c *Call) {
 	if c.Query != "" && c.Op != "read" {
 		v.errorf(pathKey(p, "query"), CodeNotApplicable, "query only applies to op read")
 	}
-	if c.Rows != nil && c.Query != "range" {
-		v.errorf(pathKey(p, "rows"), CodeNotApplicable, "rows only applies to query: range")
+	if c.Rows != nil && c.Query != "range" && c.Query != "batch" {
+		v.errorf(pathKey(p, "rows"), CodeNotApplicable, "rows only applies to query: range and query: batch")
 	}
 	v.calls(caller, pathKey(p, "on_miss"), c.OnMiss)
 }

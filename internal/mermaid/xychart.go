@@ -44,7 +44,9 @@ func (c *XYChart) String() string {
 	for i, p := range c.plots {
 		colors[i] = p.color
 	}
-	fmt.Fprintf(&b, "---\nconfig:\n  themeVariables:\n    xyChart:\n      plotColorPalette: \"%s\"\n---\n", strings.Join(colors, ", "))
+	// A transparent background, so the chart sits on the page in dark mode
+	// rather than in a grey box.
+	fmt.Fprintf(&b, "---\nconfig:\n  themeVariables:\n    xyChart:\n      backgroundColor: \"transparent\"\n      plotColorPalette: \"%s\"\n---\n", strings.Join(colors, ", "))
 	b.WriteString("xychart-beta\n")
 	if c.Title != "" {
 		fmt.Fprintf(&b, "    title \"%s\"\n", chartText.Replace(c.Title))

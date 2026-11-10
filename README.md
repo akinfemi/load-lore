@@ -18,6 +18,9 @@ loadl schema --json                            # JSON Schema of the design file
 loadl run examples/smoke.yaml                  # run on local Docker; results in .loadlore/runs/<run-id>/
 loadl report latest                            # rewrite a run's report.md; --print shows it, --json gives the analysis
 loadl compare <run-a> <run-b>                  # two runs side by side, with the design diff
+loadl scenarios                                # the scenario library
+loadl hint                                     # the next hint for the scenario you're running
+loadl scenario check scenarios/<name>          # run a scenario and its solutions; check its claims
 loadl down                                     # remove anything a run left behind
 ```
 
@@ -26,6 +29,8 @@ Every command accepts `--json`.
 `loadl run` needs Docker with Compose 2.23 or later and the synthetic service image (`make image`). It uses the current Docker context, or `DOCKER_HOST`. On Colima, give the VM enough CPUs for the design; the pre-flight check says when a design doesn't fit and which `--scale` does.
 
 A run folder holds the exact `design.yaml`, the generated `compose.yaml` and `load.js`, `plan.json` (resources after scaling, and why), `events.jsonl` (load, faults, container deaths), `metrics/` (every series, exported from Prometheus before teardown), `logs/`, `containers.json`, `k6-summary.json`, `run.json`, and the `report.md` and `analysis.json` that `loadl run` writes at the end. Reports are made from the folder alone, so `loadl report` can regenerate them at any time.
+
+Scenarios are guided experiments in [`scenarios/`](scenarios/): a starting design, a story, a question to predict, hints and worked solutions. Start with [When does one Postgres fall over?](scenarios/single-postgres-breaking-point/).
 
 Each run starts from a fresh copy of the seeded dataset. `--reuse-data` skips the copy for quick iteration; the report then says which earlier runs wrote to the data.
 

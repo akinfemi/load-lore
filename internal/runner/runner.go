@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/plan"
 	"github.com/akinfemi/load-lore/internal/report"
 	"github.com/akinfemi/load-lore/internal/rundir"
+	"github.com/akinfemi/load-lore/internal/scenario"
 	"github.com/akinfemi/load-lore/internal/version"
 )
 
@@ -54,6 +56,7 @@ type Result struct {
 	RunID       string             `json:"run_id"`
 	Dir         string             `json:"dir"`
 	Design      string             `json:"design"`
+	DesignPath  string             `json:"design_path"` // the file run, absolute
 	Status      string             `json:"status"`
 	Error       string             `json:"error,omitempty"`
 	Scale       float64            `json:"scale"`
@@ -109,7 +112,8 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 		return nil, err
 	}
 	defer dir.Close()
-	res := &Result{RunID: id, Dir: dir.Path, Design: d.Name, Started: started.UTC(), Seed: opt.Seed, ReuseData: opt.ReuseData, Loadl: version.Version, Warnings: []string{}}
+	designPath, _ := filepath.Abs(opt.DesignPath)
+	res := &Result{RunID: id, Dir: dir.Path, Design: d.Name, DesignPath: designPath, Started: started.UTC(), Seed: opt.Seed, ReuseData: opt.ReuseData, Loadl: version.Version, Warnings: []string{}}
 	if err := dir.Write("design.yaml", raw); err != nil {
 		return nil, err
 	}
@@ -141,6 +145,9 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 		if s := fittingScale(d, opt, pf.Host.CPUs); s > 0 {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("--scale %s fits this host's %d CPUs", fmtF(s), pf.Host.CPUs))
 		}
+	}
+	if sc, ok := scenario.ForDesign(opt.DesignPath); ok {
+		res.Warnings = append(res.Warnings, scenarioHostWarnings(sc, p.Scale, pf.Host)...)
 	}
 	for _, w := range res.Warnings {
 		fmt.Fprintf(out, "  warning: %s\n", w)
@@ -398,6 +405,24 @@ func fittingScale(d *design.Design, opt Options, cpus int) float64 {
 		}
 	}
 	return 0
+}
+
+// scenarioHostWarnings compares the host with what the scenario's meta.yaml
+// says it needs at --scale 1, scaled. Without it the scenario's numbers may
+// not match its README even when the design fits.
+func scenarioHostWarnings(sc *scenario.Scenario, scale float64, h driver.Host) []string {
+	need := sc.Meta.Host
+	var out []string
+	if cpus := need.CPUs * scale; cpus > float64(h.CPUs) {
+		fit := math.Floor(float64(h.CPUs)/need.CPUs*20) / 20
+		out = append(out, fmt.Sprintf("scenario %s needs %s CPUs available to Docker at --scale %s (%s CPUs at --scale 1, from its meta.yaml), but Docker has %d; try --scale %s",
+			sc.Name, fmtF(cpus), fmtF(scale), fmtF(need.CPUs), h.CPUs, fmtF(fit)))
+	}
+	if mem := int64(float64(need.Memory) * scale); mem > h.MemoryBytes {
+		out = append(out, fmt.Sprintf("scenario %s needs %d MiB of memory available to Docker at --scale %s (from its meta.yaml), but Docker has %d MiB",
+			sc.Name, mem>>20, fmtF(scale), h.MemoryBytes>>20))
+	}
+	return out
 }
 
 // InvalidDesignError carries a design's diagnostics.

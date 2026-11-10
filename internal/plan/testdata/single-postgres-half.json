@@ -235,7 +235,7 @@
         "lb"
       ],
       "cpu": 0.25,
-      "memory": 134217728,
+      "memory": 198180864,
       "port": 8080,
       "lb": {
         "target": "api",
@@ -351,13 +351,14 @@
   "notes": [
     "scale 0.5: CPU, memory, memory settings, dataset rows, the keyspace and request rates are multiplied by 0.5; replicas, pool sizes, connection limits and per-request work are not",
     "db: shared_buffers scaled from 256MB to 131072kB",
+    "lb: memory kept at 189m instead of 128m: about 40k for each of up to 4000 client connections, which don't scale",
     "Loadlore's own containers get fixed budgets: load generator 1 CPU (peak 2500 rps), Toxiproxy 1 CPU (about 10250 proxied calls/s at peak), Prometheus 0.25, cAdvisor 0.25, exporters 0.1 each"
   ],
   "assumptions": [
     {
-      "field": "load generator timeout",
+      "field": "workload.timeout_ms",
       "value": "10s",
-      "why": "k6 gives up on a request after this long and counts it as failed"
+      "why": "the default; k6 gives up on a request after this long and counts it as failed"
     },
     {
       "field": "services.lb timeouts",

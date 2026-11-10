@@ -204,3 +204,88 @@ func TestReportAndCompare(t *testing.T) {
 		t.Errorf("missing run: code %d, %s", code, stderr)
 	}
 }
+
+func TestScenarios(t *testing.T) {
+	out, _, code := runCLI(t, "scenarios")
+	if code != exitOK || !strings.Contains(out, "single-postgres-breaking-point") || !strings.Contains(out, "When does one Postgres fall over?") {
+		t.Errorf("list: code %d\n%s", code, out)
+	}
+	out, _, _ = runCLI(t, "scenarios", "QUEUEING knee", "--json")
+	var list []struct {
+		Name string `json:"name"`
+		Meta struct {
+			Level int `json:"level"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal([]byte(out), &list); err != nil || len(list) != 1 || list[0].Meta.Level != 1 {
+		t.Errorf("search: %v\n%s", err, out)
+	}
+	out, _, _ = runCLI(t, "scenarios", "kafka")
+	if !strings.Contains(out, `no scenario matches "kafka"`) {
+		t.Errorf("no match: %s", out)
+	}
+}
+
+func TestHint(t *testing.T) {
+	repo, _ := filepath.Abs("../..")
+	t.Chdir(t.TempDir())
+
+	_, stderr, code := runCLI(t, "hint")
+	if code != exitUsage || !strings.Contains(stderr, "no current scenario") {
+		t.Errorf("no scenario: code %d %s", code, stderr)
+	}
+
+	out, _, code := runCLI(t, "hint", "single-postgres-breaking-point")
+	if code != exitOK || !strings.HasPrefix(out, "Hint 1 of 5 · Start with the verdict") || !strings.Contains(out, "Next: loadl hint (2 of 5)") {
+		t.Errorf("first: code %d\n%s", code, out)
+	}
+	// The latest run's design picks the scenario: here, a solution's.
+	run := filepath.Join(".loadlore", "runs", "x-20261110-000000")
+	if err := os.MkdirAll(run, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := `{"design":"whatever","design_path":"` + filepath.Join(repo, "scenarios/single-postgres-breaking-point/solutions/one-query-per-page/design.yaml") + `"}`
+	if err := os.WriteFile(filepath.Join(run, "run.json"), []byte(rec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _, _ = runCLI(t, "hint", "--json")
+	var h hintResult
+	if err := json.Unmarshal([]byte(out), &h); err != nil || h.Number != 2 || h.Scenario != "single-postgres-breaking-point" || h.Body == "" {
+		t.Errorf("second: %v %+v", err, h)
+	}
+	for range 3 {
+		runCLI(t, "hint")
+	}
+	out, _, _ = runCLI(t, "hint")
+	if !strings.HasPrefix(out, "All 5 hints") {
+		t.Errorf("after the last: %s", out)
+	}
+	out, _, _ = runCLI(t, "hint", "--show", "2")
+	if !strings.HasPrefix(out, "Hint 2 of 5") {
+		t.Errorf("show: %s", out)
+	}
+	runCLI(t, "hint", "--reset")
+	_, stderr, code = runCLI(t, "hint", "--show", "1")
+	if code != exitUsage || !strings.Contains(stderr, "isn't revealed yet") {
+		t.Errorf("show after reset: %d %s", code, stderr)
+	}
+}
+
+func TestScenarioCheckStatic(t *testing.T) {
+	out, _, code := runCLI(t, "scenario", "check", "../../scenarios/single-postgres-breaking-point", "--static")
+	if code != exitOK || !strings.Contains(out, "ok (files only") {
+		t.Errorf("folder: code %d\n%s", code, out)
+	}
+	// A library name works too, from the built-in copy.
+	out, _, code = runCLI(t, "scenario", "check", "single-postgres-breaking-point", "--static", "--json")
+	var res struct {
+		OK bool `json:"ok"`
+	}
+	if code != exitOK || json.Unmarshal([]byte(out), &res) != nil || !res.OK {
+		t.Errorf("by name: code %d\n%s", code, out)
+	}
+	_, stderr, code := runCLI(t, "scenario", "check", "no-such-scenario", "--static")
+	if code != exitUsage || !strings.Contains(stderr, `no scenario "no-such-scenario"`) {
+		t.Errorf("unknown: %d %s", code, stderr)
+	}
+}
