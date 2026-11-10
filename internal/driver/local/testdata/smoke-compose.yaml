@@ -75,6 +75,10 @@ services:
       - ""
       - --appendonly
       - "no"
+      - --maxmemory
+      - 98304kb
+      - --maxmemory-policy
+      - allkeys-lru
     cpus: 0.5
     mem_limit: 128m
     memswap_limit: 128m
@@ -125,6 +129,39 @@ services:
       retries: 180
     restart: "no"
     stop_grace_period: 10s
+  lb:
+    image: haproxy:3.2.26
+    pull_policy: missing
+    cpus: 0.5
+    mem_limit: 256m
+    memswap_limit: 256m
+    labels:
+      io.loadlore: "1"
+      io.loadlore.role: lb
+      io.loadlore.run: test-run
+      io.loadlore.service: lb
+    networks:
+      - lab
+    configs:
+      - source: haproxy-lb
+        target: /usr/local/etc/haproxy/haproxy.cfg
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - exec 3<>/dev/tcp/127.0.0.1/8405
+      interval: 1s
+      timeout: 3s
+      retries: 60
+    depends_on:
+      api-0:
+        condition: service_healthy
+      api-1:
+        condition: service_healthy
+      lore-toxiproxy:
+        condition: service_started
+    restart: "no"
   lore-cadvisor:
     image: ghcr.io/google/cadvisor:v0.60.6
     command:
@@ -133,7 +170,7 @@ services:
       - --store_container_labels=false
       - --whitelisted_container_labels=io.loadlore.run,io.loadlore.service,io.loadlore.replica,io.loadlore.role
       - --disable_metrics=advtcp,cpu_topology,cpuset,hugetlb,memory_numa,percpu,process,referenced_memory,resctrl,sched,tcp,udp
-    cpus: 0.5
+    cpus: 0.25
     mem_limit: 256m
     memswap_limit: 256m
     labels:
@@ -162,6 +199,7 @@ services:
       - experimental-prometheus-rw
       - /scripts/load.js
     environment:
+      GOMEMLIMIT: 921MiB
       K6_PROMETHEUS_RW_PUSH_INTERVAL: 1s
       K6_PROMETHEUS_RW_SERVER_URL: http://lore-prometheus:9090/api/v1/write
       K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM: "true"
@@ -187,7 +225,7 @@ services:
       DATA_SOURCE_PASS: loadlore
       DATA_SOURCE_URI: db:5432/lab?sslmode=disable
       DATA_SOURCE_USER: loadlore
-    cpus: 0.25
+    cpus: 0.1
     mem_limit: 128m
     memswap_limit: 128m
     labels:
@@ -209,7 +247,7 @@ services:
       - --storage.tsdb.retention.time=1d
       - --web.enable-remote-write-receiver
       - --enable-feature=native-histograms
-    cpus: 1
+    cpus: 0.25
     mem_limit: 1024m
     memswap_limit: 1024m
     labels:
@@ -240,7 +278,7 @@ services:
     image: oliver006/redis_exporter:v1.97.0
     environment:
       REDIS_ADDR: redis://cache:6379
-    cpus: 0.25
+    cpus: 0.1
     mem_limit: 128m
     memswap_limit: 128m
     labels:
@@ -261,9 +299,11 @@ services:
       - -config=/config/toxiproxy.json
       - -proxy-metrics
       - -runtime-metrics
+    environment:
+      GOMEMLIMIT: 921MiB
     cpus: 0.5
-    mem_limit: 256m
-    memswap_limit: 256m
+    mem_limit: 1024m
+    memswap_limit: 1024m
     labels:
       io.loadlore: "1"
       io.loadlore.role: infra
@@ -287,6 +327,33 @@ volumes:
     external: true
     name: loadlore-test-run-db-data
 configs:
+  haproxy-lb:
+    content: |
+      global
+          maxconn 50000
+
+      defaults
+          mode http
+          timeout connect 5s
+          timeout client 60s
+          timeout server 60s
+          timeout http-keep-alive 60s
+          timeout check 1000ms
+
+      frontend web
+          bind :8080
+          default_backend replicas
+
+      frontend stats
+          bind :8405
+          http-request use-service prometheus-exporter if { path /metrics }
+
+      backend replicas
+          balance roundrobin
+          option httpchk GET /healthz
+          default-server check inter 1000ms fall 2 rise 2
+          server api-0 lore-toxiproxy:20002
+          server api-1 lore-toxiproxy:20003
   k6:
     content: |
       // script
@@ -310,6 +377,10 @@ configs:
           static_configs:
             - targets: ["lore-redisexp-cache:9121"]
               labels: {service: "cache"}
+        - job_name: lb-lb
+          static_configs:
+            - targets: ["lb:8405"]
+              labels: {service: "lb"}
         - job_name: toxiproxy
           static_configs:
             - targets: ["lore-toxiproxy:8474"]
@@ -341,6 +412,18 @@ configs:
           "name": "api--db",
           "listen": "0.0.0.0:20001",
           "upstream": "db:5432",
+          "enabled": true
+        },
+        {
+          "name": "lb--api-0",
+          "listen": "0.0.0.0:20002",
+          "upstream": "api-0:8080",
+          "enabled": true
+        },
+        {
+          "name": "lb--api-1",
+          "listen": "0.0.0.0:20003",
+          "upstream": "api-1:8080",
           "enabled": true
         }
       ]

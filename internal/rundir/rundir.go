@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -103,4 +104,52 @@ func (d *Dir) Close() error {
 	err := d.events.Close()
 	d.events = nil
 	return err
+}
+
+// Resolve finds a run folder from what a user typed: a path to the folder,
+// a run id, a unique prefix of one, or "latest".
+func Resolve(root, ref string) (string, error) {
+	isRun := func(p string) bool {
+		_, err := os.Stat(filepath.Join(p, "run.json"))
+		return err == nil
+	}
+	if isRun(ref) {
+		return ref, nil
+	}
+	if p := filepath.Join(root, ref); isRun(p) {
+		return p, nil
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return "", fmt.Errorf("no run %q: %w", ref, err)
+	}
+	var matches []string
+	var latest string
+	var latestTime time.Time
+	for _, e := range entries {
+		p := filepath.Join(root, e.Name())
+		if !e.IsDir() || !isRun(p) {
+			continue
+		}
+		if ref == "latest" {
+			if fi, err := os.Stat(filepath.Join(p, "run.json")); err == nil && fi.ModTime().After(latestTime) {
+				latest, latestTime = p, fi.ModTime()
+			}
+			continue
+		}
+		if strings.HasPrefix(e.Name(), ref) {
+			matches = append(matches, p)
+		}
+	}
+	switch {
+	case ref == "latest" && latest != "":
+		return latest, nil
+	case ref == "latest":
+		return "", fmt.Errorf("no finished runs in %s", root)
+	case len(matches) == 1:
+		return matches[0], nil
+	case len(matches) > 1:
+		return "", fmt.Errorf("%q matches %d runs; give more of the id", ref, len(matches))
+	}
+	return "", fmt.Errorf("no run %q in %s", ref, root)
 }

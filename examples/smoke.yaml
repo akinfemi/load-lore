@@ -1,8 +1,12 @@
 # A one-minute design that exercises the local driver end to end: a seeded
-# Postgres, a cache, a latency fault and a replica kill.
+# Postgres, a cache, a load balancer, a latency fault and a replica kill.
 version: 1
 name: smoke
 services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 1000, fall: 2, rise: 2 }
   api:
     image: loadlore/synthetic
     replicas: 2
@@ -22,7 +26,7 @@ services:
     resources: { cpu: 1, memory: 512m }
     dataset: { rows: 20000, row_bytes: 256 }
 workload:
-  entry: api
+  entry: lb
   profile:
     - ramp: { from: 50, to: 300, over: 30s }
     - hold: { rps: 300, for: 30s }

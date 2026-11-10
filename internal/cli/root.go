@@ -69,6 +69,8 @@ func newRootCmd() *cobra.Command {
 		newSchemaCmd(g),
 		newDiagramCmd(g),
 		newRunCmd(g),
+		newReportCmd(g),
+		newCompareCmd(g),
 		newDownCmd(g),
 		newVersionCmd(g),
 	)

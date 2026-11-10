@@ -107,11 +107,13 @@ func (c *promClient) vector(ctx context.Context, query, label string) (map[strin
 }
 
 // exportedMetrics selects which series a run keeps.
-var exportedMetrics = regexp.MustCompile(`^(loadlore_|container_|pg_|redis_|k6_|toxiproxy_|up$|scrape_duration_seconds$)`)
+var exportedMetrics = regexp.MustCompile(`^(loadlore_|container_|pg_|redis_|k6_|toxiproxy_|haproxy_|up$|scrape_duration_seconds$)`)
 
-// export writes every kept series over [from, to] at one-second steps to
-// dir/<metric>.json, as Prometheus range-query results. Native histograms
-// come out as the histograms Prometheus stores.
+// export writes every kept series over [from, to] to dir/<metric>.json as
+// the raw samples Prometheus stored, with their real scrape (or push)
+// timestamps: a range-vector query, not a stepped range query, so window
+// edges can be interpolated instead of snapping to stale step values.
+// Native histograms come out as the histograms Prometheus stores.
 func (c *promClient) export(ctx context.Context, from, to time.Time, write func(name string, data []byte) error) (int, error) {
 	data, err := c.get(ctx, "/api/v1/label/__name__/values", url.Values{
 		"start": {fmtTime(from)}, "end": {fmtTime(to)},
@@ -123,14 +125,13 @@ func (c *promClient) export(ctx context.Context, from, to time.Time, write func(
 	if err := json.Unmarshal(data, &names); err != nil {
 		return 0, err
 	}
+	window := strconv.Itoa(int(to.Sub(from).Seconds())+1) + "s"
 	n := 0
 	for _, name := range names {
 		if !exportedMetrics.MatchString(name) {
 			continue
 		}
-		res, err := c.get(ctx, "/api/v1/query_range", url.Values{
-			"query": {name}, "start": {fmtTime(from)}, "end": {fmtTime(to)}, "step": {"1"},
-		})
+		res, err := c.get(ctx, "/api/v1/query", url.Values{"query": {name + "[" + window + "]"}, "time": {fmtTime(to)}})
 		if err != nil {
 			return n, fmt.Errorf("exporting %s: %w", name, err)
 		}

@@ -4,6 +4,7 @@
   "scale": 1,
   "seed": 1,
   "duration": 60000000000,
+  "reuse_data": false,
   "services": [
     {
       "name": "api",
@@ -171,7 +172,11 @@
       "cpu": 0.5,
       "memory": 134217728,
       "port": 6379,
-      "version": "8"
+      "version": "8",
+      "config": {
+        "maxmemory": "98304kb",
+        "maxmemory-policy": "allkeys-lru"
+      }
     },
     {
       "name": "db",
@@ -189,6 +194,38 @@
         "RowBytes": 256,
         "Indexes": null
       }
+    },
+    {
+      "name": "lb",
+      "kind": "lb",
+      "image": "haproxy:3.2.26",
+      "containers": [
+        "lb"
+      ],
+      "cpu": 0.5,
+      "memory": 268435456,
+      "port": 8080,
+      "lb": {
+        "target": "api",
+        "algorithm": "round-robin",
+        "check_path": "/healthz",
+        "interval_ms": 1000,
+        "timeout_ms": 1000,
+        "fall": 2,
+        "rise": 2,
+        "servers": [
+          {
+            "name": "api-0",
+            "addr": "lore-toxiproxy:20002"
+          },
+          {
+            "name": "api-1",
+            "addr": "lore-toxiproxy:20003"
+          }
+        ],
+        "server_port": 8080,
+        "stats_listen": 8405
+      }
     }
   ],
   "proxies": [
@@ -205,13 +242,26 @@
       "to": "db",
       "upstream": "db:5432",
       "listen": 20001
+    },
+    {
+      "name": "lb--api-0",
+      "from": "lb",
+      "to": "api",
+      "upstream": "api-0:8080",
+      "listen": 20002
+    },
+    {
+      "name": "lb--api-1",
+      "from": "lb",
+      "to": "api",
+      "upstream": "api-1:8080",
+      "listen": 20003
     }
   ],
   "workload": {
-    "entry": "api",
+    "entry": "lb",
     "urls": [
-      "http://api-0:8080",
-      "http://api-1:8080"
+      "http://lb:8080"
     ],
     "start_rate": 50,
     "stages": [
@@ -262,17 +312,39 @@
     "load_cpu": 1,
     "load_memory": 1073741824,
     "proxy_cpu": 0.5,
-    "proxy_memory": 268435456,
-    "prometheus_cpu": 1,
+    "proxy_memory": 1073741824,
+    "prometheus_cpu": 0.25,
     "prometheus_memory": 1073741824,
-    "cadvisor_cpu": 0.5,
+    "cadvisor_cpu": 0.25,
     "cadvisor_memory": 268435456,
-    "exporter_cpu": 0.25,
+    "exporter_cpu": 0.1,
     "exporter_memory": 134217728,
-    "expected_proxied_ops": 840.0000000000001,
+    "expected_proxied_ops": 1140,
     "synthetic_image": "loadlore/synthetic:dev"
   },
   "notes": [
-    "Loadlore's own containers get fixed budgets: load generator 1 CPU (peak 300 rps), Toxiproxy 0.5 CPU (about 840 proxied calls/s at peak), Prometheus 1, cAdvisor 0.5, exporters 0.25 each"
+    "Loadlore's own containers get fixed budgets: load generator 1 CPU (peak 300 rps), Toxiproxy 0.5 CPU (about 1140 proxied calls/s at peak), Prometheus 0.25, cAdvisor 0.25, exporters 0.1 each"
+  ],
+  "assumptions": [
+    {
+      "field": "services.cache.config.maxmemory",
+      "value": "96m",
+      "why": "75% of the container's 128m memory limit, as managed Redis usually does; the rest is for fragmentation and client buffers. Set maxmemory: 0 for stock Redis (no cap)"
+    },
+    {
+      "field": "services.cache.config.maxmemory-policy",
+      "value": "allkeys-lru",
+      "why": "evict the least recently used keys when the cache is full, as managed Redis usually does"
+    },
+    {
+      "field": "load generator timeout",
+      "value": "10s",
+      "why": "k6 gives up on a request after this long and counts it as failed"
+    },
+    {
+      "field": "services.lb timeouts",
+      "value": "connect 5s, server 60s",
+      "why": "HAProxy's own timeouts, with its defaults otherwise. A request already sent to a replica that dies waits for the server timeout (or the load generator's); health checks only stop new requests going there"
+    }
   ]
 }

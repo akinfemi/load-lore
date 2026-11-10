@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/akinfemi/load-lore/internal/analysis/analysistest"
 )
 
 // runCLI runs loadl with args and returns stdout, stderr and the exit code.
@@ -167,5 +170,37 @@ func TestDiagramInvalidDesign(t *testing.T) {
 	out, stderr, code := runCLI(t, "diagram", writeDesign(t, broken))
 	if code != exitFailure || out != "" || !strings.Contains(stderr, "unknown service") {
 		t.Fatalf("code %d, stdout %q, stderr %q", code, out, stderr)
+	}
+}
+
+func TestReportAndCompare(t *testing.T) {
+	a := analysistest.WriteRun(t, analysistest.Healthy(), 1)
+	b := analysistest.WriteRun(t, analysistest.Healthy(), 0.5)
+
+	out, stderr, code := runCLI(t, "report", a)
+	if code != exitOK || !strings.Contains(out, "Held the whole profile") || !strings.Contains(out, "report: ") {
+		t.Fatalf("report: code %d\n%s%s", code, out, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(a, "report.md")); err != nil {
+		t.Error("report.md not written")
+	}
+
+	out, _, code = runCLI(t, "report", a, "--json")
+	var an struct {
+		Verdict struct{ Kind string } `json:"verdict"`
+		Windows []any                 `json:"windows"`
+	}
+	if code != exitOK || json.Unmarshal([]byte(out), &an) != nil || an.Verdict.Kind != "held" || len(an.Windows) != 10 {
+		t.Errorf("report --json: code %d\n%.300s", code, out)
+	}
+
+	out, _, code = runCLI(t, "compare", a, b)
+	if code != exitOK || !strings.Contains(out, "# Compare: fixture") || !strings.Contains(out, "different scales (1 and 0.5)") {
+		t.Errorf("compare: code %d\n%.500s", code, out)
+	}
+
+	_, stderr, code = runCLI(t, "report", filepath.Join(t.TempDir(), "nope"))
+	if code != exitUsage || !strings.Contains(stderr, "no run") {
+		t.Errorf("missing run: code %d, %s", code, stderr)
 	}
 }

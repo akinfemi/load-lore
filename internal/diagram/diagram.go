@@ -18,25 +18,50 @@ const LoadNode = "load"
 
 // Flowchart builds the topology of a valid design. Node ids are
 // mermaid.ID(service name); the load generator is LoadNode.
-func Flowchart(d *design.Design) *mermaid.Flowchart {
+func Flowchart(d *design.Design) *mermaid.Flowchart { return Annotated(d, nil) }
+
+// Annotations add measured numbers to a topology: extra lines on nodes and
+// edges, and a class per node. Keys are service names and LoadNode.
+type Annotations struct {
+	Nodes     map[string][]string
+	Edges     map[[2]string][]string // {from, to}: lines after the design's label
+	Classes   map[string]string
+	ClassDefs [][2]string // name, style
+}
+
+// Annotated builds the topology with annotations; nil means none.
+func Annotated(d *design.Design, an *Annotations) *mermaid.Flowchart {
+	if an == nil {
+		an = &Annotations{}
+	}
 	f := mermaid.New(mermaid.LeftRight)
 	order := nodeOrder(d)
 
 	if w := d.Workload; w != nil {
-		f.Node(LoadNode, mermaid.Stadium, "load", "up to "+rps(peakRate(w)))
+		f.Node(LoadNode, mermaid.Stadium, append([]string{"load", "up to " + rps(peakRate(w))}, an.Nodes[LoadNode]...)...)
 	}
 	for _, name := range order {
-		addNode(f, name, d.Services[name])
+		addNode(f, name, d.Services[name], an.Nodes[name])
 	}
 
+	edge := func(from, to string, style mermaid.EdgeStyle, lines ...string) {
+		lines = append(lines, an.Edges[[2]string{from, to}]...)
+		id := LoadNode
+		if from != LoadNode {
+			id = mermaid.ID(from)
+		}
+		f.Edge(id, mermaid.ID(to), style, lines...)
+	}
 	if w := d.Workload; w != nil && w.Entry != "" {
-		f.Edge(LoadNode, mermaid.ID(w.Entry), mermaid.Solid, mixLabel(w.Mix))
+		edge(LoadNode, w.Entry, mermaid.Solid, mixLabel(w.Mix))
 	}
 	for _, name := range order {
 		s := d.Services[name]
 		switch {
 		case s.Kind == "pgbouncer" && s.Target != "":
-			f.Edge(mermaid.ID(name), mermaid.ID(s.Target), mermaid.Solid, fmt.Sprintf("pool %d", deref(s.DefaultPoolSize)))
+			edge(name, s.Target, mermaid.Solid, fmt.Sprintf("pool %d", deref(s.DefaultPoolSize)))
+		case s.Kind == "lb" && s.Target != "":
+			edge(name, s.Target, mermaid.Solid, lbLabel(s)...)
 		case s.Behavior != nil:
 			for _, e := range callEdges(s) {
 				lines := []string{strings.Join(e.ops, ", ")}
@@ -47,14 +72,22 @@ func Flowchart(d *design.Design) *mermaid.Flowchart {
 				if e.async {
 					style = mermaid.Dotted
 				}
-				f.Edge(mermaid.ID(name), mermaid.ID(e.target), style, lines...)
+				edge(name, e.target, style, lines...)
 			}
+		}
+	}
+	for _, c := range an.ClassDefs {
+		f.ClassDef(c[0], c[1])
+	}
+	for _, name := range order {
+		if c := an.Classes[name]; c != "" {
+			f.Class(mermaid.ID(name), c)
 		}
 	}
 	return f
 }
 
-func addNode(f *mermaid.Flowchart, name string, s *design.Service) {
+func addNode(f *mermaid.Flowchart, name string, s *design.Service, extra []string) {
 	title := name
 	if s.Replicas != nil && *s.Replicas > 1 {
 		title = fmt.Sprintf("%s ×%d", name, *s.Replicas)
@@ -66,11 +99,13 @@ func addNode(f *mermaid.Flowchart, name string, s *design.Service) {
 		if !s.IsSynthetic() {
 			lines = append(lines, s.Image)
 		}
-		f.Node(mermaid.ID(name), mermaid.Box, append(lines, res)...)
+		f.Node(mermaid.ID(name), mermaid.Box, append(append(lines, res), extra...)...)
 	case s.Kind == "pgbouncer":
-		f.Node(mermaid.ID(name), mermaid.Rounded, title, "pgbouncer · "+s.PoolMode, res)
+		f.Node(mermaid.ID(name), mermaid.Rounded, append([]string{title, "pgbouncer · " + s.PoolMode, res}, extra...)...)
+	case s.Kind == "lb":
+		f.Node(mermaid.ID(name), mermaid.Hexagon, append([]string{title, "load balancer", res}, extra...)...)
 	default:
-		f.Node(mermaid.ID(name), mermaid.Cylinder, title, strings.TrimSpace(s.Kind+" "+s.Version), res)
+		f.Node(mermaid.ID(name), mermaid.Cylinder, append([]string{title, strings.TrimSpace(s.Kind + " " + s.Version), res}, extra...)...)
 	}
 }
 
@@ -92,7 +127,7 @@ func nodeOrder(d *design.Design) []string {
 		}
 		seen[name] = true
 		order = append(order, name)
-		if s.Kind == "pgbouncer" {
+		if s.Kind == "pgbouncer" || s.Kind == "lb" {
 			queue = append(queue, s.Target)
 		}
 		for _, e := range callEdges(s) {
@@ -141,6 +176,23 @@ func callEdges(s *design.Service) []callEdge {
 	}
 	walk(s.Behavior.Calls, false)
 	return edges
+}
+
+// lbLabel describes how an lb spreads traffic: the algorithm and how fast
+// it notices a dead replica.
+func lbLabel(s *design.Service) []string {
+	lines := []string{s.Algorithm}
+	if hc := s.HealthCheck; hc != nil && hc.IntervalMs != nil && hc.Fall != nil {
+		lines = append(lines, fmt.Sprintf("checks every %s, out after %d", msDuration(*hc.IntervalMs), *hc.Fall))
+	}
+	return lines
+}
+
+func msDuration(ms int) string {
+	if ms%1000 == 0 {
+		return strconv.Itoa(ms/1000) + "s"
+	}
+	return strconv.Itoa(ms) + "ms"
 }
 
 func opLabel(c *design.Call, onMiss bool) string {

@@ -28,6 +28,14 @@ const (
 	DefaultHotspotFraction = 0.01
 	DefaultPayloadKB       = 1.0
 	DefaultScale           = 1.0
+	DefaultLBCPU           = 0.5
+	DefaultLBMemory        = Size(256 << 20)
+	DefaultAlgorithm       = "round-robin"
+	DefaultCheckPath       = "/healthz"
+	DefaultCheckIntervalMs = 2000
+	DefaultCheckTimeoutMs  = 1000
+	DefaultCheckFall       = 3
+	DefaultCheckRise       = 2
 )
 
 // DefaultConcurrencyMax is the default max for each concurrency model.
@@ -64,6 +72,10 @@ func applyDefaults(d *Design) {
 		if s.Resources == nil {
 			s.Resources = &Resources{}
 		}
+		if s.Kind == "lb" {
+			setDefault(&s.Resources.CPU, DefaultLBCPU)
+			setDefault(&s.Resources.Memory, DefaultLBMemory)
+		}
 		setDefault(&s.Resources.CPU, DefaultCPU)
 		setDefault(&s.Resources.Memory, DefaultMemory)
 
@@ -86,6 +98,21 @@ func applyDefaults(d *Design) {
 				s.PoolMode = DefaultPoolMode
 			}
 			setDefault(&s.DefaultPoolSize, DefaultPgbPoolSize)
+		case s.Kind == "lb":
+			if s.Algorithm == "" {
+				s.Algorithm = DefaultAlgorithm
+			}
+			if s.HealthCheck == nil {
+				s.HealthCheck = &HealthCheck{}
+			}
+			hc := s.HealthCheck
+			if hc.Path == "" {
+				hc.Path = DefaultCheckPath
+			}
+			setDefault(&hc.IntervalMs, DefaultCheckIntervalMs)
+			setDefault(&hc.TimeoutMs, DefaultCheckTimeoutMs)
+			setDefault(&hc.Fall, DefaultCheckFall)
+			setDefault(&hc.Rise, DefaultCheckRise)
 		}
 	}
 

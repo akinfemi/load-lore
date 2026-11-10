@@ -116,7 +116,7 @@ func TestCompletedRunTearsDownAndRecords(t *testing.T) {
 	if len(f.injected) != 2 || len(f.undone) != 2 || f.undone[0] != "latency" {
 		t.Errorf("injected %v, undone %v", f.injected, f.undone)
 	}
-	for _, name := range []string{"design.yaml", "plan.json", "run.json", "events.jsonl", "compose.yaml", "metrics/x.json"} {
+	for _, name := range []string{"design.yaml", "plan.json", "run.json", "events.jsonl", "compose.yaml", "metrics/x.json", "report.md", "analysis.json"} {
 		if _, err := os.Stat(filepath.Join(res.Dir, name)); err != nil {
 			t.Errorf("missing %s", name)
 		}
@@ -129,7 +129,8 @@ func TestCompletedRunTearsDownAndRecords(t *testing.T) {
 	}
 	var rj Result
 	b, _ = os.ReadFile(filepath.Join(res.Dir, "run.json"))
-	if err := json.Unmarshal(b, &rj); err != nil || rj.Status != StatusCompleted {
+	// The fake driver collects no metrics, so the report can't judge it.
+	if err := json.Unmarshal(b, &rj); err != nil || rj.Status != StatusCompleted || rj.Verdict != "no_data" || rj.Report == "" {
 		t.Errorf("run.json: %v %s", err, b)
 	}
 }
@@ -140,7 +141,7 @@ func TestFailedUpStillTearsDown(t *testing.T) {
 	if err == nil || res.Status != StatusFailed || !strings.Contains(res.Error, "boom") {
 		t.Fatalf("err %v, result %+v", err, res)
 	}
-	if got := strings.Join(f.calls, ","); got != "preflight,up,down" {
+	if got := strings.Join(f.calls, ","); got != "preflight,up,collect,down" {
 		t.Errorf("calls %s", got)
 	}
 }

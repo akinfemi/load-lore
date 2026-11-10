@@ -20,6 +20,7 @@ import (
 // Fixed names and ports inside a stack.
 const (
 	AppPort       = 8080
+	LBStatsPort   = 8405
 	PostgresPort  = 5432
 	RedisPort     = 6379
 	ProxyHost     = "lore-toxiproxy"
@@ -36,6 +37,9 @@ type Plan struct {
 	Scale    float64       `json:"scale"`
 	Seed     int64         `json:"seed"`
 	Duration time.Duration `json:"duration"`
+	// ReuseData skips the fresh copy of seeded datasets: the run uses a
+	// scratch copy that earlier --reuse-data runs may have written to.
+	ReuseData bool `json:"reuse_data"`
 
 	Services []*Service `json:"services"`
 	Proxies  []*Proxy   `json:"proxies"`
@@ -46,12 +50,24 @@ type Plan struct {
 	// Notes explain choices the plan made that a reader of the report
 	// should know about, such as values changed by scaling.
 	Notes []string `json:"notes"`
+
+	// Assumptions are values Loadlore chose that the design didn't state
+	// and that results depend on. Reports print them next to the design's
+	// own assumptions.
+	Assumptions []Assumption `json:"assumptions"`
+}
+
+// Assumption is a value Loadlore chose for the design.
+type Assumption struct {
+	Field string `json:"field"`
+	Value string `json:"value"`
+	Why   string `json:"why"`
 }
 
 // Service is one design service, expanded to containers.
 type Service struct {
 	Name       string   `json:"name"`
-	Kind       string   `json:"kind"` // app, postgres, redis
+	Kind       string   `json:"kind"` // app, postgres, redis, lb
 	Image      string   `json:"image"`
 	Containers []string `json:"containers"` // one per replica: api-0, api-1; or db
 	CPU        float64  `json:"cpu"`        // per container, after scaling
@@ -65,6 +81,29 @@ type Service struct {
 	Version string            `json:"version,omitempty"`
 	Config  map[string]string `json:"config,omitempty"` // after scaling
 	Dataset *dataset.Spec     `json:"dataset,omitempty"`
+
+	// Load balancers.
+	LB *LB `json:"lb,omitempty"`
+}
+
+// LB is a load balancer's settings and the replicas behind it.
+type LB struct {
+	Target      string     `json:"target"`
+	Algorithm   string     `json:"algorithm"`
+	CheckPath   string     `json:"check_path"`
+	IntervalMs  int        `json:"interval_ms"`
+	TimeoutMs   int        `json:"timeout_ms"`
+	Fall        int        `json:"fall"`
+	Rise        int        `json:"rise"`
+	Servers     []LBServer `json:"servers"`
+	ServerPort  int        `json:"server_port"`
+	StatsListen int        `json:"stats_listen"`
+}
+
+// LBServer is one replica behind an lb, reached through its proxy.
+type LBServer struct {
+	Name string `json:"name"` // the replica's container: api-0
+	Addr string `json:"addr"` // the proxy in front of it
 }
 
 // Proxy is one proxied connection: callers of From reach the To container
@@ -164,19 +203,35 @@ type Options struct {
 	Scale          float64 // 0 means the design's modes.local.scale
 	Seed           int64
 	SyntheticImage string
+	ReuseData      bool
 }
 
-// Measured budgets for Loadlore's own containers (see the early checks in
-// the spec doc: k6 at 1 CPU held 5,000 rps against a fast target with
-// <0.06% dropped, at 2 CPUs none; one Toxiproxy core relays about 15k
-// evenly paced queries per second before it saturates).
+// Measured budgets for Loadlore's own containers. Early checks: k6 at 1 CPU
+// held 5,000 rps against a fast target with <0.06% dropped; one Toxiproxy
+// core relays about 15k evenly paced queries per second before it
+// saturates. In the first full run of the spec example (scale 0.75), the
+// peak 10-second CPU use was k6 0.53 at 3,750 rps (about 7,000 rps per
+// core), Toxiproxy 0.65 at about 11,600 proxied calls/s (about 18,000 per
+// core), Prometheus 0.02, cAdvisor 0.03 and postgres_exporter 0.01. At scale
+// 1 with an lb, Toxiproxy relayed about 20,000 calls/s per core. The budgets
+// below leave k6 about 1.5x and Toxiproxy about 1.2x headroom over those
+// rates; reports mark a run inconclusive if either still reaches 90% of its
+// budget before the system breaks.
+//
+// Toxiproxy's memory grows with open connections: when the spec example
+// broke, it went from 17 MB to over 245 MB as requests queued, and was
+// OOM-killed at a 256 MB limit. It gets 1 GiB.
 const (
-	k6RatePerCPU     = 2500.0
-	proxyOpsPerCPU   = 12000.0
+	k6RatePerCPU     = 4500.0
+	proxyOpsPerCPU   = 15000.0
+	proxyMemory      = 1 << 30
 	minLoadCPU       = 1.0
 	maxLoadCPU       = 4.0
 	minProxyCPU      = 0.5
 	maxProxyCPU      = 4.0
+	promCPU          = 0.25
+	cadvisorCPU      = 0.25
+	exporterCPU      = 0.1
 	requestTimeout   = 10 * time.Second
 	maxVUsCap        = 4000
 	minMemoryApp     = 32 << 20
@@ -186,6 +241,8 @@ const (
 	defaultRedisImg  = "redis:%s"
 	pinnedPG17       = "postgres:17.11"
 	pinnedRedis8     = "redis:8.2"
+	pinnedHAProxy    = "haproxy:3.2.26"
+	redisMemoryShare = 0.75
 	loadGeneratorKey = "load"
 )
 
@@ -198,7 +255,7 @@ func Build(d *design.Design, opt Options) (*Plan, error) {
 	if scale <= 0 {
 		return nil, fmt.Errorf("scale must be greater than 0")
 	}
-	p := &Plan{RunID: opt.RunID, Name: d.Name, Scale: scale, Seed: opt.Seed, Duration: d.TotalDuration()}
+	p := &Plan{RunID: opt.RunID, Name: d.Name, Scale: scale, Seed: opt.Seed, Duration: d.TotalDuration(), ReuseData: opt.ReuseData}
 	p.Infra.SyntheticImg = opt.SyntheticImage
 	if p.Infra.SyntheticImg == "" {
 		p.Infra.SyntheticImg = design.SyntheticImage + ":dev"
@@ -224,11 +281,13 @@ func Build(d *design.Design, opt Options) (*Plan, error) {
 			p.syntheticConfigs(d, name, s, byName)
 		}
 	}
+	p.lbs(d, byName)
 	p.workload(d, byName, scale)
 	if err := p.faults(d, byName); err != nil {
 		return nil, err
 	}
-	p.infra()
+	p.infra(d)
+	p.assume(d)
 	return p, nil
 }
 
@@ -278,6 +337,16 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 			s.Image = pinnedRedis8
 		}
 		s.Containers = []string{name}
+	case ds.Kind == "lb":
+		s.Kind, s.Port, minMem = "lb", AppPort, minMemoryApp
+		s.Image = pinnedHAProxy
+		s.Containers = []string{name}
+		hc := ds.HealthCheck
+		s.LB = &LB{
+			Target: ds.Target, Algorithm: ds.Algorithm, CheckPath: hc.Path,
+			IntervalMs: *hc.IntervalMs, TimeoutMs: *hc.TimeoutMs, Fall: *hc.Fall, Rise: *hc.Rise,
+			StatsListen: LBStatsPort, Servers: []LBServer{},
+		}
 	default:
 		return nil, fmt.Errorf("%s: %s isn't supported by local runs yet", name, ds.Kind)
 	}
@@ -302,7 +371,34 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 			s.Config[k] = v
 		}
 	}
+	if s.Kind == "redis" {
+		p.redisMemory(name, s)
+	}
 	return s, nil
+}
+
+// redisMemory caps Redis below its container limit and evicts least
+// recently used keys, unless the design sets either: stock Redis has no
+// cap and would be OOM-killed when the cache outgrows its container.
+func (p *Plan) redisMemory(name string, s *Service) {
+	if s.Config == nil {
+		s.Config = map[string]string{}
+	}
+	if _, set := s.Config["maxmemory"]; !set {
+		capBytes := int64(float64(s.Memory)*redisMemoryShare) >> 10 << 10
+		s.Config["maxmemory"] = strconv.FormatInt(capBytes>>10, 10) + "kb"
+		p.Assumptions = append(p.Assumptions, Assumption{
+			Field: "services." + name + ".config.maxmemory", Value: sizeStr(capBytes),
+			Why: fmt.Sprintf("75%% of the container's %s memory limit, as managed Redis usually does; the rest is for fragmentation and client buffers. Set maxmemory: 0 for stock Redis (no cap)", sizeStr(s.Memory)),
+		})
+	}
+	if _, set := s.Config["maxmemory-policy"]; !set {
+		s.Config["maxmemory-policy"] = "allkeys-lru"
+		p.Assumptions = append(p.Assumptions, Assumption{
+			Field: "services." + name + ".config.maxmemory-policy", Value: "allkeys-lru",
+			Why: "evict the least recently used keys when the cache is full, as managed Redis usually does",
+		})
+	}
 }
 
 // memorySetting lists native config keys that size memory and so scale.
@@ -324,6 +420,13 @@ func (p *Plan) proxies(d *design.Design, byName map[string]*Service) {
 	}
 	for _, name := range d.ServiceNames() {
 		ds := d.Services[name]
+		if ds.Kind == "lb" {
+			t := byName[ds.Target]
+			for _, c := range t.Containers {
+				add(name, ds.Target, c, t.Port)
+			}
+			continue
+		}
 		if ds.Behavior == nil {
 			continue
 		}
@@ -372,6 +475,21 @@ func (p *Plan) proxiesInto(from, to string) []*Proxy {
 	return out
 }
 
+// lbs points each load balancer at the proxies in front of its target's
+// replicas.
+func (p *Plan) lbs(d *design.Design, byName map[string]*Service) {
+	for _, name := range d.ServiceNames() {
+		s := byName[name]
+		if s.LB == nil {
+			continue
+		}
+		for _, x := range p.proxiesInto(name, s.LB.Target) {
+			s.LB.Servers = append(s.LB.Servers, LBServer{Name: strings.SplitN(x.Upstream, ":", 2)[0], Addr: x.Addr()})
+		}
+		s.LB.ServerPort = byName[s.LB.Target].Port
+	}
+}
+
 func (p *Plan) syntheticConfigs(d *design.Design, name string, s *Service, byName map[string]*Service) {
 	ds := d.Services[name]
 	b := ds.Behavior
@@ -384,7 +502,7 @@ func (p *Plan) syntheticConfigs(d *design.Design, name string, s *Service, byNam
 		}
 		st := synthetic.Target{Addrs: addrs, Pool: ds.Pools[target]}
 		switch t.Kind {
-		case "app":
+		case "app", "lb":
 			st.Kind = synthetic.KindHTTP
 		case "postgres":
 			st.Kind = synthetic.KindPostgres
@@ -571,7 +689,7 @@ func (p *Plan) faults(d *design.Design, byName map[string]*Service) error {
 	return nil
 }
 
-func (p *Plan) infra() {
+func (p *Plan) infra(d *design.Design) {
 	in := &p.Infra
 	peak := p.Workload.PeakRate
 	in.LoadCPU = clampHalf(peak/k6RatePerCPU, minLoadCPU, maxLoadCPU)
@@ -580,39 +698,95 @@ func (p *Plan) infra() {
 		in.LoadMemory = 2 << 30
 	}
 
-	// Proxied calls per request, from the design, times the peak rate.
-	var perRequest float64
-	for _, s := range p.Services {
-		if s.Kind != "app" || len(s.Synthetic) == 0 {
-			continue
-		}
-		perRequest += callsPerRequest(s.Synthetic[0].Calls, p.Workload.ReadShare)
-	}
-	in.ExpectedOps = peak * perRequest
+	in.ExpectedOps = p.proxiedOps(d, peak)
 	in.ProxyCPU = clampHalf(in.ExpectedOps/proxyOpsPerCPU, minProxyCPU, maxProxyCPU)
-	in.ProxyMemory = 256 << 20
-	in.PromCPU, in.PromMemory = 1, 1<<30
-	in.CAdvisorCPU, in.CAdvisorMem = 0.5, 256<<20
-	in.ExporterCPU, in.ExporterMem = 0.25, 128<<20
+	in.ProxyMemory = proxyMemory
+	in.PromCPU, in.PromMemory = promCPU, 1<<30
+	in.CAdvisorCPU, in.CAdvisorMem = cadvisorCPU, 256<<20
+	in.ExporterCPU, in.ExporterMem = exporterCPU, 128<<20
 	p.note("Loadlore's own containers get fixed budgets: load generator %s CPU (peak %s rps), Toxiproxy %s CPU (about %s proxied calls/s at peak), Prometheus %s, cAdvisor %s, exporters %s each",
 		fmtF(in.LoadCPU), fmtF(math.Round(peak)), fmtF(in.ProxyCPU), fmtF(math.Round(in.ExpectedOps)), fmtF(in.PromCPU), fmtF(in.CAdvisorCPU), fmtF(in.ExporterCPU))
 }
 
-// callsPerRequest is the expected number of sync and async calls one request
-// makes, counting on_miss calls as if every get missed (an upper bound).
-func callsPerRequest(calls []synthetic.Call, readShare float64) float64 {
-	var n float64
-	for _, c := range calls {
-		share := 1.0
-		switch c.When {
-		case "read":
-			share = readShare
-		case "write":
-			share = 1 - readShare
-		}
-		n += share * float64(c.Count) * (1 + callsPerRequest(c.OnMiss, readShare))
+// proxiedOps estimates the proxied calls per second at a given entry rate,
+// following the call graph: each lb forwards what reaches it, and each
+// synthetic service makes its calls for every request that reaches it.
+// on_miss calls count as if every get missed, so it is an upper bound.
+func (p *Plan) proxiedOps(d *design.Design, rate float64) float64 {
+	readShare := p.Workload.ReadShare
+	var ops float64
+	if len(p.proxiesInto(loadGeneratorKey, d.Workload.Entry)) > 0 {
+		ops += rate
 	}
-	return n
+	var visit func(name string, r float64)
+	visit = func(name string, r float64) {
+		ds := d.Services[name]
+		switch {
+		case ds.Kind == "lb":
+			ops += r
+			visit(ds.Target, r)
+		case ds.IsSynthetic() && ds.Behavior != nil:
+			var walk func(calls []*design.Call, r float64)
+			walk = func(calls []*design.Call, r float64) {
+				for _, c := range calls {
+					share := 1.0
+					switch c.When {
+					case "read":
+						share = readShare
+					case "write":
+						share = 1 - readShare
+					}
+					n := r * share * float64(*c.Count)
+					ops += n
+					if t := d.Services[c.Target]; t.IsApp() || t.Kind == "lb" {
+						visit(c.Target, n)
+					}
+					walk(c.OnMiss, n)
+				}
+			}
+			walk(ds.Behavior.Calls, r)
+		}
+	}
+	visit(d.Workload.Entry, rate)
+	return ops
+}
+
+// assume records the values Loadlore chose for the run that the design
+// didn't state and that results depend on.
+func (p *Plan) assume(d *design.Design) {
+	p.Assumptions = append(p.Assumptions, Assumption{
+		Field: "load generator timeout", Value: requestTimeout.String(),
+		Why: "k6 gives up on a request after this long and counts it as failed",
+	})
+	for _, name := range d.ServiceNames() {
+		if s := d.Services[name]; s.Kind == "lb" {
+			p.Assumptions = append(p.Assumptions, Assumption{
+				Field: "services." + name + " timeouts", Value: "connect 5s, server 60s",
+				Why: "HAProxy's own timeouts, with its defaults otherwise. A request already sent to a replica that dies waits for the server timeout (or the load generator's); health checks only stop new requests going there",
+			})
+		}
+	}
+	for _, name := range d.ServiceNames() {
+		s := d.Services[name]
+		if !s.IsApp() || *s.Replicas < 2 {
+			continue
+		}
+		direct := d.Workload.Entry == name
+		for _, o := range d.Services {
+			if o.Behavior != nil && slices.Contains(callTargets(o.Behavior.Calls), name) {
+				direct = true
+			}
+		}
+		if direct {
+			p.Assumptions = append(p.Assumptions, Assumption{
+				Field: "services." + name + ".replicas", Value: strconv.Itoa(*s.Replicas),
+				Why: "traffic reaches it without an lb: callers spread requests across the replicas themselves (round-robin), with no health checks",
+			})
+		}
+	}
+	if p.Assumptions == nil {
+		p.Assumptions = []Assumption{}
+	}
 }
 
 // clampHalf rounds up to the next half core and clamps.
@@ -629,7 +803,7 @@ func (p *Plan) TotalCPU() float64 {
 			t += p.Infra.ExporterCPU
 		}
 	}
-	return t
+	return math.Round(t*100) / 100
 }
 
 // TotalMemory sums every container's memory limit.

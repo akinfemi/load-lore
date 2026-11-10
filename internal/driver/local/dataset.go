@@ -15,14 +15,23 @@ import (
 // old caches aren't reused.
 const seedVersion = "1"
 
-const seededMarker = ".loadlore-seeded"
+const (
+	seededMarker = ".loadlore-seeded"
+	runsLog      = ".loadlore-runs" // runs that used a reused volume, one id per line
+)
 
 // cacheVolume names the volume that caches a seeded dataset. The name is a
 // hash of everything that changes the data on disk.
-func cacheVolume(s *plan.Service) string {
+func cacheVolume(s *plan.Service) string { return "loadlore-cache-pg-" + datasetHash(s) }
+
+// reuseVolume names the scratch copy that --reuse-data runs share. It is
+// separate from the cache, so fresh runs keep copying pristine data.
+func reuseVolume(s *plan.Service) string { return "loadlore-reuse-pg-" + datasetHash(s) }
+
+func datasetHash(s *plan.Service) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s|%s|%d|%d|%s|%s", seedVersion, s.Image, s.Dataset.Rows, s.Dataset.RowBytes, strings.Join(s.Dataset.Indexes, ","), strings.Join(s.Dataset.SeedSQL(), ";"))
-	return "loadlore-cache-pg-" + hex.EncodeToString(h.Sum(nil))[:16]
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // prepareData makes a fresh writable data volume for a postgres service:
@@ -46,6 +55,9 @@ func (d *Driver) prepareData(ctx context.Context, s *plan.Service, progress func
 		d.event("seed_cache_hit", map[string]any{"service": s.Name, "volume": cache})
 	}
 
+	if d.plan.ReuseData {
+		return d.reuseData(ctx, s, cache, progress)
+	}
 	run := fmt.Sprintf("loadlore-%s-%s-data", d.runID, s.Name)
 	progress(fmt.Sprintf("copying %s's cached data into a fresh volume", s.Name))
 	start := time.Now()
@@ -58,6 +70,36 @@ func (d *Driver) prepareData(ctx context.Context, s *plan.Service, progress func
 	}
 	d.event("data_copy", map[string]any{"service": s.Name, "volume": run, "seconds": time.Since(start).Seconds()})
 	return run, nil
+}
+
+// reuseData returns the shared scratch volume for --reuse-data, copying the
+// cache into it the first time. It records which earlier runs wrote to it,
+// so the report can say how far the data has drifted.
+func (d *Driver) reuseData(ctx context.Context, s *plan.Service, cache string, progress func(string)) (string, error) {
+	vol := reuseVolume(s)
+	ok, err := d.volumeHasMarker(ctx, vol)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		progress(fmt.Sprintf("making %s's reusable copy of the cached data (--reuse-data; later runs skip this)", s.Name))
+		if _, err := d.docker(ctx, "volume", "create", "--label", LabelOwner+"=1", "--label", LabelCache+"=reuse", vol); err != nil {
+			return "", err
+		}
+		if _, err := d.docker(ctx, "run", "--rm", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID, "-v", cache+":/from:ro", "-v", vol+":/to", ImageAlpine,
+			"sh", "-c", "cp -a /from/. /to/ && rm -f /to/"+runsLog); err != nil {
+			return "", err
+		}
+	}
+	out, err := d.docker(ctx, "run", "--rm", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID, "-v", vol+":/d", ImageAlpine,
+		"sh", "-c", fmt.Sprintf("cat /d/%s 2>/dev/null; echo %s >> /d/%s", runsLog, d.runID, runsLog))
+	if err != nil {
+		return "", err
+	}
+	earlier := strings.Fields(string(out))
+	progress(fmt.Sprintf("reusing %s's data (--reuse-data): %d earlier run(s) wrote to it", s.Name, len(earlier)))
+	d.event("data_reuse", map[string]any{"service": s.Name, "volume": vol, "earlier_runs": earlier})
+	return vol, nil
 }
 
 func (d *Driver) volumeHasMarker(ctx context.Context, vol string) (bool, error) {

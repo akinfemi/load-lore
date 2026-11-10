@@ -5,8 +5,7 @@ import exec from 'k6/execution';
 
 const P = {
   "urls": [
-    "http://api-0:8080",
-    "http://api-1:8080"
+    "http://lb:8080"
   ],
   "startRate": 50,
   "stages": [

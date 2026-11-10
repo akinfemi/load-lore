@@ -24,6 +24,7 @@ You turn what the user says into Loadlore files. The user decides the architectu
 1. Identify the components and how requests flow between them. Map each application service to `loadlore/synthetic` (see `references/synthetic-service.md`) and each datastore to its `kind`.
 2. Fill required fields. For anything the user didn't say, use the defaults in `references/schema.md` and add an assumption entry.
 3. Ask at most two questions, and only about things that would change the result a lot: usually the read/write mix and the peak load. Everything else gets a default.
+   - **Exception: several replicas.** When the user describes more than one replica of a service and doesn't say how traffic reaches them, ask how it is spread, for example: "Is there a load balancer in front of the API instances (with health checks), or do clients spread requests themselves?" If there is one, add a `kind: lb` service with `target` set to that service and point callers or the workload `entry` at it; record its `algorithm` and `health_check` settings as assumptions unless the user gave them. Never add an `lb` silently: without one, `loadl validate` warns `no-lb` and the report says requests were spread client-side, which is a valid design to test.
 4. Write `design.yaml`, run the validate loop (below), then present it (see "Showing the result").
 
 ### B. Model an existing codebase
@@ -83,8 +84,9 @@ Then offer the command to run it: `loadl run design.yaml` (local mode).
 | `loadl diagram <file> [--ascii]` | Showing the design |
 | `loadl scenarios --json` | Finding a library scenario to start from |
 | `loadl scenario check <folder>` | Checking a new scenario |
-| `loadl run <file> [--mode local]` | Running, when the user asks |
-| `loadl report <run-id> --json` | Explaining a run |
+| `loadl run <file> [--mode local]` | Running, when the user asks. `--scale` shrinks it for small hosts; `--seed` makes the workload repeatable; `--reuse-data` skips the fresh dataset copy (the report then says the data drifted) |
+| `loadl report <run-id> --json` | Explaining a run: verdict, diagnoses with evidence, scored predictions, per-window numbers. `latest` names the newest run |
+| `loadl compare <run-a> <run-b>` | Before and after a design change, side by side |
 | `loadl profile <service>` | Measuring a real service to replace guessed numbers |
 
 ## References

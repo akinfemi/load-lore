@@ -37,13 +37,40 @@ func TestE2ESmoke(t *testing.T) {
 		t.Errorf("no requests recorded: %+v", res.Load)
 	}
 
+	// The report was written from the folder, with real numbers in it.
+	for _, name := range []string{"report.md", "analysis.json", "metrics/haproxy_backend_active_servers.json"} {
+		if _, err := os.Stat(filepath.Join(res.Dir, name)); err != nil {
+			t.Errorf("missing %s", name)
+		}
+	}
+	if res.Verdict == "" || res.Verdict == "no_data" {
+		t.Errorf("verdict %q: %s", res.Verdict, res.VerdictSummary)
+	}
+	var an struct {
+		Windows []struct {
+			RPS *float64 `json:"rps"`
+		} `json:"windows"`
+		Expect []struct {
+			Status string `json:"status"`
+		} `json:"expect"`
+	}
+	b, _ := os.ReadFile(filepath.Join(res.Dir, "analysis.json"))
+	if err := json.Unmarshal(b, &an); err != nil || len(an.Windows) != 6 || an.Windows[2].RPS == nil {
+		t.Errorf("analysis: %v, %d windows", err, len(an.Windows))
+	}
+	for i, e := range an.Expect {
+		if e.Status != "held" && e.Status != "broken" {
+			t.Errorf("expect[%d] not scored: %s", i, e.Status)
+		}
+	}
+
 	// The killed replica shows in container state.
 	var states []struct {
 		Name     string `json:"name"`
 		Service  string `json:"service"`
 		ExitCode int    `json:"exit_code"`
 	}
-	b, _ := os.ReadFile(filepath.Join(res.Dir, "containers.json"))
+	b, _ = os.ReadFile(filepath.Join(res.Dir, "containers.json"))
 	if err := json.Unmarshal(b, &states); err != nil {
 		t.Fatal(err)
 	}

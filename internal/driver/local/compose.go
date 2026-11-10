@@ -177,6 +177,26 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 	}
 
 	for _, s := range p.Services {
+		if s.Kind != "lb" {
+			continue
+		}
+		c := base(s.Image, s.Name, "lb", -1, s.CPU, s.Memory)
+		c.PullPolicy = "missing"
+		cfgName := "haproxy-" + s.Name
+		cf.Configs[cfgName] = &composeConfig{Content: haproxyConfig(s.LB)}
+		c.Configs = []composeConfigRef{{Source: cfgName, Target: "/usr/local/etc/haproxy/haproxy.cfg"}}
+		// The image has no HTTP client; bash can open a TCP connection.
+		c.Healthcheck = &composeHealth{Test: []string{"CMD", "bash", "-c", fmt.Sprintf("exec 3<>/dev/tcp/127.0.0.1/%d", plan.LBStatsPort)}, Interval: "1s", Timeout: "3s", Retries: 60}
+		// The replicas start first so the lb's first checks find them up.
+		deps := map[string]composeDepend{svcToxiproxy: {Condition: "service_started"}}
+		for _, srv := range s.LB.Servers {
+			deps[srv.Name] = composeDepend{Condition: "service_healthy"}
+		}
+		c.DependsOn = deps
+		cf.Services[s.Name] = c
+	}
+
+	for _, s := range p.Services {
 		if s.Kind != "app" {
 			continue
 		}
@@ -203,6 +223,7 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 	// Toxiproxy: one listener per proxied connection.
 	tox := base(ImageToxiproxy, svcToxiproxy, "infra", -1, p.Infra.ProxyCPU, p.Infra.ProxyMemory)
 	tox.Command = []string{"-host=0.0.0.0", "-config=/config/toxiproxy.json", "-proxy-metrics", "-runtime-metrics"}
+	tox.Environment = map[string]string{"GOMEMLIMIT": goMemLimit(p.Infra.ProxyMemory)}
 	toxCfg, err := toxiproxyConfig(p)
 	if err != nil {
 		return nil, err
@@ -244,6 +265,7 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 		"K6_PROMETHEUS_RW_SERVER_URL":                fmt.Sprintf("http://%s:%d/api/v1/write", svcPrometheus, promPort),
 		"K6_PROMETHEUS_RW_PUSH_INTERVAL":             "1s",
 		"K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM": "true",
+		"GOMEMLIMIT": goMemLimit(p.Infra.LoadMemory),
 	}
 	cf.Configs["k6"] = &composeConfig{Content: string(in.K6Script)}
 	k6.Configs = []composeConfigRef{{Source: "k6", Target: k6ScriptPath}}
@@ -261,6 +283,44 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 		return nil, err
 	}
 	return []byte(b.String()), nil
+}
+
+// lbAlgorithms maps design algorithm names to HAProxy balance modes.
+var lbAlgorithms = map[string]string{"round-robin": "roundrobin", "least-conn": "leastconn", "random": "random"}
+
+// haproxyConfig is an lb's HAProxy configuration: HTTP mode, active health
+// checks on every replica, and the built-in Prometheus exporter. Everything
+// else is HAProxy's own default.
+func haproxyConfig(lb *plan.LB) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `global
+    maxconn 50000
+
+defaults
+    mode http
+    timeout connect 5s
+    timeout client 60s
+    timeout server 60s
+    timeout http-keep-alive 60s
+    timeout check %dms
+
+frontend web
+    bind :%d
+    default_backend replicas
+
+frontend stats
+    bind :%d
+    http-request use-service prometheus-exporter if { path /metrics }
+
+backend replicas
+    balance %s
+    option httpchk GET %s
+    default-server check inter %dms fall %d rise %d
+`, lb.TimeoutMs, plan.AppPort, lb.StatsListen, lbAlgorithms[lb.Algorithm], lb.CheckPath, lb.IntervalMs, lb.Fall, lb.Rise)
+	for _, srv := range lb.Servers {
+		fmt.Fprintf(&b, "    server %s %s\n", srv.Name, srv.Addr)
+	}
+	return b.String()
 }
 
 // pgDataPath is where the postgres image keeps its data. From 18 the image
@@ -290,9 +350,11 @@ func toxiproxyConfig(p *plan.Plan) ([]byte, error) {
 // prometheusConfig scrapes every container of the run once a second. The
 // cAdvisor job keeps only this run's containers.
 func prometheusConfig(p *plan.Plan) string {
-	var app, pg, rd []string
+	var app, pg, rd, lbs []string
 	for _, s := range p.Services {
 		switch s.Kind {
+		case "lb":
+			lbs = append(lbs, s.Name)
 		case "app":
 			if len(s.Synthetic) == 0 {
 				continue
@@ -320,6 +382,9 @@ func prometheusConfig(p *plan.Plan) string {
 	for _, name := range rd {
 		job("redis-"+name, []string{fmt.Sprintf("lore-redisexp-%s:9121", name)}, fmt.Sprintf("        labels: {service: %q}\n", name))
 	}
+	for _, name := range lbs {
+		job("lb-"+name, []string{fmt.Sprintf("%s:%d", name, plan.LBStatsPort)}, fmt.Sprintf("        labels: {service: %q}\n", name))
+	}
 	job("toxiproxy", []string{fmt.Sprintf("%s:%d", svcToxiproxy, toxiproxyAPI)}, "")
 	job("cadvisor", []string{svcCAdvisor + ":8080"}, fmt.Sprintf(`    metric_relabel_configs:
       - source_labels: [container_label_io_loadlore_run]
@@ -344,6 +409,10 @@ func quoteJoin(xs []string) string {
 	}
 	return strings.Join(q, ", ")
 }
+
+// goMemLimit makes a Go tool's garbage collector work harder as it nears
+// its container's memory limit, instead of being OOM-killed at it.
+func goMemLimit(limit int64) string { return strconv.FormatInt(limit*9/10>>20, 10) + "MiB" }
 
 func memStr(b int64) string { return strconv.FormatInt(b>>20, 10) + "m" }
 

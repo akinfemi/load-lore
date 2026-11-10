@@ -25,8 +25,11 @@ services:
   db:
     kind: postgres
     dataset: { rows: 1000 }
+  lb:
+    kind: lb
+    target: api
 workload:
-  entry: api
+  entry: lb
   profile:
     - hold: { rps: 10, for: 1m }
 `
@@ -169,8 +172,28 @@ func TestValidationDiagnostics(t *testing.T) {
 		{"count zero", map[string]string{"services.api.behavior.calls[0]": "{target: db, op: read, count: 0}"}, []string{"error services.api.behavior.calls[0].count range"}},
 		{"http loop", map[string]string{
 			"services.api.behavior.calls[1]": "{target: b, op: http}",
-			"services.b":                     "{image: loadlore/synthetic, behavior: {calls: [{target: api, op: http}]}}",
+			"services.b":                     "{image: loadlore/synthetic, behavior: {calls: [{target: lb, op: http}]}}",
 		}, []string{"error services.b.behavior.calls[0].target cycle"}},
+
+		// Load balancers.
+		{"lb without target", map[string]string{"services.lb.target": del}, []string{"error services.lb.target required"}},
+		{"lb unknown target", map[string]string{"services.lb.target": "apu"}, []string{"error services.lb.target unknown-service"}},
+		{"lb in front of a datastore", map[string]string{"services.lb.target": "db"}, []string{"error services.lb.target op-target"}},
+		{"lb replicas", map[string]string{"services.lb.replicas": "2"}, []string{"error services.lb.replicas range"}},
+		{"lb config", map[string]string{"services.lb.config": "{maxconn: 10}"}, []string{"error services.lb.config not-applicable"}},
+		{"lb algorithm", map[string]string{"services.lb.algorithm": "fastest"}, []string{"error services.lb.algorithm invalid-value"}},
+		{"lb check interval", map[string]string{"services.lb.health_check": "{interval_ms: 10}"}, []string{"error services.lb.health_check.interval_ms range"}},
+		{"lb check path", map[string]string{"services.lb.health_check": "{path: healthz}"}, []string{"error services.lb.health_check.path invalid-value"}},
+		{"algorithm on an app", map[string]string{"services.api.algorithm": "least-conn"}, []string{"error services.api.algorithm not-applicable"}},
+		{"health check on postgres", map[string]string{"services.db.health_check": "{fall: 2}"}, []string{"error services.db.health_check not-applicable"}},
+		{"op on an lb", map[string]string{
+			"services.b": "{image: loadlore/synthetic, behavior: {calls: [{target: lb, op: read}]}}",
+		}, []string{"error services.b.behavior.calls[0].op op-target"}},
+		{"entry without lb", map[string]string{"workload.entry": "api"}, []string{"warning workload.entry no-lb"}},
+		{"entry with one replica", map[string]string{"workload.entry": "api", "services.api.replicas": "1"}, []string{}},
+		{"call without lb", map[string]string{
+			"services.b": "{image: loadlore/synthetic, behavior: {calls: [{target: api, op: http}]}}",
+		}, []string{"warning services.b.behavior.calls[0].target no-lb"}},
 		{"base_ms with no backoff", map[string]string{"services.api.behavior.resilience": "{retries: {max: 2, base_ms: 10}}"}, []string{"error services.api.behavior.resilience.retries.base_ms not-applicable"}},
 		{"retries need max", map[string]string{"services.api.behavior.resilience": "{retries: {backoff: exponential}}"}, []string{"error services.api.behavior.resilience.retries.max required"}},
 		{"breaker error rate range", map[string]string{"services.api.behavior.resilience": "{circuit_breaker: {error_rate: 2, window_s: 1, open_s: 1}}"}, []string{"error services.api.behavior.resilience.circuit_breaker.error_rate range"}},
@@ -339,7 +362,7 @@ func TestDefaults(t *testing.T) {
 	if diags.HasErrors() {
 		t.Fatal(diags)
 	}
-	api, db, cache, pgb := d.Services["api"], d.Services["db"], d.Services["cache"], d.Services["pgb"]
+	api, db, cache, pgb, lb := d.Services["api"], d.Services["db"], d.Services["cache"], d.Services["pgb"], d.Services["lb"]
 	checks := []struct {
 		name      string
 		got, want any
@@ -364,6 +387,9 @@ func TestDefaults(t *testing.T) {
 		{"redis version", cache.Version, "8"},
 		{"pgbouncer mode", pgb.PoolMode, "transaction"},
 		{"pgbouncer pool", *pgb.DefaultPoolSize, DefaultPgbPoolSize},
+		{"lb algorithm", lb.Algorithm, "round-robin"},
+		{"lb check", fmt.Sprintf("%s %d %d %d %d", lb.HealthCheck.Path, *lb.HealthCheck.IntervalMs, *lb.HealthCheck.TimeoutMs, *lb.HealthCheck.Fall, *lb.HealthCheck.Rise), "/healthz 2000 1000 3 2"},
+		{"lb resources", fmt.Sprintf("%v %s", *lb.Resources.CPU, lb.Resources.Memory), "0.5 256m"},
 		{"mix read", *d.Workload.Mix.Read, 0.75},
 		{"hotspot share", *d.Workload.Keys.Share, DefaultHotspotShare},
 		{"hotspot fraction", *d.Workload.Keys.Fraction, DefaultHotspotFraction},

@@ -27,6 +27,7 @@ const (
 	Rounded               // (label)
 	Stadium               // ([label])
 	Cylinder              // [(label)]
+	Hexagon               // {{label}}
 )
 
 // EdgeStyle of an edge.
@@ -176,6 +177,8 @@ func shapeDelims(s Shape) (string, string) {
 		return "([", "])"
 	case Cylinder:
 		return "[(", ")]"
+	case Hexagon:
+		return "{{", "}}"
 	}
 	return "[", "]"
 }

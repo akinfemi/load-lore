@@ -370,21 +370,23 @@ func (d *Driver) removeToxics(proxies []string, name string) func(context.Contex
 
 // --- Progress ---
 
-// Sample reads current numbers from Prometheus for the progress line.
+// Sample reads current numbers from Prometheus for the progress line. Served,
+// errors and p99 are end to end, from the load generator.
 func (d *Driver) Sample(ctx context.Context, elapsed time.Duration) (*driver.Sample, error) {
 	s := &driver.Sample{Offered: d.plan.Workload.OfferedRate(elapsed)}
 	if d.prom == nil {
 		return s, nil
 	}
-	sel := fmt.Sprintf(`service=%q`, d.plan.Workload.Entry)
-	if v, ok, err := d.prom.scalar(ctx, fmt.Sprintf(`sum(rate(loadlore_requests_total{%s}[10s]))`, sel)); err == nil && ok {
-		s.Served = &v
-		if e, ok, err := d.prom.scalar(ctx, fmt.Sprintf(`sum(rate(loadlore_requests_total{%s,code!="200"}[10s])) or vector(0)`, sel)); err == nil && ok && v > 0 {
-			share := e / v
-			s.Errors = &share
+	if v, ok, err := d.prom.scalar(ctx, `sum(rate(k6_http_reqs_total[10s]))`); err == nil && ok {
+		if good, ok, err := d.prom.scalar(ctx, `sum(rate(k6_http_reqs_total{expected_response="true"}[10s])) or vector(0)`); err == nil && ok {
+			s.Served = &good
+			if v > 0 {
+				share := max(0, (v-good)/v)
+				s.Errors = &share
+			}
 		}
 	}
-	if v, ok, err := d.prom.scalar(ctx, fmt.Sprintf(`histogram_quantile(0.99, sum by (le) (rate(loadlore_request_duration_seconds_bucket{%s}[10s]))) * 1000`, sel)); err == nil && ok && !math.IsNaN(v) {
+	if v, ok, err := d.prom.scalar(ctx, `histogram_quantile(0.99, sum(rate(k6_http_req_duration_seconds[10s]))) * 1000`); err == nil && ok && !math.IsNaN(v) {
 		s.P99Ms = &v
 	}
 	cpu, err := d.prom.vector(ctx, `sum by (service) (rate(container_cpu_usage_seconds_total{role=~"app|datastore"}[10s])) / sum by (service) (container_spec_cpu_quota{role=~"app|datastore"} / container_spec_cpu_period{role=~"app|datastore"})`, "service")
@@ -397,9 +399,10 @@ func (d *Driver) Sample(ctx context.Context, elapsed time.Duration) (*driver.Sam
 // --- Collect ---
 
 // Collect exports metrics, container state and logs into the run folder.
+// With zero times (the stack failed to start) it skips metrics.
 func (d *Driver) Collect(ctx context.Context, dir *rundir.Dir, from, to time.Time) error {
 	var errs []error
-	if d.prom != nil {
+	if d.prom != nil && !from.IsZero() {
 		n, err := d.prom.export(ctx, from.Add(-15*time.Second), to.Add(5*time.Second), func(name string, data []byte) error {
 			return dir.Write("metrics/"+name, data)
 		})

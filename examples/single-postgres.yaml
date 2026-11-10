@@ -2,10 +2,15 @@ version: 1
 name: single-postgres-breaking-point
 
 services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
   api:
     image: loadlore/synthetic
     replicas: 4
-    resources: { cpu: 1, memory: 512m }
+    resources: { cpu: 0.8, memory: 512m }   # 4 x 0.8 keeps the run within 8 vCPUs, tooling included
     behavior:
       cpu_ms: 0.5
       calls:
@@ -16,12 +21,12 @@ services:
   db:
     kind: postgres
     version: "17"
-    resources: { cpu: 1, memory: 1g }
+    resources: { cpu: 0.5, memory: 1g }   # starting point; tuned by measurement
     config: { max_connections: 100, shared_buffers: 256MB }
     dataset: { rows: 5000000, row_bytes: 512 }
 
 workload:
-  entry: api
+  entry: lb
   profile:
     - ramp: { from: 100, to: 5000, over: 5m }
     - hold: { rps: 5000, for: 2m }

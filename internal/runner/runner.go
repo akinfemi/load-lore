@@ -19,9 +19,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/akinfemi/load-lore/internal/analysis"
 	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/driver"
 	"github.com/akinfemi/load-lore/internal/plan"
+	"github.com/akinfemi/load-lore/internal/report"
 	"github.com/akinfemi/load-lore/internal/rundir"
 	"github.com/akinfemi/load-lore/internal/version"
 )
@@ -34,6 +36,7 @@ type Options struct {
 	Keep           bool
 	Timeout        time.Duration // 0 = setup allowance + workload + margin
 	SyntheticImage string
+	ReuseData      bool      // skip the fresh dataset copy
 	Root           string    // runs folder; default rundir.Root
 	Progress       io.Writer // plain progress lines
 }
@@ -55,6 +58,7 @@ type Result struct {
 	Error       string             `json:"error,omitempty"`
 	Scale       float64            `json:"scale"`
 	Seed        int64              `json:"seed"`
+	ReuseData   bool               `json:"reuse_data"`
 	Started     time.Time          `json:"started"`
 	LoadStarted *time.Time         `json:"load_started,omitempty"`
 	LoadEnded   *time.Time         `json:"load_ended,omitempty"`
@@ -65,6 +69,11 @@ type Result struct {
 	Load        *driver.LoadResult `json:"load,omitempty"`
 	Kept        bool               `json:"kept"`
 	Loadl       string             `json:"loadl_version"`
+
+	// From the report, once written: broke, held, inconclusive or no_data.
+	Verdict        string `json:"verdict,omitempty"`
+	VerdictSummary string `json:"verdict_summary,omitempty"`
+	Report         string `json:"report,omitempty"`
 }
 
 // setupAllowance covers seeding, copying data and starting the stack.
@@ -100,12 +109,12 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 		return nil, err
 	}
 	defer dir.Close()
-	res := &Result{RunID: id, Dir: dir.Path, Design: d.Name, Started: started.UTC(), Seed: opt.Seed, Loadl: version.Version, Warnings: []string{}}
+	res := &Result{RunID: id, Dir: dir.Path, Design: d.Name, Started: started.UTC(), Seed: opt.Seed, ReuseData: opt.ReuseData, Loadl: version.Version, Warnings: []string{}}
 	if err := dir.Write("design.yaml", raw); err != nil {
 		return nil, err
 	}
 
-	p, err := plan.Build(d, plan.Options{RunID: id, Scale: opt.Scale, Seed: opt.Seed, SyntheticImage: opt.SyntheticImage})
+	p, err := plan.Build(d, plan.Options{RunID: id, Scale: opt.Scale, Seed: opt.Seed, SyntheticImage: opt.SyntheticImage, ReuseData: opt.ReuseData})
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +194,21 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 	if err := dir.WriteJSON("run.json", res); err != nil {
 		return res, err
 	}
+	// The report reads run.json, then the verdict goes back into it.
+	if a, err := report.Write(dir.Path); err != nil {
+		res.Warnings = append(res.Warnings, "report: "+err.Error())
+		fmt.Fprintf(out, "  warning: report: %v\n", err)
+	} else {
+		res.Verdict, res.VerdictSummary, res.Report = string(a.Verdict.Kind), a.Verdict.Summary, dir.File(report.FileName)
+		fmt.Fprintf(out, "%s\n", a.Verdict.Summary)
+		for _, d := range a.Diagnoses {
+			fmt.Fprintf(out, "  diagnosis: %s, from %s\n", d.Title, analysis.Clock(d.From))
+		}
+		fmt.Fprintf(out, "report: %s\n", res.Report)
+	}
+	if err := dir.WriteJSON("run.json", res); err != nil {
+		return res, err
+	}
 	fmt.Fprintf(out, "%s: %s\n", res.Status, dir.Path)
 	if res.Status != StatusCompleted {
 		return res, fmt.Errorf("run %s: %s", res.Status, res.Error)
@@ -197,6 +221,10 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.Dir, res *Result, out io.Writer) error {
 	progress := func(s string) { fmt.Fprintf(out, "  %s\n", s) }
 	if err := drv.Up(ctx, p, dir, progress); err != nil {
+		// Keep the containers' logs and states: they say why.
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		_ = drv.Collect(cctx, dir, time.Time{}, time.Time{})
 		return fmt.Errorf("starting the stack: %w", err)
 	}
 
@@ -210,7 +238,7 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 		res.LoadStarted = &ts
 		_ = dir.Event("load_start", map[string]any{"peak_rate": p.Workload.PeakRate, "duration": p.Duration.String()})
 		wg.Go(func() { timeline(loadCtx, t, p.Faults, drv, dir, out) })
-		wg.Go(func() { report(loadCtx, t, drv, out) })
+		wg.Go(func() { progressLines(loadCtx, t, drv, out) })
 	})
 	stopLoad()
 	wg.Wait()
@@ -225,9 +253,6 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 		fields = map[string]any{"requests": lr.Requests, "dropped_iterations": lr.DroppedIterations, "failed_share": lr.FailedShare, "exit_code": lr.ExitCode}
 	}
 	_ = dir.Event("load_end", fields)
-	if lr != nil && lr.DroppedIterations > 0 {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("the load generator dropped %.0f arrivals (k6 dropped_iterations): it couldn't start requests as fast as the profile asked, so offered load was below the profile", lr.DroppedIterations))
-	}
 
 	// Collect even when the load failed: whatever was measured is evidence.
 	// Wait for the last scrapes first.
@@ -265,7 +290,7 @@ func timeline(ctx context.Context, t0 time.Time, faults []*plan.Fault, drv drive
 				_ = dir.Event("fault_error", map[string]any{"index": f.Index, "inject": f.Inject, "target": f.Target, "error": err.Error()})
 				fmt.Fprintf(out, "[%s] fault failed: %s: %v\n", clock(time.Since(t0)), desc, err)
 			} else {
-				_ = dir.Event("fault_start", map[string]any{"index": f.Index, "inject": f.Inject, "target": f.Target})
+				_ = dir.Event("fault_start", map[string]any{"index": f.Index, "inject": f.Inject, "target": f.Target, "detail": desc})
 				fmt.Fprintf(out, "[%s] fault: %s\n", clock(time.Since(t0)), desc)
 			}
 			if undo == nil {
@@ -282,7 +307,7 @@ func timeline(ctx context.Context, t0 time.Time, faults []*plan.Fault, drv drive
 				_ = dir.Event("fault_end_error", map[string]any{"index": f.Index, "error": err.Error()})
 				return
 			}
-			_ = dir.Event("fault_end", map[string]any{"index": f.Index, "inject": f.Inject, "target": f.Target})
+			_ = dir.Event("fault_end", map[string]any{"index": f.Index, "inject": f.Inject, "target": f.Target, "detail": desc})
 			if ctx.Err() == nil {
 				fmt.Fprintf(out, "[%s] fault ended: %s\n", clock(time.Since(t0)), desc)
 			}
@@ -308,9 +333,9 @@ func describeFault(f *plan.Fault) string {
 	return s
 }
 
-// report prints a progress line every 10 seconds. Every number comes from
+// progressLines prints a progress line every 10 seconds. Every number comes from
 // the run's Prometheus, except offered load, which is the profile.
-func report(ctx context.Context, t0 time.Time, drv driver.Driver, out io.Writer) {
+func progressLines(ctx context.Context, t0 time.Time, drv driver.Driver, out io.Writer) {
 	tick := time.NewTicker(10 * time.Second)
 	defer tick.Stop()
 	for {

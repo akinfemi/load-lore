@@ -20,9 +20,9 @@ type Design struct {
 type Service struct {
 	// Common.
 	Image     string     `yaml:"image,omitempty" json:"image,omitempty" jsonschema_description:"Container image for an application service: loadlore/synthetic or your own. Mutually exclusive with kind."`
-	Kind      string     `yaml:"kind,omitempty" json:"kind,omitempty" jsonschema:"enum=postgres,enum=redis,enum=pgbouncer" jsonschema_description:"Built-in component. Mutually exclusive with image."`
-	Replicas  *int       `yaml:"replicas,omitempty" json:"replicas,omitempty" jsonschema:"minimum=1,default=1" jsonschema_description:"Number of replicas. Datastores and pgbouncer run exactly one."`
-	Resources *Resources `yaml:"resources,omitempty" json:"resources,omitempty"`
+	Kind      string     `yaml:"kind,omitempty" json:"kind,omitempty" jsonschema:"enum=postgres,enum=redis,enum=pgbouncer,enum=lb" jsonschema_description:"Built-in component. Mutually exclusive with image."`
+	Replicas  *int       `yaml:"replicas,omitempty" json:"replicas,omitempty" jsonschema:"minimum=1,default=1" jsonschema_description:"Number of replicas. Datastores, pgbouncer and lb run exactly one."`
+	Resources *Resources `yaml:"resources,omitempty" json:"resources,omitempty" jsonschema_description:"Default 1 CPU and 512m; lb defaults to 0.5 CPU and 256m."`
 
 	// Application services.
 	Role        string         `yaml:"role,omitempty" json:"role,omitempty" jsonschema:"enum=server,default=server" jsonschema_description:"server handles HTTP requests."`
@@ -35,10 +35,27 @@ type Service struct {
 	Config  map[string]ConfigValue `yaml:"config,omitempty" json:"config,omitempty" jsonschema_description:"Native config keys: postgresql.conf for postgres, redis.conf for redis, pgbouncer.ini for pgbouncer."`
 	Dataset *Dataset               `yaml:"dataset,omitempty" json:"dataset,omitempty" jsonschema_description:"Rows seeded before the run. postgres only."`
 
+	// pgbouncer and lb.
+	Target string `yaml:"target,omitempty" json:"target,omitempty" jsonschema_description:"pgbouncer: the postgres service it pools connections to. lb: the application service whose replicas it spreads traffic across."`
+
 	// pgbouncer.
-	Target          string `yaml:"target,omitempty" json:"target,omitempty" jsonschema_description:"The postgres service this pgbouncer pools connections to."`
 	PoolMode        string `yaml:"pool_mode,omitempty" json:"pool_mode,omitempty" jsonschema:"enum=session,enum=transaction,enum=statement,default=transaction"`
 	DefaultPoolSize *int   `yaml:"default_pool_size,omitempty" json:"default_pool_size,omitempty" jsonschema:"minimum=1,default=20" jsonschema_description:"Server connections per database and user pair."`
+
+	// lb.
+	Algorithm   string       `yaml:"algorithm,omitempty" json:"algorithm,omitempty" jsonschema:"enum=round-robin,enum=least-conn,enum=random,default=round-robin" jsonschema_description:"How the lb picks a healthy replica for each request."`
+	HealthCheck *HealthCheck `yaml:"health_check,omitempty" json:"health_check,omitempty" jsonschema_description:"Active health checks the lb runs against each replica."`
+}
+
+// HealthCheck is an lb's active check of each replica: an HTTP GET every
+// interval. A replica is taken out after fall failures in a row and put
+// back after rise successes in a row.
+type HealthCheck struct {
+	Path       string `yaml:"path,omitempty" json:"path,omitempty" jsonschema:"pattern=^/,default=/healthz" jsonschema_description:"HTTP path checked on each replica."`
+	IntervalMs *int   `yaml:"interval_ms,omitempty" json:"interval_ms,omitempty" jsonschema:"minimum=100,default=2000" jsonschema_description:"Time between checks of one replica."`
+	TimeoutMs  *int   `yaml:"timeout_ms,omitempty" json:"timeout_ms,omitempty" jsonschema:"minimum=1,default=1000" jsonschema_description:"A check slower than this fails."`
+	Fall       *int   `yaml:"fall,omitempty" json:"fall,omitempty" jsonschema:"minimum=1,default=3" jsonschema_description:"Failed checks in a row that take a replica out."`
+	Rise       *int   `yaml:"rise,omitempty" json:"rise,omitempty" jsonschema:"minimum=1,default=2" jsonschema_description:"Passed checks in a row that put a replica back."`
 }
 
 // Resources are per-replica limits: cgroup limits in local mode.
@@ -112,7 +129,7 @@ type Dataset struct {
 
 // Workload is how traffic arrives.
 type Workload struct {
-	Entry     string   `yaml:"entry" json:"entry" jsonschema:"required" jsonschema_description:"Service receiving external traffic."`
+	Entry     string   `yaml:"entry" json:"entry" jsonschema:"required" jsonschema_description:"Service receiving external traffic: an application service or an lb."`
 	Profile   []*Step  `yaml:"profile" json:"profile" jsonschema:"required,minItems=1" jsonschema_description:"Steps run in order."`
 	Mix       *Mix     `yaml:"mix,omitempty" json:"mix,omitempty"`
 	Keys      *Keys    `yaml:"keys,omitempty" json:"keys,omitempty"`

@@ -3,6 +3,7 @@ package plan
 import (
 	"encoding/json"
 	"flag"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,7 +77,7 @@ func TestScaling(t *testing.T) {
 		t.Fatal(err)
 	}
 	api, db := half.Service("api"), half.Service("db")
-	if api.CPU != 0.5 || api.Memory != 256<<20 || len(api.Containers) != 4 {
+	if api.CPU != 0.4 || api.Memory != 256<<20 || len(api.Containers) != 4 {
 		t.Errorf("api at 0.5: cpu %v, memory %d, replicas %d", api.CPU, api.Memory, len(api.Containers))
 	}
 	if db.Dataset.Rows != 2_500_000 || db.Config["shared_buffers"] != "131072kB" || db.Config["max_connections"] != "100" {
@@ -102,7 +103,7 @@ func TestProxiesAndSyntheticTargets(t *testing.T) {
 	for _, x := range p.Proxies {
 		names = append(names, x.Name+"→"+x.Upstream)
 	}
-	if got := strings.Join(names, " "); got != "api--cache→cache:6379 api--db→db:5432" {
+	if got := strings.Join(names, " "); got != "api--cache→cache:6379 api--db→db:5432 lb--api-0→api-0:8080 lb--api-1→api-1:8080" {
 		t.Errorf("proxies: %s", got)
 	}
 	cfg := p.Service("api").Synthetic[1]
@@ -118,7 +119,7 @@ func TestProxiesAndSyntheticTargets(t *testing.T) {
 	if got := p.Faults[1].Containers; len(got) != 1 || got[0] != "api-1" {
 		t.Errorf("kill fault containers: %v", got)
 	}
-	if got := strings.Join(p.Workload.URLs, " "); got != "http://api-0:8080 http://api-1:8080" {
+	if got := strings.Join(p.Workload.URLs, " "); got != "http://lb:8080" {
 		t.Errorf("load urls: %s", got)
 	}
 }
@@ -190,12 +191,128 @@ func TestInfraBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 5,000 rps at 2,500 rps per k6 CPU; 5,000 × (3 reads + 0.1 writes)
-	// = 15,500 proxied calls at 12,000 per Toxiproxy CPU, rounded up.
-	if p.Infra.LoadCPU != 2 || p.Infra.ExpectedOps != 15500 || p.Infra.ProxyCPU != 1.5 {
+	// 5,000 rps at 4,500 rps per k6 CPU, rounded up to a half core.
+	// Proxied calls: 5,000 lb → api, plus 5,000 × (3 reads + 0.1 writes)
+	// api → db = 20,500, at 15,000 per Toxiproxy CPU, rounded up.
+	if p.Infra.LoadCPU != 1.5 || p.Infra.ExpectedOps != 20500 || p.Infra.ProxyCPU != 1.5 {
 		t.Errorf("infra %+v", p.Infra)
 	}
-	if got := p.TotalCPU(); got != 10.25 {
-		t.Errorf("total CPU %v", got)
+	want := 0.0
+	for _, s := range p.Services {
+		want += s.CPU * float64(len(s.Containers))
+	}
+	want += 1.5 + 1.5 + 0.25 + 0.25 + 0.1 // k6, Toxiproxy, Prometheus, cAdvisor, postgres_exporter
+	if got := p.TotalCPU(); math.Abs(got-want) > 1e-9 || got > 8 {
+		t.Errorf("total CPU %v, want %v and at most 8 (the spec: it fits an 8-vCPU machine at scale 1)", got, want)
+	}
+}
+
+const lbDesign = `
+version: 1
+name: lb
+services:
+  edge: { kind: lb, target: web, algorithm: least-conn, health_check: { interval_ms: 500, fall: 2 } }
+  web: { image: loadlore/synthetic, replicas: 2, behavior: { calls: [ { target: inner, op: http, count: 2 } ] } }
+  inner-lb: { kind: lb, target: worker }
+  inner: { image: loadlore/synthetic, behavior: { calls: [ { target: inner-lb, op: http } ] } }
+  worker: { image: loadlore/synthetic, replicas: 3 }
+workload:
+  entry: edge
+  profile: [ { hold: { rps: 1000, for: 1m } } ]
+`
+
+func TestLoadBalancers(t *testing.T) {
+	p, err := Build(load(t, lbDesign), Options{RunID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edge := p.Service("edge")
+	if edge.Kind != "lb" || edge.Image != pinnedHAProxy || edge.CPU != design.DefaultLBCPU || edge.Memory != 256<<20 {
+		t.Errorf("edge: %+v", edge)
+	}
+	lb := edge.LB
+	var servers []string
+	for _, s := range lb.Servers {
+		servers = append(servers, s.Name+"@"+s.Addr)
+	}
+	if lb.Algorithm != "least-conn" || lb.IntervalMs != 500 || lb.Fall != 2 || lb.Rise != 2 || lb.CheckPath != "/healthz" || lb.ServerPort != AppPort {
+		t.Errorf("lb settings: %+v", lb)
+	}
+	if got := strings.Join(servers, " "); got != "web-0@lore-toxiproxy:20000 web-1@lore-toxiproxy:20001" {
+		t.Errorf("servers: %s", got)
+	}
+	if got := strings.Join(p.Workload.URLs, " "); got != "http://edge:8080" {
+		t.Errorf("load urls: %s", got)
+	}
+	// inner calls inner-lb like any HTTP service, through its proxy.
+	tgt := p.Service("inner").Synthetic[0].Targets["inner-lb"]
+	if tgt.Kind != "http" || len(tgt.Addrs) != 1 {
+		t.Errorf("inner → inner-lb: %+v", tgt)
+	}
+	if n := len(p.Service("inner-lb").LB.Servers); n != 3 {
+		t.Errorf("inner-lb has %d servers", n)
+	}
+	// 1,000 edge → web, 2,000 web → inner, 2,000 inner → inner-lb, 2,000
+	// inner-lb → worker.
+	if p.Infra.ExpectedOps != 7000 {
+		t.Errorf("proxied ops %v", p.Infra.ExpectedOps)
+	}
+	for _, a := range p.Assumptions {
+		if strings.Contains(a.Field, "replicas") {
+			t.Errorf("replicas behind an lb reported as spread client-side: %+v", a)
+		}
+	}
+}
+
+func TestClientSideSpreadIsAnAssumption(t *testing.T) {
+	src := strings.Replace(lbDesign, "entry: edge", "entry: web", 1)
+	p, err := Build(load(t, src), Options{RunID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, a := range p.Assumptions {
+		found = found || (a.Field == "services.web.replicas" && strings.Contains(a.Why, "no health checks"))
+	}
+	if !found {
+		t.Errorf("assumptions: %+v", p.Assumptions)
+	}
+}
+
+func TestRedisMemoryDefaults(t *testing.T) {
+	d := loadFile(t, "../../examples/smoke.yaml") // cache: 128m
+	p, err := Build(d, Options{RunID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := p.Service("cache").Config
+	if cfg["maxmemory"] != "98304kb" || cfg["maxmemory-policy"] != "allkeys-lru" {
+		t.Errorf("defaults: %v", cfg)
+	}
+	var fields []string
+	for _, a := range p.Assumptions {
+		fields = append(fields, a.Field+"="+a.Value)
+	}
+	if got := strings.Join(fields, " "); !strings.Contains(got, "services.cache.config.maxmemory=96m") || !strings.Contains(got, "services.cache.config.maxmemory-policy=allkeys-lru") {
+		t.Errorf("assumptions: %s", got)
+	}
+
+	// Scaled with the container.
+	half, _ := Build(d, Options{RunID: "r", Scale: 0.5})
+	if got := half.Service("cache").Config["maxmemory"]; got != "49152kb" {
+		t.Errorf("at scale 0.5: %s", got)
+	}
+
+	// Set in the design: kept, and not an assumption. 0 means stock Redis.
+	raw, _ := os.ReadFile("../../examples/smoke.yaml")
+	src := strings.Replace(string(raw), "    kind: redis\n", "    kind: redis\n    config: { maxmemory: 0, maxmemory-policy: noeviction }\n", 1)
+	p, _ = Build(load(t, src), Options{RunID: "r"})
+	if cfg := p.Service("cache").Config; cfg["maxmemory"] != "0" || cfg["maxmemory-policy"] != "noeviction" {
+		t.Errorf("explicit: %v", cfg)
+	}
+	for _, a := range p.Assumptions {
+		if strings.Contains(a.Field, "cache") {
+			t.Errorf("explicit setting reported as assumption: %+v", a)
+		}
 	}
 }

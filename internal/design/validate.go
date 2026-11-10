@@ -105,7 +105,7 @@ func (v *validator) service(name string, s *Service) {
 		return // already reported; anything more would be noise
 	}
 	if s == nil {
-		v.errorf(p, CodeRequired, "service %q needs either image (an application service) or kind (postgres, redis, pgbouncer)", name)
+		v.errorf(p, CodeRequired, "service %q needs either image (an application service) or kind (postgres, redis, pgbouncer, lb)", name)
 		return
 	}
 	switch {
@@ -113,7 +113,7 @@ func (v *validator) service(name string, s *Service) {
 		v.errorf(pathKey(p, "kind"), CodeConflict, "set either image or kind, not both")
 		return
 	case s.Image == "" && s.Kind == "":
-		v.errorf(p, CodeRequired, "service %q needs either image (an application service) or kind (postgres, redis, pgbouncer)", name)
+		v.errorf(p, CodeRequired, "service %q needs either image (an application service) or kind (postgres, redis, pgbouncer, lb)", name)
 		return
 	}
 
@@ -127,9 +127,11 @@ func (v *validator) service(name string, s *Service) {
 		notFor("version", s.Version != "", why)
 		notFor("config", s.Config != nil, why)
 		notFor("dataset", s.Dataset != nil, why)
-		notFor("target", s.Target != "", "it is for pgbouncer")
+		notFor("target", s.Target != "", "it is for pgbouncer and lb")
 		notFor("pool_mode", s.PoolMode != "", "it is for pgbouncer")
 		notFor("default_pool_size", s.DefaultPoolSize != nil, "it is for pgbouncer")
+		notFor("algorithm", s.Algorithm != "", "it is for lb")
+		notFor("health_check", s.HealthCheck != nil, "it is for lb")
 		if s.Behavior != nil && !s.IsSynthetic() {
 			v.errorf(pathKey(p, "behavior"), CodeNotApplicable, "behavior only applies to %s; your own image does its own work", SyntheticImage)
 		}
@@ -150,10 +152,19 @@ func (v *validator) service(name string, s *Service) {
 	notFor("pools", s.Pools != nil, why)
 	notFor("concurrency", s.Concurrency != nil, why)
 	notFor("dataset", s.Dataset != nil && s.Kind != "postgres", "datasets are seeded into postgres")
+	if s.Kind != "pgbouncer" && s.Kind != "lb" {
+		notFor("target", s.Target != "", "it is for pgbouncer and lb")
+	}
 	if s.Kind != "pgbouncer" {
-		notFor("target", s.Target != "", "it is for pgbouncer")
 		notFor("pool_mode", s.PoolMode != "", "it is for pgbouncer")
 		notFor("default_pool_size", s.DefaultPoolSize != nil, "it is for pgbouncer")
+	}
+	if s.Kind != "lb" {
+		notFor("algorithm", s.Algorithm != "", "it is for lb")
+		notFor("health_check", s.HealthCheck != nil, "it is for lb")
+	} else {
+		notFor("version", s.Version != "", "the lb's version is pinned by Loadlore")
+		notFor("config", s.Config != nil, "set algorithm and health_check instead")
 	}
 	if s.Replicas != nil && *s.Replicas != 1 {
 		msg := fmt.Sprintf("%s runs exactly one replica", s.Kind)
@@ -161,6 +172,17 @@ func (v *validator) service(name string, s *Service) {
 			msg += "; read replicas are planned for phase 2"
 		}
 		v.errorf(pathKey(p, "replicas"), CodeRange, "%s", msg)
+	}
+	if s.Kind == "lb" {
+		switch t, ok := v.d.Services[s.Target]; {
+		case s.Target == "":
+			v.errorf(pathKey(p, "target"), CodeRequired, "lb needs a target: the application service whose replicas it spreads traffic across")
+		case !ok:
+			v.unknownService(pathKey(p, "target"), s.Target)
+		case v.broken(s.Target):
+		case t == nil || !t.IsApp():
+			v.errorf(pathKey(p, "target"), CodeOpTarget, "an lb's target must be an application service; %q is %s", s.Target, describeService(t))
+		}
 	}
 	if s.Kind == "pgbouncer" {
 		switch t, ok := v.d.Services[s.Target]; {
@@ -181,6 +203,14 @@ func (v *validator) service(name string, s *Service) {
 	}
 }
 
+// broken reports whether a service's image or kind is already in error, so
+// checks that depend on what the service is would only add noise.
+func (v *validator) broken(name string) bool {
+	p := pathKey("services", name)
+	s := v.d.Services[name]
+	return v.failed[pathKey(p, "image")] || v.failed[pathKey(p, "kind")] || (s != nil && s.Image != "" && s.Kind != "")
+}
+
 func (v *validator) unknownService(path, name string) {
 	msg := fmt.Sprintf("unknown service %q", name)
 	if s := suggest(name, v.d.ServiceNames()); s != "" {
@@ -192,7 +222,7 @@ func (v *validator) unknownService(path, name string) {
 // opsFor lists the call ops a target accepts.
 func opsFor(t *Service) []string {
 	switch {
-	case t.IsApp():
+	case t.IsApp(), t.Kind == "lb":
 		return []string{"http"}
 	case t.Kind == "postgres", t.Kind == "pgbouncer":
 		return []string{"read", "write"}
@@ -225,6 +255,9 @@ func (v *validator) call(caller, p string, c *Call) {
 			if ops := opsFor(t); ops != nil && !slices.Contains(ops, c.Op) && !v.failed[pathKey(p, "op")] {
 				v.errorf(pathKey(p, "op"), CodeOpTarget, "%s is %s; use op %s", c.Target, describeService(t), strings.Join(ops, ", "))
 			}
+			if t.IsApp() && t.Replicas != nil && *t.Replicas > 1 {
+				v.warnf(pathKey(p, "target"), CodeNoLB, "%s", noLBMessage(caller, c.Target, *t.Replicas))
+			}
 		}
 	}
 	if len(c.OnMiss) > 0 && c.Op != "get" {
@@ -243,10 +276,21 @@ func (v *validator) call(caller, p string, c *Call) {
 }
 
 func describeService(s *Service) string {
-	if s.IsApp() {
+	switch {
+	case s == nil:
+		return "empty"
+	case s.IsApp():
 		return "an application service"
+	case s.Kind == "lb":
+		return "a load balancer"
 	}
 	return "a " + s.Kind + " service"
+}
+
+// noLBMessage explains client-side spreading: without an lb, callers
+// round-robin across replica addresses and never notice a dead replica.
+func noLBMessage(caller, target string, replicas int) string {
+	return fmt.Sprintf("%s has %d replicas and no load balancer in front, so %s spreads requests across them itself, with no health checks: a dead replica keeps getting its share. Put a kind: lb service in front to model a load balancer", target, replicas, caller)
 }
 
 func (v *validator) resilience(p string, r *Resilience) {
@@ -297,8 +341,14 @@ func (v *validator) cycles() {
 					continue
 				}
 				cp := pathIndex(path, i)
-				if t, ok := v.d.Services[c.Target]; ok && t != nil && t.IsApp() && c.Target != name {
-					graph[name] = append(graph[name], edge{c.Target, pathKey(cp, "target")})
+				t, ok := v.d.Services[c.Target]
+				to := c.Target
+				if ok && t != nil && t.Kind == "lb" {
+					to = t.Target
+					t, ok = v.d.Services[to]
+				}
+				if ok && t != nil && t.IsApp() && to != name {
+					graph[name] = append(graph[name], edge{to, pathKey(cp, "target")})
 				}
 				visit(pathKey(cp, "on_miss"), c.OnMiss)
 			}
@@ -349,8 +399,10 @@ func (v *validator) workload() {
 		switch s, ok := v.d.Services[w.Entry]; {
 		case !ok:
 			v.unknownService("workload.entry", w.Entry)
-		case s != nil && s.Kind != "" && s.Image == "":
-			v.errorf("workload.entry", CodeOpTarget, "the entry must be an application service (image); %s is %s", w.Entry, describeService(s))
+		case s != nil && s.Kind != "" && s.Kind != "lb" && s.Image == "":
+			v.errorf("workload.entry", CodeOpTarget, "the entry must be an application service (image) or an lb; %s is %s", w.Entry, describeService(s))
+		case s != nil && s.IsApp() && s.Replicas != nil && *s.Replicas > 1:
+			v.warnf("workload.entry", CodeNoLB, "%s", noLBMessage("the load generator", w.Entry, *s.Replicas))
 		}
 	}
 	for i, st := range w.Profile {
@@ -707,7 +759,7 @@ func (d *Design) isCalled(name string) bool {
 		if s == nil {
 			continue
 		}
-		if s.Kind == "pgbouncer" && s.Target == name {
+		if (s.Kind == "pgbouncer" || s.Kind == "lb") && s.Target == name {
 			return true
 		}
 		if s.Behavior == nil {
@@ -728,8 +780,8 @@ type EntryPathInfo struct {
 	Keyed bool     // whether any call on the path uses a key
 }
 
-// EntryPath follows calls from the workload entry through http calls and
-// pgbouncer, and reports which postgres services it reads.
+// EntryPath follows calls from the workload entry through http calls, load
+// balancers and pgbouncer, and reports which postgres services it reads.
 func (d *Design) EntryPath() EntryPathInfo {
 	var info EntryPathInfo
 	read := map[string]bool{}
@@ -737,7 +789,15 @@ func (d *Design) EntryPath() EntryPathInfo {
 	var visit func(name string)
 	visit = func(name string) {
 		s, ok := d.Services[name]
-		if !ok || s == nil || seen[name] || s.Behavior == nil {
+		if !ok || s == nil || seen[name] {
+			return
+		}
+		if s.Kind == "lb" {
+			seen[name] = true
+			visit(s.Target)
+			return
+		}
+		if s.Behavior == nil {
 			return
 		}
 		seen[name] = true
@@ -747,7 +807,7 @@ func (d *Design) EntryPath() EntryPathInfo {
 				return
 			}
 			switch {
-			case t.IsApp():
+			case t.IsApp(), t.Kind == "lb":
 				visit(c.Target)
 				return
 			case t.Kind == "pgbouncer":

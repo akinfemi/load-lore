@@ -22,6 +22,7 @@ func newRunCmd(g *globalOpts) *cobra.Command {
 		keep    bool
 		timeout time.Duration
 		image   string
+		reuse   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "run <design.yaml>",
@@ -41,7 +42,7 @@ stack up to poke at; remove it later with loadl down.`,
 			if !g.json {
 				progress = cmd.OutOrStdout()
 			}
-			opt := runner.Options{DesignPath: args[0], Scale: scale, Seed: seed, Keep: keep, Timeout: timeout, SyntheticImage: image, Progress: progress}
+			opt := runner.Options{DesignPath: args[0], Scale: scale, Seed: seed, Keep: keep, Timeout: timeout, SyntheticImage: image, ReuseData: reuse, Progress: progress}
 			res, err := runner.Run(cmd.Context(), opt, func(ctx context.Context) (driver.Driver, error) { return local.New(ctx) })
 			var inv *runner.InvalidDesignError
 			if errors.As(err, &inv) {
@@ -74,6 +75,7 @@ stack up to poke at; remove it later with loadl down.`,
 	cmd.Flags().Int64Var(&seed, "seed", 0, "seed for the load generator's random keys and mix (0 = random)")
 	cmd.Flags().BoolVar(&keep, "keep", false, "leave the stack running after the load ends")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "stop and tear down after this long (default: 15m setup + the profile + 5m)")
+	cmd.Flags().BoolVar(&reuse, "reuse-data", false, "skip the fresh copy of seeded data and reuse a shared one; earlier runs' writes carry over, and the report says so")
 	cmd.Flags().StringVar(&image, "synthetic-image", "loadlore/synthetic:dev", "image for loadlore/synthetic services")
 	return cmd
 }

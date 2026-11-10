@@ -73,6 +73,23 @@ func TestGoldenCompose(t *testing.T) {
 	if !strings.Contains(cf.Configs["toxiproxy"].Content, `"upstream": "db:5432"`) {
 		t.Errorf("toxiproxy config: %s", cf.Configs["toxiproxy"].Content)
 	}
+
+	// The lb checks both replicas through their proxies, starts after
+	// them, and is scraped.
+	hap := cf.Configs["haproxy-lb"].Content
+	for _, want := range []string{"balance roundrobin", "option httpchk GET /healthz", "default-server check inter 1000ms fall 2 rise 2",
+		"server api-0 lore-toxiproxy:20002", "server api-1 lore-toxiproxy:20003", "prometheus-exporter"} {
+		if !strings.Contains(hap, want) {
+			t.Errorf("haproxy.cfg lacks %q:\n%s", want, hap)
+		}
+	}
+	lb := cf.Services["lb"]
+	if lb.DependsOn["api-0"].Condition != "service_healthy" || lb.DependsOn["api-1"].Condition != "service_healthy" || lb.Labels[LabelRole] != "lb" {
+		t.Errorf("lb service: %+v", lb)
+	}
+	if !strings.Contains(cf.Configs["prometheus"].Content, `"lb:8405"`) {
+		t.Errorf("lb isn't scraped:\n%s", cf.Configs["prometheus"].Content)
+	}
 }
 
 func TestComposeVersion(t *testing.T) {

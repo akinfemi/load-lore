@@ -39,6 +39,7 @@ const (
 	CodeAssumptionPath = "assumption-path"
 	CodeUnusedPool     = "unused-pool"
 	CodeScale          = "scale"
+	CodeNoLB           = "no-lb"
 )
 
 // Diagnostic is one problem found in a design file.

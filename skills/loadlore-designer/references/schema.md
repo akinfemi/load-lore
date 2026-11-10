@@ -25,9 +25,9 @@ Every service has either `image` (an application service) or `kind` (a built-in 
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `replicas` | `1` | Application services only; datastores and pgbouncer run exactly one |
-| `resources.cpu` | `1` | CPU cores per replica (cgroup limit locally) |
-| `resources.memory` | `512m` | Per replica. Units `k`, `m`, `g` (binary), also `256MB`, `1Gi` |
+| `replicas` | `1` | Application services only; datastores, pgbouncer and lb run exactly one |
+| `resources.cpu` | `1` (`0.5` for `lb`) | CPU cores per replica (cgroup limit locally) |
+| `resources.memory` | `512m` (`256m` for `lb`) | Per replica. Units `k`, `m`, `g` (binary), also `256MB`, `1Gi` |
 
 ### Application services (`image: loadlore/synthetic`)
 
@@ -72,7 +72,7 @@ Call fields:
 | Field | Default | Values |
 | --- | --- | --- |
 | `target` | required | A service name |
-| `op` | required | `read`, `write` (postgres, pgbouncer) · `get`, `set`, `del` (redis) · `http` (application services) |
+| `op` | required | `read`, `write` (postgres, pgbouncer) · `get`, `set`, `del` (redis) · `http` (application services and lb) |
 | `count` | `1` | Times per request |
 | `when` | `always` | `always`, `read`, `write` (from the workload mix) |
 | `mode` | `sync` | `sync` waits for the result; `async` fires and continues |
@@ -98,8 +98,30 @@ Resilience fields apply to every outbound call of the service:
 | `kind` | Key fields | Notes |
 | --- | --- | --- |
 | `postgres` | `version` (default `"17"`), `config` (any postgresql.conf key; Postgres's own defaults apply, such as `max_connections` 100 and `shared_buffers` 128MB), `dataset` | |
-| `redis` | `version` (default `"8"`), `config` (any redis.conf key, such as `maxmemory` and `maxmemory-policy`; Redis's own defaults apply) | |
+| `redis` | `version` (default `"8"`), `config` (any redis.conf key) | Unless `config` sets them, `maxmemory` is 75% of the container's memory limit and `maxmemory-policy` is `allkeys-lru`, as managed Redis usually does. Both are printed as assumptions in every report, and `--scale` scales `maxmemory`. `maxmemory: 0` restores stock Redis, including being OOM-killed when the cache outgrows its container |
 | `pgbouncer` | `target` (required, a postgres service), `pool_mode` (`transaction`; also `session`, `statement`), `default_pool_size` (`20`), `config` (any pgbouncer.ini key) | |
+| `lb` | `target` (required, an application service), `algorithm`, `health_check` | A load balancer (HAProxy) in front of the target's replicas. See below |
+
+`lb` spreads requests across the healthy replicas of its target. Call it like an application service (`op: http`), or make it the workload `entry`:
+
+```yaml
+lb:
+  kind: lb
+  target: api
+  algorithm: round-robin        # round-robin (default) | least-conn | random
+  health_check: { path: /healthz, interval_ms: 2000, timeout_ms: 1000, fall: 3, rise: 2 }
+```
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `algorithm` | `round-robin` | `round-robin`, `least-conn` (fewest open requests), `random` |
+| `health_check.path` | `/healthz` | HTTP GET on each replica |
+| `health_check.interval_ms` | `2000` | Time between checks of one replica (minimum 100) |
+| `health_check.timeout_ms` | `1000` | A slower check fails |
+| `health_check.fall` | `3` | Failed checks in a row that take a replica out |
+| `health_check.rise` | `2` | Passed checks in a row that put it back |
+
+A dead replica keeps getting requests until it fails `fall` checks, about `interval_ms × fall`; that lag is part of what a run shows. Traffic sent to a service with more than one replica without an `lb` still validates, with a `no-lb` warning: the caller (or the load generator) spreads requests across the replicas itself, with no health checks, and the report says so.
 
 `dataset` (postgres only) is seeded before the run into a table with columns `id` (primary key), `user_id` and a payload:
 
@@ -115,7 +137,7 @@ There is deliberately no field for hit rate, capacity or failure point. Those em
 
 ```yaml
 workload:
-  entry: api                    # application service receiving external traffic
+  entry: lb                     # application service or lb receiving external traffic
   profile:                      # steps run in order
     - ramp:  { from: 100, to: 5000, over: 5m }
     - hold:  { rps: 5000, for: 2m }
