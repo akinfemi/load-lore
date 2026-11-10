@@ -111,6 +111,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: scenario-runs
+          include-hidden-files: true
           path: |
             check-*.json
             .loadlore/runs/
