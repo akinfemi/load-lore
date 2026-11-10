@@ -176,7 +176,7 @@ The design lists no assumptions.
 
 ## Thresholds
 
-- **Broke:** two windows in a row with p99 at least 10x the low-load p99 (the median p99 of windows offered at most 25% of the peak) and at least 100 ms, at least 1.0% of requests failing, or successful responses below 90% of the offered rate.
+- **Broke:** 2 windows in a row with at least 1.0% of requests failing or successful responses below 90% of the offered rate, or 3 windows in a row with any of those or p99 at least 10x the low-load p99 (the median p99 of windows offered at most 25% of the peak, before errors or a shortfall in 2 windows in a row) and at least 100 ms. A shorter episode is shown as a stall in the timeline, not a break.
 - **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than 1.0% of a window's arrivals, or the load generator or Toxiproxy used 90% or more of its CPU budget, or was stalled at its CPU limit in 5.0% or more of its scheduling periods (from 1.0% it's noted as a caveat). The first 10 s of load are a warm-up and don't count: the load generator starts its VUs and connections open then. A cause is named only with evidence: on a Linux host, the hypervisor giving 2.0% or more of CPU time to other virtual machines (steal), or other programs using 10% or more of the host's CPUs (at least 0.5); inside a VM on this machine, only as a possibility.
 - **Connection pool exhausted:** for two windows in a row, a pool at 95% or more of its size with callers waiting, while the target's CPU stayed below 80% and the caller's below 90%.
 - **Queueing knee:** for 3 windows in a row, p99 at least 3x the low-load p99 and 10 ms above it, with a CPU or pool at 70% or more.

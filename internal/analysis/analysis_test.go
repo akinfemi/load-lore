@@ -373,3 +373,89 @@ func TestToolDeathEndsTheAnalysis(t *testing.T) {
 		}
 	}
 }
+
+// p99 alone needs 3 windows in a row; 2 are a stall in the timeline.
+func TestLatencyBreakNeedsThreeWindows(t *testing.T) {
+	spike := func(from, to float64) func(float64) float64 {
+		return func(t float64) float64 {
+			if t >= from && t < to {
+				return 0.3
+			}
+			return 0.005
+		}
+	}
+	w := analysistest.Healthy()
+	w.P99 = spike(40, 60)
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.Verdict.Kind != VerdictHeld {
+		t.Fatalf("20 s spike: %s %q", a.Verdict.Kind, a.Verdict.Summary)
+	}
+	var stalls []Event
+	for _, e := range a.Timeline {
+		if e.Kind == "stall" {
+			stalls = append(stalls, e)
+		}
+	}
+	if len(stalls) != 1 || stalls[0].At != 40 || !strings.Contains(stalls[0].Detail, "p99 reached 300 ms (5.0 ms at low load) for 20 s, then recovered") {
+		t.Errorf("stalls %+v", stalls)
+	}
+
+	w.P99 = spike(40, 70)
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if b := a.Verdict.Break; a.Verdict.Kind != VerdictBroke || b == nil || b.At != 40 {
+		t.Fatalf("30 s spike: %s %+v", a.Verdict.Kind, b)
+	}
+	for _, e := range a.Timeline {
+		if e.Kind == "stall" {
+			t.Errorf("a break is also a stall: %+v", e)
+		}
+	}
+}
+
+// A shortfall breaks in 2 windows, and windows from the first shortfall on
+// don't count toward the low-load p99.
+func TestShortfallBreakAndBaseline(t *testing.T) {
+	w := analysistest.Healthy()
+	w.Served = func(t, o float64) float64 {
+		if t >= 10 {
+			return 0.5 * o
+		}
+		return o
+	}
+	w.P99 = func(t float64) float64 {
+		if t >= 10 {
+			return 2
+		}
+		return 0.005
+	}
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	v := a.Verdict
+	if v.Kind != VerdictBroke || v.Break == nil || v.Break.At != 10 {
+		t.Fatalf("%s %+v", v.Kind, v.Break)
+	}
+	if !near(v.BaselineP99, 5, 0.1) {
+		t.Errorf("baseline %v, want 5 ms from the window before the shortfall", deref(v.BaselineP99))
+	}
+}
+
+// One shortfall window is a stall, not a break.
+func TestOneShortfallWindowIsAStall(t *testing.T) {
+	w := analysistest.Healthy()
+	w.Served = func(t, o float64) float64 {
+		if t >= 50 && t < 60 {
+			return 0.5 * o
+		}
+		return o
+	}
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.Verdict.Kind != VerdictHeld {
+		t.Fatalf("%s %q", a.Verdict.Kind, a.Verdict.Summary)
+	}
+	found := false
+	for _, e := range a.Timeline {
+		found = found || e.Kind == "stall" && e.At == 50 && strings.Contains(e.Detail, "of the offered rate was served for 10 s")
+	}
+	if !found {
+		t.Errorf("timeline %+v", a.Timeline)
+	}
+}

@@ -29,11 +29,16 @@ const (
 	BreakLatencyFactor = 10.0 // p99 at least 10x the low-load p99 ...
 	BreakLatencyMinMs  = 100.0
 	BreakShortfall     = 0.9 // successful responses below 90% of the offered rate
-	BaselineShare      = 0.25
-	DroppedShareLimit  = 0.01 // the load generator dropped >1% of a window's arrivals
-	ToolCPULimit       = 0.9  // a tool used >=90% of its CPU budget
-	ToolThrottleLimit  = 0.05 // a tool was stalled by CFS in >=5% of its periods
-	ToolThrottleNote   = 0.01 // ... or in >=1%: noted, since it can still move p99
+	// A shortfall or errors break in 2 windows in a row; p99 alone needs 3,
+	// since a short latency episode, such as a CPU-throttling stall, often
+	// recovers by itself. Shorter episodes are stalls in the timeline.
+	BreakWindows        = 2
+	BreakLatencyWindows = 3
+	BaselineShare       = 0.25
+	DroppedShareLimit   = 0.01 // the load generator dropped >1% of a window's arrivals
+	ToolCPULimit        = 0.9  // a tool used >=90% of its CPU budget
+	ToolThrottleLimit   = 0.05 // a tool was stalled by CFS in >=5% of its periods
+	ToolThrottleNote    = 0.01 // ... or in >=1%: noted, since it can still move p99
 	// The first seconds of load don't count for the tooling checks: k6
 	// starts its VUs and every connection opens then.
 	ToolWarmupSeconds = 10.0
@@ -88,7 +93,11 @@ func verdict(a *Analysis) Verdict {
 		v.Summary = statusPrefix(a) + "No end-to-end data was collected during the load, so the run can't be judged."
 		return v
 	}
-	v.BaselineP99 = baselineP99(ws, a.PeakOffered)
+	hard := make([][]string, len(ws))
+	for i, w := range ws {
+		hard[i] = hardSignals(w)
+	}
+	v.BaselineP99 = baselineP99(ws, a.PeakOffered, hard)
 	for _, w := range ws {
 		if w.RPS != nil && (v.MaxRPS == nil || *w.RPS > *v.MaxRPS) {
 			v.MaxRPS, v.MaxRPSAt = w.RPS, w.Start
@@ -99,17 +108,13 @@ func verdict(a *Analysis) Verdict {
 
 	sig := make([][]string, len(ws))
 	for i, w := range ws {
-		sig[i] = signals(w, v.BaselineP99)
-	}
-	// A break is sustained: two windows in a row. One bad window, such as
-	// a CPU-throttling stall, isn't a break.
-	breakAt := -1
-	for i := 0; i+1 < len(ws); i++ {
-		if len(sig[i]) > 0 && len(sig[i+1]) > 0 {
-			breakAt = i
-			break
+		sig[i] = hard[i]
+		if lim, ok := LatencyLimit(v.BaselineP99); ok && w.P99 != nil && *w.P99 >= lim {
+			sig[i] = append([]string{"latency"}, hard[i]...)
 		}
 	}
+	breakAt := findBreak(hard, sig)
+	a.Timeline = withStalls(a.Timeline, ws, sig, breakAt, v.BaselineP99)
 	v.Moment = v.momentWindow(ws, breakAt)
 	if breakAt >= 0 {
 		w := ws[breakAt]
@@ -149,16 +154,23 @@ func maxPtr(cur, v *float64) *float64 {
 
 // baselineP99 is the median p99 of the low-load windows: those offered at
 // most a quarter of the peak, or the first three if the profile starts
-// high.
-func baselineP99(ws []*Window, peak float64) *float64 {
+// high. Only windows before the first shortfall or errors in a row count:
+// a system that is already failing has no low-load latency to compare
+// against. A single short window, as when k6 is still starting its VUs,
+// doesn't end the baseline.
+func baselineP99(ws []*Window, peak float64, hard [][]string) *float64 {
+	healthy := ws
+	if i := findBreak(hard, nil); i >= 0 {
+		healthy = ws[:i]
+	}
 	var xs []float64
-	for _, w := range ws {
+	for _, w := range healthy {
 		if w.P99 != nil && w.Offered <= BaselineShare*peak {
 			xs = append(xs, *w.P99)
 		}
 	}
 	if len(xs) == 0 {
-		for _, w := range ws[:min(3, len(ws))] {
+		for _, w := range healthy[:min(3, len(healthy))] {
 			if w.P99 != nil {
 				xs = append(xs, *w.P99)
 			}
@@ -180,11 +192,10 @@ func LatencyLimit(baseline *float64) (float64, bool) {
 	return math.Max(BreakLatencyFactor**baseline, BreakLatencyMinMs), true
 }
 
-func signals(w *Window, baseline *float64) []string {
+// hardSignals are the signs that requests weren't served: errors and a
+// shortfall. Latency is judged separately, against the baseline.
+func hardSignals(w *Window) []string {
 	var s []string
-	if lim, ok := LatencyLimit(baseline); ok && w.P99 != nil && *w.P99 >= lim {
-		s = append(s, "latency")
-	}
 	if w.ErrorRate != nil && *w.ErrorRate >= BreakErrorRate {
 		s = append(s, "errors")
 	}
@@ -192,6 +203,87 @@ func signals(w *Window, baseline *float64) []string {
 		s = append(s, "throughput")
 	}
 	return s
+}
+
+// findBreak is the first window of a sustained break: BreakWindows in a
+// row with errors or a shortfall, or BreakLatencyWindows in a row with
+// any signal (sig nil: errors and shortfalls only). It returns -1 when
+// nothing broke.
+func findBreak(hard, sig [][]string) int {
+	run := func(i, n int, xs [][]string) bool {
+		if i+n > len(xs) {
+			return false
+		}
+		for _, x := range xs[i : i+n] {
+			if len(x) == 0 {
+				return false
+			}
+		}
+		return true
+	}
+	for i := range hard {
+		if run(i, BreakWindows, hard) || sig != nil && run(i, BreakLatencyWindows, sig) {
+			return i
+		}
+	}
+	return -1
+}
+
+// withStalls adds to the timeline each episode before the break (or in
+// the whole run, if nothing broke) that had a break signal but was too
+// short to count as one.
+func withStalls(tl []Event, ws []*Window, sig [][]string, breakAt int, baseline *float64) []Event {
+	end := len(ws)
+	if breakAt >= 0 {
+		end = breakAt
+	}
+	added := false
+	for i := 0; i < end; {
+		if len(sig[i]) == 0 {
+			i++
+			continue
+		}
+		j := i
+		for j < end && len(sig[j]) > 0 {
+			j++
+		}
+		tl = append(tl, Event{At: ws[i].Start, Kind: "stall", Detail: stallDetail(ws[i:j], baseline, j == len(ws))})
+		added = true
+		i = j
+	}
+	if added {
+		sort.SliceStable(tl, func(i, j int) bool { return tl[i].At < tl[j].At })
+	}
+	return tl
+}
+
+func stallDetail(ws []*Window, baseline *float64, last bool) string {
+	var p99, errs, served *float64
+	for _, w := range ws {
+		p99 = maxPtr(p99, w.P99)
+		errs = maxPtr(errs, w.ErrorRate)
+		if w.RPS != nil && w.Offered >= 1 {
+			share := *w.RPS / w.Offered
+			if served == nil || share < *served {
+				served = &share
+			}
+		}
+	}
+	var parts []string
+	if lim, ok := LatencyLimit(baseline); ok && p99 != nil && *p99 >= lim {
+		parts = append(parts, fmt.Sprintf("p99 reached %s (%s at low load)", Ms(*p99), Ms(*baseline)))
+	}
+	if errs != nil && *errs >= BreakErrorRate {
+		parts = append(parts, fmt.Sprintf("%s of requests failed", Pct(*errs)))
+	}
+	if served != nil && *served < BreakShortfall {
+		parts = append(parts, fmt.Sprintf("only %s of the offered rate was served", Pct(*served)))
+	}
+	then := "then recovered"
+	if last {
+		then = "until the load ended"
+	}
+	return fmt.Sprintf("%s for %d s, %s; too short to count as a break", strings.Join(parts, ", "), len(ws)*WindowSeconds, then)
 }
 
 // momentWindow is the window the annotated diagram shows: the break, or

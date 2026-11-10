@@ -5,7 +5,7 @@ _A: run `single-postgres-breaking-point-20261110-004633` · B: run `single-postg
 | | A | B |
 | --- | --- | --- |
 | Design | single-postgres-breaking-point | single-postgres-breaking-point-one-query-per-page |
-| Verdict | broke at 2:50 (2,958 rps offered) | broke at 1:50 (1,978 rps offered) |
+| Verdict | broke at 2:50 (2,958 rps offered) | broke at 2:50 (2,958 rps offered) |
 | Most served | 2,791 rps at 2:40 | 3,422 rps at 3:20 |
 | Worst 10-second p99 | 6.45 s | 4.76 s |
 | Worst error rate | 0% | 0% |
@@ -26,7 +26,7 @@ _A: run `single-postgres-breaking-point-20261110-004633` · B: run `single-postg
 
 **A.** Broke 2:50 into the load, at 2,958 rps offered: p99 reached 990 ms (3.2 ms at low load). Most saturated then: api → db pool 96 of 96 connections in use. After the break the load generator couldn't send 50% of the arrivals the profile asked for (546,431 arrivals from 3:00; k6_dropped_iterations_total (k6: arrivals it couldn't start)): slow responses held its 4,000 VUs, so served throughput from then on is partly the generator's limit, not only the system's.
 
-**B.** Broke 1:50 into the load, at 1,978 rps offered: p99 reached 212 ms (3.6 ms at low load). Most saturated then: api → db pool 73 of 96 connections in use. After the break the load generator couldn't send 29% of the arrivals the profile asked for (355,690 arrivals from 3:10; k6_dropped_iterations_total (k6: arrivals it couldn't start)): slow responses held its 4,000 VUs, so served throughput from then on is partly the generator's limit, not only the system's.
+**B.** Broke 2:50 into the load, at 2,958 rps offered: p99 reached 233 ms (3.6 ms at low load). Most saturated then: api → db pool 96 of 96 connections in use. After the break the load generator couldn't send 33% of the arrivals the profile asked for (355,690 arrivals from 3:10; k6_dropped_iterations_total (k6: arrivals it couldn't start)): slow responses held its 4,000 VUs, so served throughput from then on is partly the generator's limit, not only the system's.
 
 ## Charts
 

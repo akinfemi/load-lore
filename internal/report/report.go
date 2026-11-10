@@ -299,7 +299,11 @@ func markers(a *analysis.Analysis) []marker {
 		if i < 0 || i >= len(a.Windows) || e.Kind == "fault_end" {
 			continue
 		}
-		out = append(out, marker{i, analysis.Clock(e.At) + " " + e.Detail})
+		label := e.Detail
+		if e.Kind == "stall" {
+			label = "stall"
+		}
+		out = append(out, marker{i, analysis.Clock(e.At) + " " + label})
 	}
 	if b := a.Verdict.Break; b != nil {
 		out = append(out, marker{b.Window, analysis.Clock(b.At) + " break"})
@@ -543,11 +547,15 @@ func timelineSection(d *doc, a *analysis.Analysis) {
 	d.line("| Time | Event |")
 	d.line("| --- | --- |")
 	for _, e := range a.Timeline {
-		kind := map[string]string{"fault_start": "fault started", "fault_end": "fault ended", "fault_error": "fault failed", "container": "container"}[e.Kind]
+		kind := map[string]string{"fault_start": "fault started", "fault_end": "fault ended", "fault_error": "fault failed", "container": "container", "stall": "stall"}[e.Kind]
 		d.line("| %s | %s: %s |", analysis.Clock(e.At), kind, cell(e.Detail))
 	}
 	d.line("")
-	d.p("<sub>From events.jsonl: the fault timeline and Docker container events.</sub>")
+	src := "From events.jsonl: the fault timeline and Docker container events."
+	if slices.ContainsFunc(a.Timeline, func(e analysis.Event) bool { return e.Kind == "stall" }) {
+		src += " Stalls are from the per-window numbers below, judged by the thresholds."
+	}
+	d.p("<sub>" + src + "</sub>")
 }
 
 // --- assumptions ---
@@ -599,10 +607,10 @@ func assumptionsSection(d *doc, a *analysis.Analysis) {
 }
 
 func thresholdsSection(d *doc) {
-	lat := fmt.Sprintf("%gx the low-load p99 (the median p99 of windows offered at most %s of the peak) and at least %g ms", analysis.BreakLatencyFactor, analysis.Pct(analysis.BaselineShare), analysis.BreakLatencyMinMs)
+	lat := fmt.Sprintf("%gx the low-load p99 (the median p99 of windows offered at most %s of the peak, before errors or a shortfall in 2 windows in a row) and at least %g ms", analysis.BreakLatencyFactor, analysis.Pct(analysis.BaselineShare), analysis.BreakLatencyMinMs)
 	d.line("## Thresholds")
 	d.line("")
-	d.line("- **Broke:** two windows in a row with p99 at least %s, at least %s of requests failing, or successful responses below %s of the offered rate.", lat, analysis.Pct(analysis.BreakErrorRate), analysis.Pct(analysis.BreakShortfall))
+	d.line("- **Broke:** %d windows in a row with at least %s of requests failing or successful responses below %s of the offered rate, or %d windows in a row with any of those or p99 at least %s. A shorter episode is shown as a stall in the timeline, not a break.", analysis.BreakWindows, analysis.Pct(analysis.BreakErrorRate), analysis.Pct(analysis.BreakShortfall), analysis.BreakLatencyWindows, lat)
 	d.line("- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than %s of a window's arrivals, or the load generator or Toxiproxy used %s or more of its CPU budget, or was stalled at its CPU limit in %s or more of its scheduling periods (from %s it's noted as a caveat). The first %g s of load are a warm-up and don't count: the load generator starts its VUs and connections open then. A cause is named only with evidence: on a Linux host, the hypervisor giving %s or more of CPU time to other virtual machines (steal), or other programs using %s or more of the host's CPUs (at least %g); inside a VM on this machine, only as a possibility.", analysis.Pct(analysis.DroppedShareLimit), analysis.Pct(analysis.ToolCPULimit), analysis.Pct(analysis.ToolThrottleLimit), analysis.Pct(analysis.ToolThrottleNote), analysis.ToolWarmupSeconds, analysis.Pct(analysis.HostStealLimit), analysis.Pct(analysis.HostOthersShare), analysis.HostOthersMin)
 	d.line("- **Connection pool exhausted:** for two windows in a row, a pool at %s or more of its size with callers waiting, while the target's CPU stayed below %s and the caller's below %s.", analysis.Pct(analysis.PoolFullShare), analysis.Pct(analysis.PoolTargetCPUMax), analysis.Pct(analysis.PoolCallerCPUMax))
 	d.line("- **Queueing knee:** for %d windows in a row, p99 at least %gx the low-load p99 and %g ms above it, with a CPU or pool at %s or more.", analysis.KneeWindows, analysis.KneeLatencyFactor, analysis.KneeLatencyMinMs, analysis.Pct(analysis.KneeUtilization))

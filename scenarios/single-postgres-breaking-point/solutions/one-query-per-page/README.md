@@ -26,9 +26,9 @@ In the reference runs (8-vCPU machine, `--scale 1`, seed 1), the most the system
 
 The gain is smaller than a database benchmark predicts. With pgbench on the same 0.5-CPU Postgres and the same mix of 10% writes, one batched statement served 6,537 pages per second against 4,187 for three single-row queries (1.56×). In the full run, the api, the load balancer and Toxiproxy add their own latency, and the database is CPU-throttled in bursts (next section).
 
-## Why the verdict says it broke earlier
+## Why it doesn't break later
 
-The verdict marks this design as broken at 1:50, at 1,978 rps, while the starting design held until 2:50. That isn't because one query is slower. At about 1:30, the api's connection pools grew from about 20 connections to 96 at once. From then on, bursts of up to 96 active queries used up the database's CPU quota early in each 100 ms scheduling period, and Postgres sat stalled until the next one. p50 stayed at about 1.3 ms, but p99 jumped to 100–550 ms in some windows while the database averaged 60–80% CPU. The report shows it as CPU throttling under the queueing-knee diagnosis.
+The verdict marks both designs as broken at 2:50, at 2,958 rps offered, though this one served 1.23× more at its best. Before that, its timeline shows three stalls, at 1:30, 1:50 and 2:20: p99 reached 212–558 ms for 10–20 s at a time while at least 90% of the offered load was still served. At about 1:30, the api's connection pools grew from about 20 connections to 96 at once. From then on, bursts of up to 96 active queries used up the database's CPU quota early in each 100 ms scheduling period, and Postgres sat stalled until the next one. p50 stayed at about 1.3 ms while the database averaged 60–80% CPU. A p99 spike alone counts as a break only after 30 s, so these are stalls, not the break; the report shows the throttling under the queueing-knee diagnosis.
 
 The starting design had the same storm at 1:50 but recovered for a while. Small CPU limits are bursty, so compare peak throughput and the shape of the curves, not just the break time. Fewer connections in the pool would likely smooth it out; that's the subject of the connection pool scenario.
 
