@@ -7,6 +7,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/akinfemi/load-lore/internal/bench"
 	"github.com/akinfemi/load-lore/internal/plan"
 	"github.com/akinfemi/load-lore/internal/rundir"
 )
@@ -51,7 +52,24 @@ type Host struct {
 	EngineVersion  string `json:"engine_version"`
 	ComposeVersion string `json:"compose_version"`
 	CgroupVersion  string `json:"cgroup_version"`
+
+	// HostCPU is what loadl can see of the CPU under Docker's kernel:
+	// HostCPUSampled when that kernel is this machine's and loadl samples
+	// its /proc/stat, HostCPUInVM when Docker runs in a VM on this machine
+	// (Colima, Docker Desktop), whose host load it can't see, and empty
+	// when it can't tell.
+	HostCPU string `json:"host_cpu,omitempty"`
+
+	// Speed is the host speed benchmark pre-flight ran, against the
+	// reference machine; nil when it couldn't run.
+	Speed *bench.Speed `json:"speed,omitempty"`
 }
+
+// Values of Host.HostCPU.
+const (
+	HostCPUSampled = "sampled"
+	HostCPUInVM    = "vm"
+)
 
 // LoadResult is the load generator's own account of the run.
 type LoadResult struct {

@@ -30,6 +30,11 @@ const (
 	DBName        = "lab"
 )
 
+// DefaultCPUPeriodMs is the CFS period for the design's own containers
+// when the design doesn't set resources.cpu_period_ms: Docker's default.
+// Loadlore's tooling always keeps Docker's default.
+const DefaultCPUPeriodMs = 100
+
 // Plan is everything a driver needs to run one experiment.
 type Plan struct {
 	RunID    string        `json:"run_id"`
@@ -69,9 +74,10 @@ type Service struct {
 	Name       string   `json:"name"`
 	Kind       string   `json:"kind"` // app, postgres, redis, lb
 	Image      string   `json:"image"`
-	Containers []string `json:"containers"` // one per replica: api-0, api-1; or db
-	CPU        float64  `json:"cpu"`        // per container, after scaling
-	Memory     int64    `json:"memory"`     // bytes per container, after scaling
+	Containers []string `json:"containers"`    // one per replica: api-0, api-1; or db
+	CPU        float64  `json:"cpu"`           // per container, after scaling
+	CPUPeriod  int      `json:"cpu_period_ms"` // CFS period the CPU limit is enforced over
+	Memory     int64    `json:"memory"`        // bytes per container, after scaling
 	Port       int      `json:"port"`
 
 	// Application services: one config per replica (synthetic image only).
@@ -366,7 +372,10 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 		p.note("%s: memory raised from %s to the %s minimum for %s", name, sizeStr(mem), sizeStr(minMem), s.Kind)
 		mem = minMem
 	}
-	s.CPU, s.Memory = cpu, mem
+	s.CPU, s.Memory, s.CPUPeriod = cpu, mem, DefaultCPUPeriodMs
+	if ds.Resources.CPUPeriodMs != nil {
+		s.CPUPeriod = *ds.Resources.CPUPeriodMs
+	}
 
 	if len(ds.Config) > 0 {
 		s.Config = map[string]string{}
@@ -825,6 +834,7 @@ func (p *Plan) assume(d *design.Design) {
 	p.Assumptions = append(p.Assumptions, Assumption{
 		Field: "workload.timeout_ms", Value: p.Workload.Timeout.D().String(), Why: why,
 	})
+	p.assumePeriods(d)
 	for _, name := range d.ServiceNames() {
 		if s := d.Services[name]; s.Kind == "lb" {
 			p.Assumptions = append(p.Assumptions, Assumption{
@@ -854,6 +864,25 @@ func (p *Plan) assume(d *design.Design) {
 	if p.Assumptions == nil {
 		p.Assumptions = []Assumption{}
 	}
+}
+
+// assumePeriods lists the CFS periods of the services that don't set one,
+// grouped by value.
+func (p *Plan) assumePeriods(d *design.Design) {
+	var names []string
+	for _, s := range p.Services {
+		if r := d.Services[s.Name].Resources; r == nil || r.CPUPeriodMs == nil {
+			names = append(names, s.Name)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	p.Assumptions = append(p.Assumptions, Assumption{
+		Field: "resources.cpu_period_ms",
+		Value: fmt.Sprintf("%d ms for %s", DefaultCPUPeriodMs, strings.Join(names, ", ")),
+		Why:   "Docker's default. A container that uses its CPU share early in a period stalls until the next one, which can show up in p99 when a service has a fraction of a CPU",
+	})
 }
 
 // clampHalf rounds up to the next half core and clamps.

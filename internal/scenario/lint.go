@@ -53,6 +53,9 @@ func (s *Scenario) Lint() []Problem {
 	if m.Host.CPUs <= 0 || m.Host.Memory <= 0 {
 		bad(MetaFile, "host.cpus and host.memory are required: what Docker needs available at --scale 1, Loadlore's own containers included")
 	}
+	if m.Host.Reference == "" || m.Host.Speed <= 0 {
+		bad(MetaFile, "host.reference and host.speed are required: the machine the scenario was checked on and its host speed index, as loadl run prints it")
+	}
 	if v := m.Check.Problem.Verdict; v != "broke" && v != "held" {
 		bad(MetaFile, "check.problem.verdict must be broke or held, not %q", v)
 	}

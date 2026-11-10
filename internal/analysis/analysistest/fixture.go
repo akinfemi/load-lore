@@ -12,6 +12,7 @@ import (
 
 	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/driver"
+	"github.com/akinfemi/load-lore/internal/hoststat"
 	"github.com/akinfemi/load-lore/internal/plan"
 	"github.com/akinfemi/load-lore/internal/rundir"
 )
@@ -55,6 +56,17 @@ type World struct {
 	InUse       func(t float64) float64
 	Pending     func(t float64) float64
 	WaitS       func(t float64) float64 // mean pool wait per acquire
+
+	// HostCPU is run.json's host.host_cpu. With HostCPUSampled, the run
+	// has /proc/stat samples of an 8-CPU host: Steal is the share of CPU
+	// time stolen and Others the CPUs used outside the run (nil: none).
+	HostCPU string
+	Steal   func(t float64) float64
+	Others  func(t float64) float64
+
+	// EndEarly ends the load (run.json's load_ended) this long before the
+	// profile does, as when Docker's clock runs fast.
+	EndEarly time.Duration
 
 	// Events are written to events.jsonl at their time into the load.
 	Events []Event
@@ -101,10 +113,10 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 		t.Fatal(err)
 	}
 	start := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
-	end := start.Add(p.Duration)
+	end := start.Add(p.Duration - w.EndEarly)
 	rec := map[string]any{
 		"run_id": "fixture-run", "status": "completed", "scale": scale, "seed": 1,
-		"load_started": start, "load_ended": end, "host": driver.Host{CPUs: 8}, "warnings": []string{}, "loadl_version": "test",
+		"load_started": start, "load_ended": end, "host": driver.Host{CPUs: 8, HostCPU: w.HostCPU}, "warnings": []string{}, "loadl_version": "test",
 	}
 	write := func(name string, v any) {
 		b, _ := json.Marshal(v)
@@ -156,6 +168,12 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 	inUse := newC(gauges, "loadlore_pool_connections", map[string]string{"service": "api", "target": "db", "state": "in_use"})
 	maxC := newC(gauges, "loadlore_pool_max_connections", map[string]string{"service": "api", "target": "db"})
 	pending := newC(gauges, "loadlore_pool_pending", map[string]string{"service": "api", "target": "db"})
+	hostModes := map[string]*counter{}
+	if w.HostCPU == driver.HostCPUSampled {
+		for _, m := range hoststat.Modes {
+			hostModes[m] = newC(counters, hoststat.Metric, map[string]string{"mode": m})
+		}
+	}
 	var hists [][2]any
 	hb := map[[2]float64]float64{}
 	var hcount, hsum float64
@@ -182,6 +200,20 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			add(apiCPU, w.APICPU(el)*p.Service("api").CPU)
 			add(dbCPU, w.DBCPU(el)*p.Service("db").CPU)
 			add(k6CPU, w.K6CPU(el)*p.Infra.LoadCPU)
+			if len(hostModes) > 0 {
+				const cpus = 8.0
+				steal, others := 0.0, 0.0
+				if w.Steal != nil {
+					steal = w.Steal(el) * cpus
+				}
+				if w.Others != nil {
+					others = w.Others(el)
+				}
+				user := w.APICPU(el)*p.Service("api").CPU + w.DBCPU(el)*p.Service("db").CPU + w.K6CPU(el)*p.Infra.LoadCPU + others
+				for m, c := range hostModes {
+					add(c, map[string]float64{"user": user, "steal": steal, "idle": cpus - user - steal}[m])
+				}
+			}
 			if w.K6Throttled != nil {
 				add(k6Periods, 10) // one 100 ms period per tenth of a second
 				add(k6Throttled, 10*w.K6Throttled(el))

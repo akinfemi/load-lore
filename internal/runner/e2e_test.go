@@ -56,7 +56,7 @@ func TestE2ESmoke(t *testing.T) {
 	}
 	b, _ := os.ReadFile(filepath.Join(res.Dir, "analysis.json"))
 	if err := json.Unmarshal(b, &an); err != nil || len(an.Windows) != 6 || an.Windows[2].RPS == nil {
-		t.Errorf("analysis: %v, %d windows", err, len(an.Windows))
+		t.Errorf("analysis: %v, %d windows; load from %v to %v", err, len(an.Windows), res.LoadStarted, res.LoadEnded)
 	}
 	for i, e := range an.Expect {
 		if e.Status != "held" && e.Status != "broken" {

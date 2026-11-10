@@ -96,7 +96,7 @@ func demoFiles() map[string]string {
 level: 1
 concepts: [pools]
 minutes: 10
-host: { cpus: 2, memory: 2g }
+host: { cpus: 2, memory: 2g, reference: test machine, speed: 1000 }
 check:
   problem: { verdict: broke, diagnoses: [pool-exhausted] }
   solutions:

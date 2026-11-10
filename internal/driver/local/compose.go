@@ -3,6 +3,7 @@ package local
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -50,6 +51,8 @@ type composeService struct {
 	Command         []string                 `yaml:"command,omitempty"`
 	Environment     map[string]string        `yaml:"environment,omitempty"`
 	CPUs            float64                  `yaml:"cpus,omitempty"`
+	CPUPeriod       int64                    `yaml:"cpu_period,omitempty"` // microseconds
+	CPUQuota        int64                    `yaml:"cpu_quota,omitempty"`
 	MemLimit        string                   `yaml:"mem_limit,omitempty"`
 	MemswapLimit    string                   `yaml:"memswap_limit,omitempty"`
 	ShmSize         string                   `yaml:"shm_size,omitempty"`
@@ -130,11 +133,21 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 		return s
 	}
 
+	// A design container whose CFS period isn't Docker's default gets an
+	// explicit period and quota in place of cpus; Compose rejects both.
+	setPeriod := func(c *composeService, s *plan.Service) {
+		if s.CPUPeriod > 0 && s.CPUPeriod != plan.DefaultCPUPeriodMs && c.CPUs > 0 {
+			period := int64(s.CPUPeriod) * 1000
+			c.CPUs, c.CPUPeriod, c.CPUQuota = 0, period, int64(math.Round(c.CPUs*float64(period)))
+		}
+	}
+
 	healthyDeps := map[string]composeDepend{svcToxiproxy: {Condition: "service_started"}}
 	for _, s := range p.Services {
 		switch s.Kind {
 		case "postgres":
 			c := base(s.Image, s.Name, "datastore", -1, s.CPU, s.Memory)
+			setPeriod(c, s)
 			c.PullPolicy = "missing"
 			c.Environment = map[string]string{"POSTGRES_USER": plan.DBUser, "POSTGRES_PASSWORD": plan.DBPassword, "POSTGRES_DB": plan.DBName}
 			c.Command = []string{"postgres"}
@@ -160,6 +173,7 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 			cf.Services["lore-pgexp-"+s.Name] = exp
 		case "redis":
 			c := base(s.Image, s.Name, "datastore", -1, s.CPU, s.Memory)
+			setPeriod(c, s)
 			c.PullPolicy = "missing"
 			c.Command = []string{"redis-server", "--save", "", "--appendonly", "no"}
 			for _, k := range sortedKeys(s.Config) {
@@ -181,6 +195,7 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 			continue
 		}
 		c := base(s.Image, s.Name, "lb", -1, s.CPU, s.Memory)
+		setPeriod(c, s)
 		c.PullPolicy = "missing"
 		cfgName := "haproxy-" + s.Name
 		cf.Configs[cfgName] = &composeConfig{Content: haproxyConfig(s.LB)}
@@ -206,6 +221,7 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 				image = in.Synthetic
 			}
 			c := base(image, s.Name, "app", i, s.CPU, s.Memory)
+			setPeriod(c, s)
 			if i < len(s.Synthetic) {
 				c.PullPolicy = "never" // built locally: make image
 				cfg, err := json.Marshal(s.Synthetic[i])

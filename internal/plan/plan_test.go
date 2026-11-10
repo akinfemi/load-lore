@@ -338,6 +338,28 @@ func TestClientTimeout(t *testing.T) {
 	t.Error("the client timeout isn't an assumption")
 }
 
+func TestCPUPeriod(t *testing.T) {
+	raw, _ := os.ReadFile("../../examples/smoke.yaml")
+	src := strings.Replace(string(raw), "    resources: { cpu: 1, memory: 512m }", "    resources: { cpu: 1, memory: 512m, cpu_period_ms: 10 }", 1)
+	if src == string(raw) {
+		t.Fatal("smoke.yaml changed; update the test")
+	}
+	p, err := Build(load(t, src), Options{RunID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range p.Services {
+		if want := map[bool]int{true: 10, false: DefaultCPUPeriodMs}[s.Name == "db"]; s.CPUPeriod != want {
+			t.Errorf("%s: period %d, want %d", s.Name, s.CPUPeriod, want)
+		}
+	}
+	for _, a := range p.Assumptions {
+		if a.Field == "resources.cpu_period_ms" && a.Value != "100 ms for api, cache, lb" {
+			t.Errorf("assumption %+v", a)
+		}
+	}
+}
+
 // Scaling shrinks memory but not connection counts, so memory stays above
 // what the connections need, and never above the design's own value.
 func TestConnectionMemory(t *testing.T) {

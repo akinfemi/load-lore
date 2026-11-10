@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,12 +17,23 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/akinfemi/load-lore/internal/bench"
 	"github.com/akinfemi/load-lore/internal/synthetic"
 )
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(healthcheck())
+	}
+	// bench is the host speed benchmark loadl's pre-flight runs.
+	if len(os.Args) > 1 && os.Args[1] == "bench" {
+		r, err := bench.Run(context.Background(), time.Second)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "synthetic bench:", err)
+			os.Exit(1)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(r)
+		return
 	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "synthetic:", err)

@@ -51,7 +51,13 @@ minutes: 45                    # rough time to work through it
 
 # Available to Docker at --scale 1, Loadlore's own containers included.
 # loadl run warns when the host has less, and suggests a --scale.
-host: { cpus: 8, memory: 8g }
+# reference and speed: the machine the scenario was checked on and the
+# host speed index loadl run printed there; it warns on a much slower host.
+host:
+  cpus: 8
+  memory: 8g
+  reference: MacBook Air M4, Colima VM with 8 vCPUs
+  speed: 1000
 
 # What `loadl scenario check` verifies, at --scale 1.
 check:
@@ -63,7 +69,7 @@ check:
     # bigger-db: { min_gain: 1.5, diagnoses: [queueing-knee] }
 ```
 
-Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Rule ids are `pool-exhausted` and `queueing-knee` in this version.
+Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Breaking points move with core speed, so state the claims as relative results (broke or held, which rule fired, the gain from a fix), never as request rates. Rule ids are `pool-exhausted` and `queueing-knee` in this version.
 
 ## Solutions
 

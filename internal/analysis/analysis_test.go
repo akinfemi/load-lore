@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akinfemi/load-lore/internal/analysis/analysistest"
+	"github.com/akinfemi/load-lore/internal/driver"
 )
 
 func analyze(t *testing.T, dir string) *Analysis {
@@ -159,6 +161,75 @@ func TestThrottledToolIsInconclusive(t *testing.T) {
 	a = analyze(t, analysistest.WriteRun(t, w, 1))
 	if a.Verdict.Kind != VerdictBroke || len(a.Verdict.Caveats) != 0 {
 		t.Errorf("after the break: %s %v %v", a.Verdict.Kind, a.Verdict.Inconclusive, a.Verdict.Caveats)
+	}
+}
+
+// A load that ends a second short keeps its last window, with rates over
+// the seconds it covers; one that ends well short drops it.
+func TestShortLastWindow(t *testing.T) {
+	w := analysistest.Healthy()
+	w.EndEarly = 900 * time.Millisecond
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	last := a.Windows[len(a.Windows)-1]
+	if len(a.Windows) != 10 || last.RPS == nil || *last.RPS < 0.97*last.Offered {
+		t.Errorf("%d windows, last served %v of %v offered", len(a.Windows), last.RPS, last.Offered)
+	}
+	w.EndEarly = 3 * time.Second
+	if a := analyze(t, analysistest.WriteRun(t, w, 1)); len(a.Windows) != 9 {
+		t.Errorf("%d windows", len(a.Windows))
+	}
+}
+
+// k6 starting its VUs isn't evidence against the run.
+func TestToolWarmupDoesntCount(t *testing.T) {
+	w := analysistest.Healthy()
+	w.K6Throttled = func(t float64) float64 { return 0.08 * boolF(t <= 10) }
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.Verdict.Kind != VerdictHeld || len(a.Verdict.Caveats) != 0 {
+		t.Errorf("%s %v %v", a.Verdict.Kind, a.Verdict.Inconclusive, a.Verdict.Caveats)
+	}
+}
+
+// The verdict names what took CPU from the tooling only with evidence.
+func TestShortCause(t *testing.T) {
+	stalled := func(w analysistest.World) analysistest.World {
+		w.K6Throttled = func(t float64) float64 { return 0.08 * boolF(t > 40 && t <= 50) }
+		return w
+	}
+	during := func(v float64) func(float64) float64 {
+		return func(t float64) float64 { return v * boolF(t > 40 && t <= 50) }
+	}
+	for _, c := range []struct {
+		name  string
+		world func(*analysistest.World)
+		want  string // "" = no cause
+	}{
+		{"unknown host", func(*analysistest.World) {}, ""},
+		{"in a VM", func(w *analysistest.World) { w.HostCPU = driver.HostCPUInVM }, "possibly took CPU from the run"},
+		{"sampled, quiet", func(w *analysistest.World) { w.HostCPU = driver.HostCPUSampled }, ""},
+		{"steal", func(w *analysistest.World) {
+			w.HostCPU, w.Steal = driver.HostCPUSampled, during(0.05)
+		}, "gave 5.0% of this machine's CPU time to other virtual machines at 0:40"},
+		{"other programs", func(w *analysistest.World) {
+			w.HostCPU, w.Others = driver.HostCPUSampled, during(2)
+		}, "Other programs on this machine used 2 CPUs at 0:40"},
+		{"other programs, too few", func(w *analysistest.World) {
+			w.HostCPU, w.Others = driver.HostCPUSampled, during(0.4)
+		}, ""},
+	} {
+		w := stalled(analysistest.Healthy())
+		c.world(&w)
+		a := analyze(t, analysistest.WriteRun(t, w, 1))
+		if a.Verdict.Kind != VerdictInconclusive {
+			t.Errorf("%s: %s", c.name, a.Verdict.Kind)
+			continue
+		}
+		if got := a.Verdict.Cause; (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
+			t.Errorf("%s: cause %q", c.name, got)
+		}
+		if c.want != "" && !strings.Contains(a.Verdict.Summary, a.Verdict.Cause) {
+			t.Errorf("%s: summary lacks the cause: %s", c.name, a.Verdict.Summary)
+		}
 	}
 }
 

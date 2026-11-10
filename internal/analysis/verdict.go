@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/akinfemi/load-lore/internal/driver"
 )
 
 // VerdictKind is the one-word outcome of a run.
@@ -32,6 +34,13 @@ const (
 	ToolCPULimit       = 0.9  // a tool used >=90% of its CPU budget
 	ToolThrottleLimit  = 0.05 // a tool was stalled by CFS in >=5% of its periods
 	ToolThrottleNote   = 0.01 // ... or in >=1%: noted, since it can still move p99
+	// The first seconds of load don't count for the tooling checks: k6
+	// starts its VUs and every connection opens then.
+	ToolWarmupSeconds = 10.0
+	// Evidence for naming the cause when tooling was short of CPU.
+	HostStealLimit  = 0.02 // the hypervisor gave >=2% of CPU time to other VMs
+	HostOthersShare = 0.1  // other programs used >=10% of the host's CPUs ...
+	HostOthersMin   = 0.5  // ... and at least half a CPU
 )
 
 // Verdict says whether and where the system broke.
@@ -40,7 +49,8 @@ type Verdict struct {
 	Summary      string      `json:"summary"`
 	Break        *Break      `json:"break,omitempty"`
 	Inconclusive []string    `json:"inconclusive,omitempty"`
-	Caveats      []string    `json:"caveats,omitempty"` // tooling strain too small to make the run inconclusive
+	Caveats      []string    `json:"caveats,omitempty"`            // tooling strain too small to make the run inconclusive
+	Cause        string      `json:"inconclusive_cause,omitempty"` // what took CPU from the tooling, when there's evidence
 	BaselineP99  *float64    `json:"baseline_p99_ms,omitempty"`
 	MaxRPS       *float64    `json:"max_rps,omitempty"`
 	MaxRPSAt     float64     `json:"max_rps_at_s"`
@@ -107,7 +117,9 @@ func verdict(a *Analysis) Verdict {
 		v.Break = &Break{Window: breakAt, At: w.Start, Offered: w.Offered, RPS: w.RPS, P99: w.P99, ErrorRate: w.ErrorRate,
 			Signals: sig[breakAt], Saturation: saturation(a, w)}
 	}
-	v.Inconclusive, v.Caveats = inconclusive(ws, breakAt)
+	var short []*Window
+	v.Inconclusive, v.Caveats, short = inconclusive(ws, breakAt)
+	v.Cause = shortCause(a.Environment.Host, short)
 	if a.Cutoff != "" && breakAt < 0 {
 		v.Inconclusive = append([]string{"before the system broke, " + a.Cutoff}, v.Inconclusive...)
 	}
@@ -274,7 +286,7 @@ func MostSaturated(ss []Saturation) (Saturation, bool) {
 // inconclusive finds signs that Loadlore's own tooling, not the system, set
 // the limit before the break (or anywhere, if nothing broke). Dropped
 // arrivals in the break window itself are a consequence of the break.
-func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string) {
+func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string, short []*Window) {
 	end := len(ws)
 	if breakAt >= 0 {
 		end = breakAt + 1
@@ -289,6 +301,9 @@ func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string) {
 		{"Toxiproxy", func(w *Window) *float64 { return w.ProxyThrottled }, nil},
 	}
 	for i, w := range ws[:end] {
+		if w.Start < ToolWarmupSeconds {
+			continue
+		}
 		if i < end-1 || breakAt < 0 {
 			if w.Dropped != nil && w.Offered > 0 && *w.Dropped/(w.Offered*WindowSeconds) > DroppedShareLimit && drop == nil {
 				drop = w
@@ -305,6 +320,11 @@ func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string) {
 			if v := t.get(w); v != nil && *v >= ToolThrottleNote && (t.worst == nil || *v > *t.get(t.worst)) {
 				t.worst = w
 			}
+		}
+	}
+	for _, w := range []*Window{drop, load, proxy} {
+		if w != nil {
+			short = append(short, w)
 		}
 	}
 	if drop != nil {
@@ -324,12 +344,52 @@ func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string) {
 		share := *t.get(t.worst)
 		s := fmt.Sprintf("at %s %s hit its CPU limit and was stalled in %s of its scheduling periods (%s)", Clock(t.worst.Start), t.name, Pct(share), SrcThrottledPeriods)
 		if share >= ToolThrottleLimit {
+			short = append(short, t.worst)
 			reasons = append(reasons, s+", so it was short of CPU in bursts even if its average use looked fine")
 		} else {
 			caveats = append(caveats, s+"; work caught in a stall waits for the next 100 ms period, which can show up in p99")
 		}
 	}
-	return reasons, caveats
+	return reasons, caveats, short
+}
+
+// shortCause names what took CPU from the tooling in the windows where it
+// was short, only from evidence: steal or other programs' CPU in the
+// host's /proc/stat, or, when Docker runs in a VM on this machine, the
+// possibility that something outside the VM did. When the host was
+// sampled and neither shows, it says nothing: the tooling's own bursts are
+// then the likelier cause.
+func shortCause(h *driver.Host, short []*Window) string {
+	if h == nil || len(short) == 0 {
+		return ""
+	}
+	switch h.HostCPU {
+	case driver.HostCPUInVM:
+		return "Docker runs in a virtual machine here, which can't see what the rest of this machine is doing: if other programs were busy, they possibly took CPU from the run. Close them and run again"
+	case driver.HostCPUSampled:
+		var steal, others *Window
+		for _, w := range short {
+			if w.HostSteal != nil && *w.HostSteal >= HostStealLimit && (steal == nil || *w.HostSteal > *steal.HostSteal) {
+				steal = w
+			}
+			limit := math.Max(HostOthersMin, HostOthersShare*float64(h.CPUs))
+			if w.HostOthers != nil && *w.HostOthers >= limit && (others == nil || *w.HostOthers > *others.HostOthers) {
+				others = w
+			}
+		}
+		var c []string
+		if others != nil {
+			c = append(c, fmt.Sprintf("other programs on this machine used %s CPUs at %s (%s), taking CPU from the run. Close them and run again", strconv.FormatFloat(math.Round(*others.HostOthers*10)/10, 'f', -1, 64), Clock(others.Start), SrcHostOthers))
+		}
+		if steal != nil {
+			c = append(c, fmt.Sprintf("the hypervisor gave %s of this machine's CPU time to other virtual machines at %s (%s). Run again, or on a machine with dedicated CPUs", Pct(*steal.HostSteal), Clock(steal.Start), SrcHostSteal))
+		}
+		if len(c) > 0 {
+			s := strings.Join(c, ". Also, ")
+			return strings.ToUpper(s[:1]) + s[1:]
+		}
+	}
+	return ""
 }
 
 func (v *Verdict) summary(a *Analysis) string {
@@ -386,7 +446,11 @@ func (v *Verdict) summary(a *Analysis) string {
 		s += "."
 	}
 	if len(v.Inconclusive) > 0 {
-		s = "Inconclusive: " + v.Inconclusive[0] + ". Taken at face value: " + s
+		cause := ""
+		if v.Cause != "" {
+			cause = v.Cause + ". "
+		}
+		s = "Inconclusive: " + v.Inconclusive[0] + ". " + cause + "Taken at face value: " + s
 	}
 	return statusPrefix(a) + s
 }

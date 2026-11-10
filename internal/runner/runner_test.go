@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/akinfemi/load-lore/internal/bench"
 	"github.com/akinfemi/load-lore/internal/driver"
 	"github.com/akinfemi/load-lore/internal/plan"
 	"github.com/akinfemi/load-lore/internal/rundir"
+	"github.com/akinfemi/load-lore/internal/scenario"
 )
 
 // fakeDriver records calls. Load lasts loadFor unless ctx ends first.
@@ -199,5 +201,22 @@ func TestInvalidDesignCreatesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Error("a run folder was created for an invalid design")
+	}
+}
+
+func TestScenarioHostWarnings(t *testing.T) {
+	sc := &scenario.Scenario{Name: "s", Meta: scenario.Meta{Host: scenario.Host{CPUs: 8, Memory: 8 << 30, Reference: "ref machine", Speed: 1000}}}
+	host := driver.Host{CPUs: 8, MemoryBytes: 10 << 30, Speed: &bench.Speed{Score: bench.Score{Index: 800}}}
+	if w := scenarioHostWarnings(sc, 1, host); len(w) != 0 {
+		t.Errorf("fast enough: %v", w)
+	}
+	host.Speed.Index = 300
+	w := scenarioHostWarnings(sc, 1, host)
+	if len(w) != 1 || !strings.Contains(w[0], "speed index is 300, against 1000") || !strings.Contains(w[0], "ref machine") {
+		t.Errorf("slow: %v", w)
+	}
+	host.Speed, host.CPUs = nil, 4
+	if w := scenarioHostWarnings(sc, 1, host); len(w) != 1 || !strings.Contains(w[0], "try --scale 0.5") {
+		t.Errorf("small: %v", w)
 	}
 }

@@ -28,6 +28,7 @@ Every service has either `image` (an application service) or `kind` (a built-in 
 | `replicas` | `1` | Application services only; datastores, pgbouncer and lb run exactly one |
 | `resources.cpu` | `1` (`0.5` for `lb`) | CPU cores per replica (cgroup limit locally) |
 | `resources.memory` | `512m` (`256m` for `lb`) | Per replica. Units `k`, `m`, `g` (binary), also `256MB`, `1Gi` |
+| `resources.cpu_period_ms` | `100` (Docker's default) | Period over which the CPU limit is enforced, 1–1000. A 0.5-CPU container may run 50 ms in each 100 ms period, then waits for the next one: bursts of work stall, which shows in p99. Shorter periods make a small limit behave more like a slower CPU; `100` or more reproduces Kubernetes-style CPU throttling. Loadlore's own containers keep the default |
 
 ### Application services (`image: loadlore/synthetic`)
 

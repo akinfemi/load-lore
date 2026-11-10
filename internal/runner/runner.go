@@ -23,6 +23,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/analysis"
 	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/driver"
+	"github.com/akinfemi/load-lore/internal/hoststat"
 	"github.com/akinfemi/load-lore/internal/plan"
 	"github.com/akinfemi/load-lore/internal/report"
 	"github.com/akinfemi/load-lore/internal/rundir"
@@ -140,6 +141,9 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 		return nil, fmt.Errorf("preflight: %w", err)
 	}
 	res.Host = &pf.Host
+	if sp := pf.Host.Speed; sp != nil {
+		fmt.Fprintf(out, "  host: %d CPUs, %d MiB, speed index %d (reference machine 1000)\n", pf.Host.CPUs, pf.Host.MemoryBytes>>20, sp.Index)
+	}
 	res.Warnings = append(res.Warnings, pf.Warnings...)
 	if p.TotalCPU() > float64(pf.Host.CPUs) {
 		if s := fittingScale(d, opt, pf.Host.CPUs); s > 0 {
@@ -238,6 +242,7 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 	loadCtx, stopLoad := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	var t0 time.Time
+	var host *hoststat.Sampler
 	fmt.Fprintf(out, "load: %s, peak %s rps\n", p.Duration, fmtRate(p.Workload.PeakRate))
 	lr, err := drv.RunLoad(ctx, func(t time.Time) {
 		t0 = t
@@ -246,6 +251,9 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 		_ = dir.Event("load_start", map[string]any{"peak_rate": p.Workload.PeakRate, "duration": p.Duration.String()})
 		wg.Go(func() { timeline(loadCtx, t, p.Faults, drv, dir, out) })
 		wg.Go(func() { progressLines(loadCtx, t, drv, out) })
+		if res.Host != nil && res.Host.HostCPU == driver.HostCPUSampled {
+			host = hoststat.Start(loadCtx, time.Second)
+		}
 	})
 	stopLoad()
 	wg.Wait()
@@ -270,6 +278,15 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 	if cerr := drv.Collect(cctx, dir, t0, end); cerr != nil {
 		res.Warnings = append(res.Warnings, "collect: "+cerr.Error())
 		fmt.Fprintf(out, "  warning: collect: %v\n", cerr)
+	}
+	if host != nil {
+		host.Wait()
+		if b, herr := host.JSON(); herr == nil && b != nil {
+			herr = dir.Write(filepath.Join("metrics", hoststat.Metric+".json"), b)
+			if herr != nil {
+				res.Warnings = append(res.Warnings, "host CPU samples: "+herr.Error())
+			}
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("load: %w", err)
@@ -422,8 +439,16 @@ func scenarioHostWarnings(sc *scenario.Scenario, scale float64, h driver.Host) [
 		out = append(out, fmt.Sprintf("scenario %s needs %d MiB of memory available to Docker at --scale %s (from its meta.yaml), but Docker has %d MiB",
 			sc.Name, mem>>20, fmtF(scale), h.MemoryBytes>>20))
 	}
+	if sp := h.Speed; sp != nil && need.Speed > 0 && float64(sp.Index) < SlowHostShare*float64(need.Speed) {
+		out = append(out, fmt.Sprintf("this host's speed index is %d, against %d on the machine scenario %s was checked on (%s): CPU limits are fractions of this host's cores, so expect it to break at a lower load than its README describes; the lessons are in the relative results",
+			sp.Index, need.Speed, sc.Name, need.Reference))
+	}
 	return out
 }
+
+// SlowHostShare is how much slower than a scenario's reference machine a
+// host can be before pre-flight warns.
+const SlowHostShare = 0.75
 
 // InvalidDesignError carries a design's diagnostics.
 type InvalidDesignError struct{ Diagnostics design.Diagnostics }

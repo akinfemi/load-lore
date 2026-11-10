@@ -62,6 +62,10 @@ type HealthCheck struct {
 type Resources struct {
 	CPU    *float64 `yaml:"cpu,omitempty" json:"cpu,omitempty" jsonschema:"exclusiveMinimum=0,default=1" jsonschema_description:"CPU cores per replica."`
 	Memory *Size    `yaml:"memory,omitempty" json:"memory,omitempty" jsonschema:"default=512m" jsonschema_description:"Memory per replica, such as 512m or 1g."`
+	// CPUPeriodMs is the CFS period the CPU limit is enforced over. The
+	// quota is cpu × period, so a 0.5-CPU container may run 50 ms in each
+	// 100 ms period and then waits for the next one.
+	CPUPeriodMs *int `yaml:"cpu_period_ms,omitempty" json:"cpu_period_ms,omitempty" jsonschema:"minimum=1,maximum=1000,default=100" jsonschema_description:"Period in ms over which the CPU limit is enforced. A container that uses its share early in a period stalls until the next one, so short periods behave like a slower CPU and long ones like Kubernetes-style throttling."`
 }
 
 // Behavior is what loadlore/synthetic does for each request.

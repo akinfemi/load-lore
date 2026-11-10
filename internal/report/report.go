@@ -14,10 +14,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/akinfemi/load-lore/internal/analysis"
+	"github.com/akinfemi/load-lore/internal/bench"
 	"github.com/akinfemi/load-lore/internal/diagram"
+	"github.com/akinfemi/load-lore/internal/driver"
 	"github.com/akinfemi/load-lore/internal/mermaid"
 	"github.com/akinfemi/load-lore/internal/plan"
 )
@@ -600,7 +603,7 @@ func thresholdsSection(d *doc) {
 	d.line("## Thresholds")
 	d.line("")
 	d.line("- **Broke:** two windows in a row with p99 at least %s, at least %s of requests failing, or successful responses below %s of the offered rate.", lat, analysis.Pct(analysis.BreakErrorRate), analysis.Pct(analysis.BreakShortfall))
-	d.line("- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than %s of a window's arrivals, or the load generator or Toxiproxy used %s or more of its CPU budget, or was stalled at its CPU limit in %s or more of its scheduling periods (from %s it's noted as a caveat).", analysis.Pct(analysis.DroppedShareLimit), analysis.Pct(analysis.ToolCPULimit), analysis.Pct(analysis.ToolThrottleLimit), analysis.Pct(analysis.ToolThrottleNote))
+	d.line("- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than %s of a window's arrivals, or the load generator or Toxiproxy used %s or more of its CPU budget, or was stalled at its CPU limit in %s or more of its scheduling periods (from %s it's noted as a caveat). The first %g s of load are a warm-up and don't count: the load generator starts its VUs and connections open then. A cause is named only with evidence: on a Linux host, the hypervisor giving %s or more of CPU time to other virtual machines (steal), or other programs using %s or more of the host's CPUs (at least %g); inside a VM on this machine, only as a possibility.", analysis.Pct(analysis.DroppedShareLimit), analysis.Pct(analysis.ToolCPULimit), analysis.Pct(analysis.ToolThrottleLimit), analysis.Pct(analysis.ToolThrottleNote), analysis.ToolWarmupSeconds, analysis.Pct(analysis.HostStealLimit), analysis.Pct(analysis.HostOthersShare), analysis.HostOthersMin)
 	d.line("- **Connection pool exhausted:** for two windows in a row, a pool at %s or more of its size with callers waiting, while the target's CPU stayed below %s and the caller's below %s.", analysis.Pct(analysis.PoolFullShare), analysis.Pct(analysis.PoolTargetCPUMax), analysis.Pct(analysis.PoolCallerCPUMax))
 	d.line("- **Queueing knee:** for %d windows in a row, p99 at least %gx the low-load p99 and %g ms above it, with a CPU or pool at %s or more.", analysis.KneeWindows, analysis.KneeLatencyFactor, analysis.KneeLatencyMinMs, analysis.Pct(analysis.KneeUtilization))
 	d.line("")
@@ -616,6 +619,17 @@ func environmentSection(d *doc, a *analysis.Analysis) {
 	if h := e.Host; h != nil {
 		d.line("- Host: %d CPUs, %s memory, %s (%s, kernel %s), cgroup v%s", h.CPUs, gib(h.MemoryBytes), h.OS, h.Arch, h.Kernel, h.CgroupVersion)
 		d.line("- Docker %s, Compose %s", h.EngineVersion, h.ComposeVersion)
+		if sp := h.Speed; sp != nil {
+			d.line("- Host speed index %d (hash %d, memory %d, syscalls %d): one CPU's work against the reference machine's 1000 (%s). CPU limits are fractions of this host's cores, so a lower index means the design breaks at a lower load", sp.Index, sp.Hash, sp.Memory, sp.Syscalls, bench.ReferenceMachine)
+		} else {
+			d.line("- Host speed index: not measured")
+		}
+		switch h.HostCPU {
+		case driver.HostCPUSampled:
+			d.line("- Host CPU: sampled from /proc/stat of the kernel Docker runs on, for steal and other programs' use")
+		case driver.HostCPUInVM:
+			d.line("- Host CPU: Docker runs in a VM on this machine, so other programs' use of the CPU can't be seen")
+		}
 	}
 	if a.ReuseData {
 		d.line("- Data: reused with --reuse-data (see the verdict)")
@@ -750,6 +764,15 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 			return opt(w.LoadThrottled, analysis.Pct) + " / " + opt(w.ProxyThrottled, analysis.Pct)
 		}},
 	)
+	hostSampled := slices.ContainsFunc(a.Windows, func(w *analysis.Window) bool { return w.HostSteal != nil })
+	if hostSampled {
+		cols = append(cols,
+			col{"host steal", func(w *analysis.Window) string { return opt(w.HostSteal, analysis.Pct) }},
+			col{"other CPUs", func(w *analysis.Window) string {
+				return opt(w.HostOthers, func(v float64) string { return strconv.FormatFloat(math.Round(v*10)/10, 'f', -1, 64) })
+			}},
+		)
+	}
 
 	d.line("## Per-window data")
 	d.line("")
@@ -772,6 +795,10 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 	d.line("")
 	d.line("Columns: offered is %s; served is %s; dropped is %s; errors are %s; p50 and p99 are from %s; CPU is %s, mean over the window; conns are %s; hit rate is from %s; up is %s; pools are %s (peak in use/size, +peak waiting), wait is the mean from %s; k6 and Toxiproxy CPU are against their budgets.",
 		analysis.SrcOffered, analysis.SrcRPS, analysis.SrcDropped, analysis.SrcErrors, analysis.SrcK6Latency, analysis.SrcCPU, analysis.SrcPGConns, analysis.SrcHitRate, analysis.SrcLBHealthy, analysis.SrcPoolInUse, analysis.SrcPoolWait)
+	if hostSampled {
+		d.line("")
+		d.line("Host steal is %s; other CPUs are %s.", analysis.SrcHostSteal, analysis.SrcHostOthers)
+	}
 	d.line("")
 	d.line("</details>")
 	d.line("")

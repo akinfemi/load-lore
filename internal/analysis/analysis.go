@@ -19,6 +19,7 @@ import (
 
 	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/driver"
+	"github.com/akinfemi/load-lore/internal/hoststat"
 	"github.com/akinfemi/load-lore/internal/plan"
 	"github.com/akinfemi/load-lore/internal/rundir"
 )
@@ -26,6 +27,10 @@ import (
 // WindowSeconds is the length of the windows percentiles and rates are
 // computed over, as the expect grammar defines.
 const WindowSeconds = 10
+
+// MinWindowShare is how much of the last window the load must cover for
+// it to count.
+const MinWindowShare = 0.9
 
 // Analysis is everything a report says about one run.
 type Analysis struct {
@@ -91,6 +96,13 @@ type Window struct {
 	ProxyCPU       *float64 `json:"proxy_cpu"`
 	LoadThrottled  *float64 `json:"load_generator_throttled_periods"`
 	ProxyThrottled *float64 `json:"proxy_throttled_periods"`
+
+	// The kernel Docker runs on, when loadl sampled its /proc/stat: the
+	// share of CPU time the hypervisor gave to other virtual machines
+	// (steal), and the CPUs used by everything except this run's
+	// containers.
+	HostSteal  *float64 `json:"host_steal,omitempty"`
+	HostOthers *float64 `json:"host_other_cpus,omitempty"`
 }
 
 // ServiceWindow is one design service in one window.
@@ -241,9 +253,12 @@ func Analyze(dir string) (*Analysis, error) {
 	if rec.LoadEnded != nil {
 		end = math.Min(end, rec.LoadEnded.Sub(*rec.LoadStarted).Seconds())
 	}
-	n := int(math.Floor(end/WindowSeconds + 1e-9))
+	// A last window that is nearly complete counts, over the seconds it
+	// covers: k6 runs on Docker's clock, which in a VM can run a little
+	// fast, so a load can end a second short of its profile.
+	n := int(math.Floor(end/WindowSeconds + 1 - MinWindowShare + 1e-9))
 	st := newStore(filepath.Join(dir, "metrics"))
-	b := &builder{st: st, p: &p, d: d, t0: t0}
+	b := &builder{st: st, p: &p, d: d, t0: t0, end: end}
 	for i := range n {
 		a.Windows = append(a.Windows, b.window(i))
 	}
@@ -391,10 +406,11 @@ func timeline(events []rundir.Event, t0 float64, project string) ([]Event, []Dat
 // --- per-window numbers ---
 
 type builder struct {
-	st *store
-	p  *plan.Plan
-	d  *design.Design
-	t0 float64
+	st  *store
+	p   *plan.Plan
+	d   *design.Design
+	t0  float64
+	end float64 // seconds of load
 }
 
 func num(v float64, ok bool) *float64 {
@@ -406,15 +422,15 @@ func num(v float64, ok bool) *float64 {
 
 func (b *builder) window(i int) *Window {
 	start := float64(i * WindowSeconds)
-	wa, wb := b.t0+start, b.t0+start+WindowSeconds
+	wa, wb := b.t0+start, b.t0+math.Min(start+WindowSeconds, b.end)
 	w := &Window{Index: i, Start: start, Services: map[string]*ServiceWindow{}, Pools: []*PoolWindow{}, Edges: []*EdgeWindow{}}
 	w.Offered = b.offered(start)
 	st := b.st
 
 	if total, ok := st.increase("k6_http_reqs_total", nil, wa, wb); ok {
 		good, _ := st.increase("k6_http_reqs_total", eq("expected_response", "true"), wa, wb)
-		w.Completed = num(total/WindowSeconds, true)
-		w.RPS = num(good/WindowSeconds, true)
+		w.Completed = num(total/(wb-wa), true)
+		w.RPS = num(good/(wb-wa), true)
 		w.ErrorRate = num((total-good)/total, total > 0)
 		dropped, _ := st.increase("k6_dropped_iterations_total", nil, wa, wb)
 		w.Dropped = num(dropped, true)
@@ -447,7 +463,37 @@ func (b *builder) window(i int) *Window {
 	w.ProxyCPU = b.toolCPU(plan.ProxyHost, b.p.Infra.ProxyCPU, wa, wb)
 	w.LoadThrottled = b.throttledPeriods("lore-k6", wa, wb)
 	w.ProxyThrottled = b.throttledPeriods(plan.ProxyHost, wa, wb)
+	b.host(w, wa, wb)
 	return w
+}
+
+// host fills the window's steal and other programs' CPU from the host
+// samples, when there are any.
+func (b *builder) host(w *Window, wa, wb float64) {
+	modes := map[string]float64{}
+	total := 0.0
+	for _, m := range hoststat.Modes {
+		v, ok := b.st.increase(hoststat.Metric, eq("mode", m), wa, wb)
+		if !ok {
+			return
+		}
+		modes[m] = v
+		total += v
+	}
+	if total <= 0 {
+		return
+	}
+	w.HostSteal = num(modes["steal"]/total, true)
+	// irq and softirq time isn't charged to containers, so it isn't
+	// counted on either side.
+	busy := modes["user"] + modes["nice"] + modes["system"]
+	ours := 0.0
+	for _, ss := range b.st.match("container_cpu_usage_seconds_total", not("service", "")) {
+		if inc, ok := b.st.increaseOne(ss, wa, wb); ok {
+			ours += inc
+		}
+	}
+	w.HostOthers = num(math.Max(0, busy-ours)/(wb-wa), true)
 }
 
 func ms(v float64, ok bool) *float64 { return num(v*1000, ok) }
@@ -485,7 +531,7 @@ func (b *builder) cpu(m matcher, limit float64, wa, wb float64) (util, throttled
 	if replicas == 0 || limit <= 0 {
 		return nil, nil, 0
 	}
-	util = num(used/WindowSeconds/(limit*float64(replicas)), true)
+	util = num(used/(wb-wa)/(limit*float64(replicas)), true)
 	if th, ok := b.st.increase("container_cpu_cfs_throttled_seconds_total", m, wa, wb); ok {
 		throttled = num(th, true)
 	}
@@ -529,7 +575,7 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 	case "app":
 		if total, ok := st.increase("loadlore_requests_total", svc, wa, wb); ok {
 			bad, _ := st.increase("loadlore_requests_total", and(svc, not("code", "200")), wa, wb)
-			sw.RPS = num(total/WindowSeconds, true)
+			sw.RPS = num(total/(wb-wa), true)
 			sw.ErrorRate = num(bad/total, total > 0)
 		}
 		sw.P99 = ms(quantile(st.classicBuckets("loadlore_request_duration_seconds", svc, wa, wb), 0.99))
@@ -556,7 +602,7 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 	case "lb":
 		be := and(svc, eq("proxy", "replicas"))
 		if total, ok := st.increase("haproxy_backend_http_requests_total", be, wa, wb); ok {
-			sw.RPS = num(total/WindowSeconds, true)
+			sw.RPS = num(total/(wb-wa), true)
 			resp, _ := st.increase("haproxy_backend_http_responses_total", be, wa, wb)
 			bad, _ := st.increase("haproxy_backend_http_responses_total", and(be, eq("code", "5xx")), wa, wb)
 			sw.ErrorRate = num(bad/resp, resp > 0)
@@ -582,7 +628,7 @@ func (b *builder) appEdges(w *Window, s *plan.Service, wa, wb float64) {
 		e := &EdgeWindow{From: s.Name, To: t, P99Source: SrcCallLatency}
 		if total, ok := st.increase("loadlore_calls_total", m, wa, wb); ok {
 			bad, _ := st.increase("loadlore_calls_total", and(m, eq("outcome", "error")), wa, wb)
-			e.RPS = num(total/WindowSeconds, true)
+			e.RPS = num(total/(wb-wa), true)
 			e.ErrorRate = num(bad/total, total > 0)
 		}
 		e.P99 = ms(quantile(st.classicBuckets("loadlore_call_duration_seconds", m, wa, wb), 0.99))
@@ -641,6 +687,8 @@ const (
 	SrcLoadCPU          = "container_cpu_usage_seconds_total{service=\"lore-k6\"} ÷ the load generator's CPU budget"
 	SrcProxyCPU         = "container_cpu_usage_seconds_total{service=\"lore-toxiproxy\"} ÷ Toxiproxy's CPU budget"
 	SrcThrottledPeriods = "container_cpu_cfs_throttled_periods_total ÷ container_cpu_cfs_periods_total (cAdvisor)"
+	SrcHostSteal        = "steal time ÷ all CPU time in /proc/stat of the kernel Docker runs on"
+	SrcHostOthers       = "user and system time in /proc/stat minus container_cpu_usage_seconds_total of this run's containers (cAdvisor)"
 )
 
 // Clock formats seconds from the start of the load as m:ss.

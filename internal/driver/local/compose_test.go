@@ -105,3 +105,30 @@ func TestPGDataPath(t *testing.T) {
 		t.Error("wrong data path")
 	}
 }
+
+// A design container with its own CFS period gets a period and quota in
+// place of cpus; tooling keeps Docker's default.
+func TestCPUPeriod(t *testing.T) {
+	p := smokePlan(t)
+	for _, s := range p.Services {
+		if s.Name == "db" {
+			s.CPUPeriod = 10
+		}
+	}
+	got, err := buildCompose(p, stackInput{Project: "loadlore-test-run", K6Script: []byte("// script\n"), DataVols: map[string]string{"db": "loadlore-test-run-db-data"}, Synthetic: "loadlore/synthetic:dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cf composeFile
+	if err := yaml.Unmarshal(got, &cf); err != nil {
+		t.Fatal(err)
+	}
+	if db := cf.Services["db"]; db.CPUs != 0 || db.CPUPeriod != 10000 || db.CPUQuota != 10000 {
+		t.Errorf("db: cpus %v, period %d, quota %d", db.CPUs, db.CPUPeriod, db.CPUQuota)
+	}
+	for _, name := range []string{"api-0", "lore-k6", "lore-toxiproxy"} {
+		if s := cf.Services[name]; s.CPUs == 0 || s.CPUPeriod != 0 {
+			t.Errorf("%s: cpus %v, period %d", name, s.CPUs, s.CPUPeriod)
+		}
+	}
+}

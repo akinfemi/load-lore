@@ -17,6 +17,7 @@
         "api-3"
       ],
       "cpu": 0.8,
+      "cpu_period_ms": 100,
       "memory": 536870912,
       "port": 8080,
       "synthetic": [
@@ -214,6 +215,7 @@
         "db"
       ],
       "cpu": 0.5,
+      "cpu_period_ms": 100,
       "memory": 1073741824,
       "port": 5432,
       "version": "17",
@@ -235,6 +237,7 @@
         "lb"
       ],
       "cpu": 0.5,
+      "cpu_period_ms": 100,
       "memory": 268435456,
       "port": 8080,
       "lb": {
@@ -356,6 +359,11 @@
       "field": "workload.timeout_ms",
       "value": "10s",
       "why": "the default; k6 gives up on a request after this long and counts it as failed"
+    },
+    {
+      "field": "resources.cpu_period_ms",
+      "value": "100 ms for api, db, lb",
+      "why": "Docker's default. A container that uses its CPU share early in a period stalls until the next one, which can show up in p99 when a service has a fraction of a CPU"
     },
     {
       "field": "services.lb timeouts",

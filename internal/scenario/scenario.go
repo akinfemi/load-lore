@@ -67,6 +67,11 @@ type Meta struct {
 type Host struct {
 	CPUs   float64     `yaml:"cpus" json:"cpus"`
 	Memory design.Size `yaml:"memory" json:"memory_bytes"`
+	// Reference is the machine the scenario was checked on, and Speed its
+	// host speed index (bench.Score.Index). CPU limits are fractions of
+	// the host's cores, so a slower machine breaks at a lower load.
+	Reference string `yaml:"reference" json:"reference"`
+	Speed     int    `yaml:"speed" json:"speed"`
 }
 
 // Claims holds the claims `loadl scenario check` verifies: the starting

@@ -6,7 +6,16 @@ minutes: 45
 # Available to Docker at --scale 1, Loadlore's own containers included: the
 # design and its tooling add up to 7.8 CPUs. Smaller hosts need a smaller
 # --scale (loadl run warns and suggests one).
-host: { cpus: 8, memory: 8g }
+#
+# reference and speed: the machine its numbers come from and its host speed
+# index (pre-flight measured 844-1020 there across runs). CPU limits are
+# fractions of the host's cores, so a slower machine breaks at a lower
+# load; loadl run warns below 75% of this.
+host:
+  cpus: 8
+  memory: 8g
+  reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
+  speed: 1000
 
 # What `loadl scenario check` verifies, at --scale 1. At small scales the
 # 0.25-CPU-or-less Postgres stalls under CPU throttling and breaks early.

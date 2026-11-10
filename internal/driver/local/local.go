@@ -4,12 +4,14 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,7 +20,9 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
+	"github.com/akinfemi/load-lore/internal/bench"
 	"github.com/akinfemi/load-lore/internal/driver"
+	"github.com/akinfemi/load-lore/internal/hoststat"
 	"github.com/akinfemi/load-lore/internal/load"
 	"github.com/akinfemi/load-lore/internal/plan"
 	"github.com/akinfemi/load-lore/internal/rundir"
@@ -84,6 +88,12 @@ func (d *Driver) Preflight(ctx context.Context, p *plan.Plan) (*driver.Preflight
 		Kernel: info.Info.KernelVersion, Arch: info.Info.Architecture, EngineVersion: info.Info.ServerVersion,
 		CgroupVersion: info.Info.CgroupVersion,
 	}}
+	switch {
+	case hoststat.SameKernel(info.Info.KernelVersion, info.Info.Name):
+		pf.Host.HostCPU = driver.HostCPUSampled
+	case localSocket(d.host) && (runtime.GOOS != "linux" || strings.Contains(info.Info.OperatingSystem, "Docker Desktop")):
+		pf.Host.HostCPU = driver.HostCPUInVM
+	}
 	out, err := d.docker(ctx, "compose", "version", "--short")
 	if err != nil {
 		return nil, fmt.Errorf("docker compose isn't available: %w", err)
@@ -102,6 +112,13 @@ func (d *Driver) Preflight(ctx context.Context, p *plan.Plan) (*driver.Preflight
 			}
 			break
 		}
+	}
+	if _, err := d.api.ImageInspect(ctx, p.Infra.SyntheticImg); err == nil {
+		sp, err := d.speed(ctx, p.Infra.SyntheticImg)
+		if err != nil {
+			pf.Warnings = append(pf.Warnings, "the host speed benchmark failed, so the report has no speed index: "+err.Error())
+		}
+		pf.Host.Speed = sp
 	}
 	if need, have := p.TotalCPU(), float64(info.Info.NCPU); need > have {
 		pf.Warnings = append(pf.Warnings, fmt.Sprintf(
@@ -539,4 +556,30 @@ type Counts struct {
 	Containers int `json:"containers"`
 	Networks   int `json:"networks"`
 	Volumes    int `json:"volumes"`
+}
+
+// localSocket reports whether Docker is reached through a socket on this
+// machine rather than over the network.
+func localSocket(host string) bool {
+	return host == "" || strings.HasPrefix(host, "unix://") || strings.HasPrefix(host, "npipe://")
+}
+
+// speed runs the host speed benchmark in a container limited to one CPU,
+// the way the design's own containers are limited.
+func (d *Driver) speed(ctx context.Context, image string) (*bench.Speed, error) {
+	out, err := d.docker(ctx, "run", "--rm", "--network", "none", "--cpus", "1", "--memory", "256m",
+		"--label", LabelOwner+"=1", image, "bench")
+	if err != nil {
+		return nil, err
+	}
+	// Docker may print warnings around the result, which is one JSON line.
+	line := out
+	if i := bytes.LastIndex(out, []byte("\n{")); i >= 0 {
+		line = out[i+1:]
+	}
+	var r bench.Result
+	if err := json.Unmarshal(bytes.TrimSpace(line), &r); err != nil {
+		return nil, fmt.Errorf("reading its result: %w", err)
+	}
+	return &bench.Speed{Score: r.Scored(), Raw: r}, nil
 }
