@@ -4,7 +4,7 @@ Loadlore is an open-source, terminal-first lab for system design. You describe a
 
 The CLI is `loadl`.
 
-> **Status:** early development. Nothing here is usable yet.
+> **Status:** early development, pre-MVP. You can validate a design, run it on local Docker (Linux, or macOS with Colima), read its report and work through the first scenario, [When does one Postgres fall over?](scenarios/single-postgres-breaking-point/). Not built yet: four of the six diagnosis rules, three of the four MVP scenarios, the live dashboard, `loadl init`, PgBouncer, and the loss, partition and slow-disk faults. Docker Desktop and WSL2 aren't verified. The spec's "Build status" section has the details.
 
 - **Spec:** [Loadlore — Product Spec](https://claude.ai/artifact/TEkM1GHG5mpmKXTcH3jJ6m) is the source of truth for scope and behavior.
 - **AI skill:** [`skills/loadlore-designer/`](skills/loadlore-designer/) turns plain-language descriptions into validated design files.
