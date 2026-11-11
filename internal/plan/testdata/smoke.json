@@ -316,7 +316,7 @@
   "infra": {
     "load_cpu": 1.5,
     "load_memory": 1073741824,
-    "proxy_cpu": 0.5,
+    "proxy_cpu": 1,
     "proxy_memory": 1073741824,
     "prometheus_cpu": 0.1,
     "prometheus_memory": 1073741824,
@@ -328,7 +328,7 @@
     "synthetic_image": "loadlore/synthetic:dev"
   },
   "notes": [
-    "Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 300 rps), Toxiproxy 0.5 CPU (about 1140 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each"
+    "Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 300 rps), Toxiproxy 1 CPU (about 1140 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each"
   ],
   "assumptions": [
     {

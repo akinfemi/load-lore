@@ -164,7 +164,7 @@ The design lists no assumptions.
 
 ### How the run was planned
 
-- Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 1000 rps), Toxiproxy 0.5 CPU (about 1000 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each
+- Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 1000 rps), Toxiproxy 1 CPU (about 1000 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each
 
 ## Thresholds
 

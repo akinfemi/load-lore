@@ -256,7 +256,7 @@ const (
 	proxyMemory    = 1 << 30
 	minLoadCPU     = 1.5 // at 1 CPU, k6 stalled in bursts at about a third of it (pool trap runs, 1,400 rps)
 	maxLoadCPU     = 4.0
-	minProxyCPU    = 0.5
+	minProxyCPU    = 1.0 // at 0.5 CPU, Toxiproxy was throttled in bursts at 58-65% of it (pool trap, mains power)
 	maxProxyCPU    = 4.0
 	promCPU        = 0.1
 	cadvisorCPU    = 0.1
