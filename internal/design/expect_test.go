@@ -2,6 +2,7 @@ package design
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -99,6 +100,25 @@ func TestCmpOpHolds(t *testing.T) {
 	} {
 		if got := tt.op.Holds(tt.a, tt.b); got != tt.want {
 			t.Errorf("%v %s %v = %v", tt.a, tt.op, tt.b, got)
+		}
+	}
+}
+
+func TestParseRunMetricForms(t *testing.T) {
+	p, err := ParseExpect("break_load_rps within 25% of 1,000")
+	if err != nil || p.Op != OpWithin || p.Value.Number != 1000 || p.Tolerance.Text != "25%" {
+		t.Errorf("within: %+v, %v", p, err)
+	}
+	if p, err := ParseExpect("errors_load_rps none"); err != nil || p.Op != OpNone {
+		t.Errorf("none: %+v, %v", p, err)
+	}
+	for line, want := range map[string]string{
+		"break_load_rps within 25% 1000":      `expected "of"`,
+		"break_load_rps within 25% of 1000 x": `unexpected "x"`,
+		"break_load_rps none please":          `unexpected "please"`,
+	} {
+		if _, err := ParseExpect(line); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v, want %q", line, err, want)
 		}
 	}
 }

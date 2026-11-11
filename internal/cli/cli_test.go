@@ -377,7 +377,7 @@ func TestPredict(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, out)
 	}
 	b, _ := os.ReadFile(path)
-	want := "expect:\n  - p99_ms < 500 until load_rps >= 600\n  - error_rate < 1% throughout\n  - note: \"db gives out first\"\n  - note: \"pools 3x bigger: they hit max_connections\"\n"
+	want := "expect:\n  - break_load_rps within 25% of 600\n  - errors_load_rps none\n  - note: \"db gives out first\"\n  - note: \"pools 3x bigger: they hit max_connections\"\n"
 	if !strings.HasSuffix(string(b), want) {
 		t.Errorf("design ends\n%s", b[len(b)-300:])
 	}

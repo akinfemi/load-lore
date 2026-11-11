@@ -25,9 +25,11 @@ type Expectation struct {
 
 // Prediction is a parsed expect line.
 type Prediction struct {
-	Subject   MetricRef
-	Op        CmpOp
-	Value     Quantity
+	Subject MetricRef
+	Op      CmpOp
+	Value   Quantity
+	// Tolerance is the N% of "within N% of X" (OpWithin).
+	Tolerance Quantity
 	Qualifier Qualifier
 }
 
@@ -55,6 +57,11 @@ const (
 	OpLE CmpOp = "<="
 	OpGT CmpOp = ">"
 	OpGE CmpOp = ">="
+	// OpWithin is "<metric> within <N>% of <value>": held when the
+	// measured value is within N% of the value, either side.
+	OpWithin CmpOp = "within"
+	// OpNone is "<metric> none": held when it never happened.
+	OpNone CmpOp = "none"
 )
 
 // Holds reports whether "actual op threshold" is true.
@@ -128,6 +135,26 @@ func ParseExpect(line string) (*Prediction, error) {
 	var err error
 	if pred.Subject, err = p.metric("a metric such as p99_ms or db.connections"); err != nil {
 		return nil, err
+	}
+	// <metric> within <N>% of <value>, or <metric> none.
+	switch t := p.toks[p.pos]; {
+	case t.kind == tokWord && t.text == "none":
+		p.next()
+		pred.Op = OpNone
+		return pred, p.end()
+	case t.kind == tokWord && t.text == "within":
+		p.next()
+		pred.Op = OpWithin
+		if pred.Tolerance, err = p.quantity(); err != nil {
+			return nil, err
+		}
+		if of := p.next(); of.kind != tokWord || of.text != "of" {
+			return nil, &ExpectSyntaxError{of.off, fmt.Sprintf("expected \"of\" after the tolerance, as in within 25%% of 1000, found %s", describe(of))}
+		}
+		if pred.Value, err = p.quantity(); err != nil {
+			return nil, err
+		}
+		return pred, p.end()
 	}
 	if pred.Op, err = p.op(); err != nil {
 		return nil, err
@@ -274,6 +301,15 @@ func (p *expectParser) next() token {
 }
 
 func (p *expectParser) done() bool { return p.toks[p.pos].kind == tokEOF }
+
+// end is nil at the end of the line, else an error at what follows.
+func (p *expectParser) end() error {
+	if p.done() {
+		return nil
+	}
+	t := p.next()
+	return &ExpectSyntaxError{t.off, fmt.Sprintf("unexpected %q at the end of the line", t.text)}
+}
 
 func (p *expectParser) metric(want string) (MetricRef, error) {
 	t := p.next()

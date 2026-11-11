@@ -44,6 +44,10 @@ func scoreAll(a *Analysis, ws []*Window) []ExpectResult {
 			out = append(out, ExpectResult{Note: e.Note, Text: e.Text, Status: ExpectNote})
 			continue
 		}
+		if _, ok := design.RunMetrics[e.Prediction.Subject.Metric]; ok && e.Prediction.Subject.Service == "" {
+			out = append(out, scoreRun(a, e, ws))
+			continue
+		}
 		out = append(out, score(a, e, ws))
 	}
 	return out

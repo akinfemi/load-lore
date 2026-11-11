@@ -28,6 +28,16 @@ var EndToEndMetrics = map[string]MetricKind{
 	"load_rps":   MetricRate,
 }
 
+// RunMetrics are about the whole run, not a window: the offered load at
+// which the run broke (the verdict's break), and at which requests started
+// failing (1% or more for two windows in a row). They're predicted with
+// "within N% of X", which a guess too high or too low both break, or with
+// "none" for a run that never does.
+var RunMetrics = map[string]MetricKind{
+	"break_load_rps":  MetricRate,
+	"errors_load_rps": MetricRate,
+}
+
 // ComponentMetrics lists the per-component metrics, written
 // <service>.<metric>, by component class. Each must map to a series the run
 // collects. cpu and memory are utilization of the container's limit.

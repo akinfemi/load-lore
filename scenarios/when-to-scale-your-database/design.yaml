@@ -39,5 +39,5 @@ workload:
 # Your predictions, scored in the report. Replace these with your own
 # before you run it.
 expect:
-  - p99_ms < 300 until load_rps >= 3000
-  - error_rate < 1% throughout
+  - break_load_rps within 25% of 3000
+  - errors_load_rps none

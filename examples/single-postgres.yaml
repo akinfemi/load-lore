@@ -34,5 +34,5 @@ workload:
   keys: { distribution: zipf, skew: 1.1, count: 5000000 }
 
 expect:
-  - p99_ms < 300 until load_rps >= 3000
-  - error_rate < 1% throughout
+  - break_load_rps within 25% of 3000
+  - errors_load_rps none

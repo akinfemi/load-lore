@@ -264,6 +264,10 @@ func TestValidationDiagnostics(t *testing.T) {
 		{"expect after past end", map[string]string{"expect": "[\"p99_ms < 5 after 5m\"]"}, []string{"error expect[0] timing"}},
 		{"expect bad note", map[string]string{"expect": "[{note: x, extra: y}]"}, []string{"error expect[0] invalid-value"}},
 		{"expect until metric checked", map[string]string{"expect": "[\"p99_ms < 5 until loadrps >= 5\"]"}, []string{"error expect[0] expect-metric"}},
+		{"expect run metric compared", map[string]string{"expect": "[\"break_load_rps < 1000\"]"}, []string{"error expect[0] expect-metric"}},
+		{"expect within on a window metric", map[string]string{"expect": "[\"p99_ms within 25% of 300\"]"}, []string{"error expect[0] expect-metric"}},
+		{"expect tolerance not a percentage", map[string]string{"expect": "[\"break_load_rps within 25 of 1000\"]"}, []string{"error expect[0] expect-value"}},
+		{"expect tolerance too big", map[string]string{"expect": "[\"break_load_rps within 150% of 1000\"]"}, []string{"error expect[0] expect-value"}},
 
 		// Assumptions and modes.
 		{"assumption bad basis", map[string]string{"assumptions": "[{field: workload.mix, basis: hunch}]"}, []string{"error assumptions[0].basis invalid-value"}},
@@ -441,10 +445,10 @@ func TestSpecExampleIsValid(t *testing.T) {
 	if got := d.TotalDuration().String(); got != "7m0s" {
 		t.Errorf("total duration %s", got)
 	}
-	if p := d.Expect[0].Prediction; p.Qualifier.Cond.Metric.Metric != "load_rps" || p.Value.Canonical != 300 {
+	if p := d.Expect[0].Prediction; p.Op != OpWithin || p.Value.Canonical != 3000 || p.Tolerance.Canonical != 0.25 {
 		t.Errorf("expect[0] parsed as %+v", p)
 	}
-	if got := d.Expect[1].Prediction.Value.Canonical; got != 0.01 {
-		t.Errorf("1%% normalized to %v", got)
+	if p := d.Expect[1].Prediction; p.Op != OpNone || p.Subject.Metric != "errors_load_rps" {
+		t.Errorf("expect[1] parsed as %+v", p)
 	}
 }

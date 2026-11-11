@@ -30,16 +30,17 @@ check:
     one-query-per-page: { min_gain: 1.15 }
 
 # What `loadl predict` asks before a run; each answer becomes an expect
-# line in design.yaml. The load ramps from 100 to 5,000 rps.
+# line in design.yaml. A load guess scores right within 25%, too high or
+# too low both count as wrong. The load ramps from 100 to 5,000 rps.
 predict:
-  - ask: At what offered load, in requests per second, will p99 pass 500 ms? The ramp goes from 100 to 5,000 rps; answer never if you think it stays fast.
+  - ask: At what offered load, in requests per second, will it break? The ramp goes from 100 to 5,000 rps; answer never if you think it holds.
     answer: rps
-    expect: p99_ms < 500 until load_rps >= {answer}
-    never: p99_ms < 500 throughout
-  - ask: At what offered load will 1% or more of requests fail? A load, or never.
+    expect: break_load_rps within 25% of {answer}
+    never: break_load_rps none
+  - ask: At what offered load will requests start failing, 1% or more of them? A load, or never.
     answer: rps
-    expect: error_rate < 1% until load_rps >= {answer}
-    never: error_rate < 1% throughout
+    expect: errors_load_rps within 25% of {answer}
+    never: errors_load_rps none
   - ask: Which component gives out first?
     answer: service
     expect: 'note: "{answer} gives out first"'

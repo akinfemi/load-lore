@@ -640,6 +640,26 @@ func (v *validator) expect() {
 			continue
 		}
 		pr := e.Prediction
+		_, runMetric := RunMetrics[pr.Subject.Metric]
+		runMetric = runMetric && pr.Subject.Service == ""
+		switch {
+		case runMetric && pr.Op != OpWithin && pr.Op != OpNone:
+			v.exprErr(p, pr.Subject.Offset, CodeExpectMetric, "%s is the whole run's: predict it as %s within 25%% of <rps>, or %s none", pr.Subject.Metric, pr.Subject.Metric, pr.Subject.Metric)
+			continue
+		case runMetric:
+			if pr.Op == OpWithin {
+				v.quantity(p, MetricRate, pr.Subject, &pr.Value)
+				if t := &pr.Tolerance; t.Unit != "%" || t.Number <= 0 || t.Number > 100 {
+					v.exprErr(p, t.Offset, CodeExpectValue, "the tolerance is a percentage above 0 and at most 100, such as 25%%, not %q", t.Text)
+				} else {
+					t.Canonical = t.Number / 100
+				}
+			}
+			continue
+		case pr.Op == OpWithin || pr.Op == OpNone:
+			v.exprErr(p, pr.Subject.Offset, CodeExpectMetric, "%q is for the whole run's metrics (%s), not %s", pr.Op, metricNames(RunMetrics), pr.Subject)
+			continue
+		}
 		if pr.Subject.Metric == "load_rps" && pr.Subject.Service == "" {
 			v.exprErr(p, pr.Subject.Offset, CodeExpectMetric, "load_rps is the offered load you set in workload; predict rps (achieved throughput) instead")
 		} else if kind, ok := v.metric(p, pr.Subject); ok {

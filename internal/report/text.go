@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/akinfemi/load-lore/internal/analysis"
+	"github.com/akinfemi/load-lore/internal/design"
 )
 
 // Text is a run's report as plain text for a terminal, width columns
@@ -70,6 +71,9 @@ func Text(a *analysis.Analysis, path string, width int) string {
 			case analysis.ExpectHeld, analysis.ExpectBroken:
 				status = string(e.Status)
 				s = e.Text + ": worst " + e.Shown
+				if _, run := design.RunMetrics[e.Metric]; run {
+					s = e.Text + ": measured " + e.Shown
+				}
 				if e.BrokeAt != nil {
 					s += ", broken from " + analysis.Clock(*e.BrokeAt)
 				}

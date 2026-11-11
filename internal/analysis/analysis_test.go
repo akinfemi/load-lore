@@ -331,6 +331,48 @@ func TestInterruptedHeldRun(t *testing.T) {
 	}
 }
 
+// Load predictions count as wrong when too low as well as too high.
+func TestRunMetricPredictions(t *testing.T) {
+	w := analysistest.Healthy()
+	w.Failed = func(t float64) float64 { return 0.2 * boolF(t > 70) } // breaks in the window from 1:10, at 750 rps
+	w.Expect = []string{
+		"break_load_rps within 25% of 700", "break_load_rps within 25% of 400", "break_load_rps within 25% of 1200",
+		"break_load_rps none", "errors_load_rps within 10% of 750",
+	}
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	want := []struct {
+		status ExpectStatus
+		msg    string
+	}{
+		{ExpectHeld, "it broke at 750 rps, 7.1% above the guess of 700"},
+		{ExpectBroken, "too low: it broke at 750 rps, 88% above the guess of 400"},
+		{ExpectBroken, "too high: it broke at 750 rps, 38% below the guess of 1,200"},
+		{ExpectBroken, "it broke at 750 rps offered, at 1:10"},
+		{ExpectHeld, "requests started failing at 750 rps"},
+	}
+	for i, e := range a.Expect {
+		if e.Status != want[i].status || !strings.HasPrefix(e.Message, want[i].msg) {
+			t.Errorf("%s: %s, %q; want %s, %q", e.Text, e.Status, e.Message, want[i].status, want[i].msg)
+		}
+	}
+
+	h := analysistest.Healthy()
+	h.Expect = []string{"break_load_rps none", "break_load_rps within 25% of 500", "errors_load_rps none"}
+	a = analyze(t, analysistest.WriteRun(t, h, 1))
+	if e := a.Expect; e[0].Status != ExpectHeld || e[1].Status != ExpectBroken || !strings.Contains(e[1].Message, "too low: it never broke up to 950 rps") || e[2].Status != ExpectHeld {
+		t.Errorf("a run that held: %+v", e)
+	}
+
+	// Interrupted at 0:30: it can't say it never broke.
+	h.EndEarly = 70 * time.Second
+	h.RunJSON = map[string]any{"status": "interrupted", "error": "interrupted"}
+	h.Expect = []string{"break_load_rps none", "break_load_rps within 25% of 800"}
+	a = analyze(t, analysistest.WriteRun(t, h, 1))
+	if e := a.Expect; e[0].Status != ExpectUnscored || e[1].Status != ExpectUnscored {
+		t.Errorf("an interrupted run: %+v", e)
+	}
+}
+
 func TestExpectRangesAndScaling(t *testing.T) {
 	w := analysistest.Healthy()
 	w.P99 = func(t float64) float64 { return 0.005 + 0.1*boolF(t > 60) } // 105 ms after 60 s

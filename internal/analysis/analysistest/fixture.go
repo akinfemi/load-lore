@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,6 +84,9 @@ type World struct {
 
 	// RunJSON adds fields to run.json, such as stopped_early.
 	RunJSON map[string]any
+
+	// Expect, when set, replaces Design's expect lines.
+	Expect []string
 }
 
 // Event is an events.jsonl line at At seconds into the load.
@@ -117,7 +121,15 @@ type metricFile struct {
 func WriteRun(t testing.TB, w World, scale float64) string {
 	t.Helper()
 	dir := t.TempDir()
-	d, diags := design.Load([]byte(Design))
+	src := Design
+	if w.Expect != nil {
+		head, _, _ := strings.Cut(Design, "expect:\n")
+		src = head + "expect:\n"
+		for _, l := range w.Expect {
+			src += "  - " + l + "\n"
+		}
+	}
+	d, diags := design.Load([]byte(src))
 	if diags.HasErrors() {
 		t.Fatal(diags)
 	}
@@ -145,7 +157,7 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 	}
 	write("run.json", rec)
 	write("plan.json", p)
-	if err := os.WriteFile(filepath.Join(dir, "design.yaml"), []byte(Design), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "design.yaml"), []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var events []byte
