@@ -31,8 +31,8 @@ services:
 workload:
   entry: lb
   profile:
-    - ramp: { from: 100, to: 5000, over: 5m }
-    - hold: { rps: 5000, for: 2m }
+    - ramp: { from: 100, to: 3500, over: 5m }
+    - hold: { rps: 3500, for: 2m }
   mix: { read: 0.9, write: 0.1 }
   keys: { distribution: zipf, skew: 1.1, count: 5000000 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/analysis/analysistest"
 	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/diagram"
+	"github.com/akinfemi/load-lore/internal/plan"
 )
 
 // Every scenario in the library passes its static checks, and its design
@@ -286,4 +287,40 @@ func flowchart(d *design.Design) string { return diagram.Flowchart(d).String() }
 func yamlJSON(d *design.Design) (string, error) {
 	b, err := json.Marshal(d)
 	return string(b), err
+}
+
+// Scenarios are sized so Toxiproxy's estimated peak stays under the share
+// of its budget pre-flight warns above (the spec's option B).
+func TestLibraryFitsToxiproxy(t *testing.T) {
+	lib, err := Library()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range lib {
+		root := filepath.Join("../../scenarios", s.Name)
+		designs := []string{DesignFile}
+		for _, n := range s.Solutions {
+			designs = append(designs, SolutionDesign(n))
+		}
+		for _, n := range s.Variants {
+			designs = append(designs, VariantDesign(n))
+		}
+		for _, f := range designs {
+			src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			d, diags := design.Load(src)
+			if diags.HasErrors() {
+				t.Fatalf("%s/%s: %v", s.Name, f, diags)
+			}
+			p, err := plan.Build(d, plan.Options{RunID: "x", Scale: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if share := p.Infra.ProxyShare(); share > plan.ProxyShareLimit {
+				t.Errorf("%s/%s: Toxiproxy's estimated peak is %.0f%% of its %g CPU budget (%.0f proxied calls/s), above %.0f%%", s.Name, f, share*100, p.Infra.ProxyCPU, p.Infra.ExpectedOps, plan.ProxyShareLimit*100)
+			}
+		}
+	}
 }

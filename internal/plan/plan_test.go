@@ -193,17 +193,18 @@ func TestInfraBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 5,000 rps at 2,500 rps per k6 CPU, rounded up to a half core.
-	// Proxied calls: 5,000 lb → api, plus 5,000 × (3 reads + 0.1 writes)
-	// api → db = 20,500, at 15,000 per Toxiproxy CPU, rounded up.
-	if p.Infra.LoadCPU != 2 || p.Infra.ExpectedOps != 20500 || p.Infra.ProxyCPU != 1.5 {
+	// 3,500 rps at 2,500 rps per k6 CPU, rounded up to a half core (1.5,
+	// the floor). Proxied calls: 3,500 lb → api, plus 3,500 × (3 reads +
+	// 0.1 writes) api → db = 14,350, at 15,000 per Toxiproxy CPU and sized
+	// for 65% of the budget: 1.47, rounded up.
+	if p.Infra.LoadCPU != 1.5 || p.Infra.ExpectedOps != 14350 || p.Infra.ProxyCPU != 1.5 {
 		t.Errorf("infra %+v", p.Infra)
 	}
 	want := 0.0
 	for _, s := range p.Services {
 		want += s.CPU * float64(len(s.Containers))
 	}
-	want += 2 + 1.5 + 0.1 + 0.1 + 0.1 // k6, Toxiproxy, Prometheus, cAdvisor, postgres_exporter
+	want += 1.5 + 1.5 + 0.1 + 0.1 + 0.1 // k6, Toxiproxy, Prometheus, cAdvisor, postgres_exporter
 	if got := p.TotalCPU(); math.Abs(got-want) > 1e-9 || got > 8 {
 		t.Errorf("total CPU %v, want %v and at most 8 (the spec: it fits an 8-vCPU machine at scale 1)", got, want)
 	}
@@ -374,8 +375,8 @@ func TestConnectionMemory(t *testing.T) {
 	if got := p.Service("db").Memory; got != 328<<20 {
 		t.Errorf("db: %s", sizeStr(got))
 	}
-	// 2,500 VUs (peak 1,250 rps) x 40 KiB + 32 MiB, rounded up.
-	if got := p.Service("lb").Memory; got != 130<<20 {
+	// 1,750 VUs (peak 875 rps) x 40 KiB + 32 MiB, rounded up.
+	if got := p.Service("lb").Memory; got != 101<<20 {
 		t.Errorf("lb: %s", sizeStr(got))
 	}
 	if notes := strings.Join(p.Notes, "\n"); !strings.Contains(notes, "db: memory kept at 328m instead of 256m: shared_buffers 64m plus about 2m for each of 100 connections") {

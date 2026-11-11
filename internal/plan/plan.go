@@ -202,6 +202,20 @@ type Infra struct {
 	SyntheticImg string  `json:"synthetic_image"`
 }
 
+// ProxyShareLimit is how much of Toxiproxy's CPU budget a design's
+// estimated peak may use: above it, Toxiproxy was CPU-throttled in bursts
+// in the pool trap's runs, so pre-flight warns.
+const ProxyShareLimit = 0.65
+
+// ProxyShare is the share of Toxiproxy's CPU budget its estimated peak
+// traffic uses, by the cost model (proxyOpsPerCPU calls per CPU).
+func (in Infra) ProxyShare() float64 {
+	if in.ProxyCPU <= 0 {
+		return 0
+	}
+	return in.ExpectedOps / proxyOpsPerCPU / in.ProxyCPU
+}
+
 // Dur is a duration that marshals as a string like "5m0s".
 type Dur time.Duration
 
@@ -840,7 +854,9 @@ func (p *Plan) infra(d *design.Design) {
 	}
 
 	in.ExpectedOps = p.proxiedOps(d, peak)
-	in.ProxyCPU = clampHalf(in.ExpectedOps/proxyOpsPerCPU, minProxyCPU, maxProxyCPU)
+	// Sized so the estimated peak uses at most ProxyShareLimit of it: above
+	// that, Toxiproxy was CPU-throttled in bursts.
+	in.ProxyCPU = clampHalf(in.ExpectedOps/proxyOpsPerCPU/ProxyShareLimit, minProxyCPU, maxProxyCPU)
 	in.ProxyMemory = proxyMemory
 	in.PromCPU, in.PromMemory = promCPU, 1<<30
 	in.CAdvisorCPU, in.CAdvisorMem = cadvisorCPU, 256<<20

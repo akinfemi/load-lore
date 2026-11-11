@@ -6,11 +6,11 @@ Level 1 · about 45 minutes · teaches saturation, the queueing knee and connect
 
 You run a feed service. Every request returns a page of three items from one Postgres database, and one request in ten also updates an item. Four api replicas sit behind a load balancer. Traffic is growing, and someone asks the question every team gets eventually: how much more can this take, and what gives out first?
 
-You're going to find out by ramping the load from 100 to 5,000 requests per second over five minutes, then holding it for two.
+You're going to find out by ramping the load from 100 to 3,500 requests per second over five minutes, then holding it for two.
 
 ```mermaid
 flowchart LR
-    load(["load<br/>up to 5,000 rps"])
+    load(["load<br/>up to 3,500 rps"])
     lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m"}}
     api["api ×4<br/>0.8 CPU · 512m"]
     db[("db<br/>postgres 17<br/>0.5 CPU · 1g")]
@@ -40,7 +40,7 @@ loadl report latest --print | less
 
 The run takes about 8 minutes, plus about a minute the first time to seed the 5-million-row table.
 
-It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers (load generator, Toxiproxy, Prometheus, cAdvisor, exporter) add up to 8 CPUs (7.5 for the worked solution). On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. Scale shrinks CPU, memory, the dataset and the load together, but Loadlore's own containers don't shrink much, and a database with a fraction of a CPU stalls under CPU throttling. Core speed matters too: CPU limits are fractions of your machine's cores, so a slower machine breaks at a lower load. The numbers here come from a MacBook Air M4 on mains power (host speed index 1000; `loadl run` prints yours and warns when it's much lower), and the same design broke at 672 rps on an 8-vCPU cloud VM. On a laptop, plug it in and turn off Low Power Mode, which roughly halves the index. This scenario is checked at `--scale 1`; at `--scale 0.25` its Postgres gets 0.125 CPU and breaks at the very start of the ramp instead, which is a different lesson.
+It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers (load generator, Toxiproxy, Prometheus, cAdvisor, exporter) add up to 7.5 CPUs (7 for the worked solution). On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. Scale shrinks CPU, memory, the dataset and the load together, but Loadlore's own containers don't shrink much, and a database with a fraction of a CPU stalls under CPU throttling. Core speed matters too: CPU limits are fractions of your machine's cores, so a slower machine breaks at a lower load. The numbers here come from a MacBook Air M4 on mains power (host speed index 1000; `loadl run` prints yours and warns when it's much lower), and the same design broke at 672 rps on an 8-vCPU cloud VM. On a laptop, plug it in and turn off Low Power Mode, which roughly halves the index. This scenario is checked at `--scale 1`; at `--scale 0.25` its Postgres gets 0.125 CPU and breaks at the very start of the ramp instead, which is a different lesson.
 
 Stuck? `loadl hint` reveals one hint at a time.
 

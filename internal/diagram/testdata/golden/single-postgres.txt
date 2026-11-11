@@ -3,7 +3,7 @@
 │                 │                            │       lb       │                                                     │                │                                              │      db      │
 │       load      │                            │                │                                                     │     api ×4     │                                              │              │
 │                 ├─90% read · 10% write──────►│ load balancer  ├─round-robin · checks every 2s, out after 3─────────►│                ├─read ×3, write on writes · pool 24──────────►│ postgres 17  │
-│ up to 5,000 rps │                            │                │                                                     │ 0.8 CPU · 512m │                                              │              │
+│ up to 3,500 rps │                            │                │                                                     │ 0.8 CPU · 512m │                                              │              │
 │                 │                            │ 0.5 CPU · 256m │                                                     │                │                                              │ 0.5 CPU · 1g │
 │                 │                            │                │                                                     │                │                                              │              │
 └─────────────────┘                            └────────────────┘                                                     └────────────────┘                                              └──────────────┘

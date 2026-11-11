@@ -233,6 +233,10 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 		fmt.Fprintf(out, "  host: %d CPUs, %d MiB, speed index %d (reference machine 1000)\n", pf.Host.CPUs, pf.Host.MemoryBytes>>20, sp.Index)
 	}
 	res.Warnings = append(res.Warnings, pf.Warnings...)
+	if share := p.Infra.ProxyShare(); share > plan.ProxyShareLimit {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("Toxiproxy's estimated peak (about %s proxied calls/s) is %.0f%% of its %s CPU budget, above the %.0f%% it's sized for: it may be CPU-throttled in bursts and make the run inconclusive; a lower peak load keeps it under",
+			fmtRate(p.Infra.ExpectedOps), share*100, fmtF(p.Infra.ProxyCPU), plan.ProxyShareLimit*100))
+	}
 	if p.TotalCPU() > float64(pf.Host.CPUs) {
 		if s := fittingScale(d, opt, pf.Host.CPUs); s > 0 {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("--scale %s fits this host's %d CPUs", fmtF(s), pf.Host.CPUs))

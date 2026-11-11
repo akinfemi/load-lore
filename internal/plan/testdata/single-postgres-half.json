@@ -238,7 +238,7 @@
       ],
       "cpu": 0.25,
       "cpu_period_ms": 100,
-      "memory": 198180864,
+      "memory": 177209344,
       "port": 8080,
       "lb": {
         "target": "api",
@@ -316,15 +316,15 @@
     "start_rate": 50,
     "stages": [
       {
-        "target": 2500,
+        "target": 1750,
         "duration": "5m0s"
       },
       {
-        "target": 2500,
+        "target": 1750,
         "duration": "2m0s"
       }
     ],
-    "peak_rate": 2500,
+    "peak_rate": 1750,
     "read_share": 0.9,
     "keys": {
       "distribution": "zipf",
@@ -332,8 +332,8 @@
       "skew": 1.1
     },
     "payload_bytes": 1024,
-    "max_vus": 4000,
-    "pre_vus": 1250,
+    "max_vus": 3500,
+    "pre_vus": 875,
     "timeout": "10s",
     "slo_p99_ms": 500
   },
@@ -349,14 +349,14 @@
     "cadvisor_memory": 268435456,
     "exporter_cpu": 0.1,
     "exporter_memory": 134217728,
-    "expected_proxied_ops": 10250,
+    "expected_proxied_ops": 7175,
     "synthetic_image": "loadlore/synthetic:dev"
   },
   "notes": [
     "scale 0.5: CPU, memory, memory settings, dataset rows, the keyspace and request rates are multiplied by 0.5; replicas, pool sizes, connection limits and per-request work are not",
     "db: shared_buffers scaled from 256MB to 131072kB",
-    "lb: memory kept at 189m instead of 128m: about 40k for each of up to 4000 client connections, which don't scale",
-    "Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 2500 rps), Toxiproxy 1 CPU (about 10250 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each"
+    "lb: memory kept at 169m instead of 128m: about 40k for each of up to 3500 client connections, which don't scale",
+    "Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 1750 rps), Toxiproxy 1 CPU (about 7175 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each"
   ],
   "assumptions": [
     {
