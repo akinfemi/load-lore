@@ -40,8 +40,11 @@ type Result struct {
 	RoundTripsPerS float64 `json:"round_trips_per_s"`
 }
 
+// ReferenceIndex is the reference machine's speed index.
+const ReferenceIndex = 1000
+
 // Score is a result against Reference: each part scaled so the reference
-// is 1000, and the index their geometric mean.
+// is ReferenceIndex, and the index their geometric mean.
 type Score struct {
 	Index    int `json:"index"`
 	Hash     int `json:"hash"`
@@ -57,7 +60,7 @@ type Speed struct {
 
 // Scored scores r against Reference.
 func (r Result) Scored() Score {
-	part := func(v, ref float64) float64 { return 1000 * v / ref }
+	part := func(v, ref float64) float64 { return ReferenceIndex * v / ref }
 	h := part(r.HashMBps, Reference.HashMBps)
 	m := part(r.MemReadsPerS, Reference.MemReadsPerS)
 	s := part(r.RoundTripsPerS, Reference.RoundTripsPerS)

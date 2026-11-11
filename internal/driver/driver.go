@@ -76,6 +76,17 @@ type Host struct {
 	Cooled *Cooldown `json:"cooled,omitempty"`
 }
 
+// Inspection is what loadl doctor learns about Docker without a plan.
+// Docker itself was reachable; the errors are the other problems found.
+type Inspection struct {
+	Host       Host
+	DockerHost string // the address loadl reached Docker at; not saved with runs
+	ComposeErr error  // Compose missing or too old
+	Image      string // the synthetic image checked
+	ImageErr   error  // the image isn't available
+	SpeedErr   error  // the speed benchmark failed
+}
+
 // Cooldown is how long pre-flight waited for the host speed index to get
 // back within a share of Target, re-running the benchmark meanwhile.
 type Cooldown struct {

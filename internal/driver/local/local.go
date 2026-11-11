@@ -76,32 +76,63 @@ func (d *Driver) bind(p *plan.Plan) {
 // minComposeMinor is the first Compose v2 release with inline config content.
 const minComposeMinor = 23
 
-// Preflight checks Docker, Compose, images and host capacity.
-func (d *Driver) Preflight(ctx context.Context, p *plan.Plan) (*driver.Preflight, error) {
-	d.bind(p)
+// hostInfo reads Docker's view of the host and checks Compose. It fails
+// only when Docker can't be reached; a missing or old Compose comes back
+// as composeErr.
+func (d *Driver) hostInfo(ctx context.Context) (h driver.Host, composeErr, err error) {
 	info, err := d.api.Info(ctx, client.InfoOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("docker isn't reachable at %q: %w", d.host, err)
+		return h, nil, fmt.Errorf("docker isn't reachable at %q: %w", d.host, err)
 	}
-	pf := &driver.Preflight{Host: driver.Host{
+	h = driver.Host{
 		Driver: "local", CPUs: info.Info.NCPU, MemoryBytes: info.Info.MemTotal, OS: info.Info.OperatingSystem,
 		Kernel: info.Info.KernelVersion, Arch: info.Info.Architecture, EngineVersion: info.Info.ServerVersion,
 		CgroupVersion: info.Info.CgroupVersion,
-	}}
+	}
 	switch {
 	case hoststat.SameKernel(info.Info.KernelVersion, info.Info.Name):
-		pf.Host.HostCPU = driver.HostCPUSampled
+		h.HostCPU = driver.HostCPUSampled
 	case localSocket(d.host) && (runtime.GOOS != "linux" || strings.Contains(info.Info.OperatingSystem, "Docker Desktop")):
-		pf.Host.HostCPU = driver.HostCPUInVM
+		h.HostCPU = driver.HostCPUInVM
 	}
-	out, err := d.docker(ctx, "compose", "version", "--short")
+	out, cerr := d.docker(ctx, "compose", "version", "--short")
+	if cerr != nil {
+		return h, fmt.Errorf("docker compose isn't available: %w", cerr), nil
+	}
+	h.ComposeVersion = strings.TrimSpace(string(out))
+	if !composeNewEnough(h.ComposeVersion) {
+		return h, fmt.Errorf("docker compose %s is too old: need 2.%d or later", h.ComposeVersion, minComposeMinor), nil
+	}
+	return h, nil, nil
+}
+
+// Inspect is what loadl doctor checks, without a plan: Docker, Compose,
+// the synthetic image and, when the image is there, the host speed.
+func (d *Driver) Inspect(ctx context.Context, image string) (*driver.Inspection, error) {
+	h, composeErr, err := d.hostInfo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("docker compose isn't available: %w", err)
+		return nil, err
 	}
-	pf.Host.ComposeVersion = strings.TrimSpace(string(out))
-	if !composeNewEnough(pf.Host.ComposeVersion) {
-		return nil, fmt.Errorf("docker compose %s is too old: need 2.%d or later", pf.Host.ComposeVersion, minComposeMinor)
+	in := &driver.Inspection{Host: h, DockerHost: d.host, ComposeErr: composeErr, Image: image}
+	if _, err := d.api.ImageInspect(ctx, image); err != nil {
+		in.ImageErr = fmt.Errorf("image %s isn't available to Docker", image)
+		return in, nil
 	}
+	in.Host.Speed, in.SpeedErr = d.speed(ctx, image)
+	return in, nil
+}
+
+// Preflight checks Docker, Compose, images and host capacity.
+func (d *Driver) Preflight(ctx context.Context, p *plan.Plan) (*driver.Preflight, error) {
+	d.bind(p)
+	h, composeErr, err := d.hostInfo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if composeErr != nil {
+		return nil, composeErr
+	}
+	pf := &driver.Preflight{Host: h}
 	if pf.Host.CgroupVersion != "2" {
 		pf.Warnings = append(pf.Warnings, fmt.Sprintf("Docker uses cgroup v%s; Loadlore is tested on cgroup v2, so CPU and memory limits may behave differently", pf.Host.CgroupVersion))
 	}
@@ -120,12 +151,12 @@ func (d *Driver) Preflight(ctx context.Context, p *plan.Plan) (*driver.Preflight
 		}
 		pf.Host.Speed = sp
 	}
-	if need, have := p.TotalCPU(), float64(info.Info.NCPU); need > have {
+	if need, have := p.TotalCPU(), float64(h.CPUs); need > have {
 		pf.Warnings = append(pf.Warnings, fmt.Sprintf(
 			"the run needs %s CPUs of container limits (Loadlore's own containers included) but Docker has %d; containers will compete for CPU, so host contention would mix into the results",
-			strconv.FormatFloat(math.Round(need*100)/100, 'f', -1, 64), info.Info.NCPU))
+			strconv.FormatFloat(math.Round(need*100)/100, 'f', -1, 64), h.CPUs))
 	}
-	if need, have := p.TotalMemory(), info.Info.MemTotal; need > have {
+	if need, have := p.TotalMemory(), h.MemoryBytes; need > have {
 		pf.Warnings = append(pf.Warnings, fmt.Sprintf("the run's memory limits add up to %d MiB but Docker has %d MiB; the host may run out of memory before a container reaches its limit", need>>20, have>>20))
 	}
 	return pf, nil

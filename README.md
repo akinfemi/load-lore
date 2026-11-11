@@ -22,11 +22,12 @@ loadl scenarios                                # the scenario library
 loadl hint                                     # the next hint for the scenario you're running
 loadl scenario check scenarios/<name>          # run a scenario and its solutions; check its claims
 loadl down                                     # remove anything a run left behind
+loadl doctor                                   # check Docker, capacity, image, host speed and power, with fixes
 ```
 
 Every command accepts `--json`.
 
-`loadl run` needs Docker with Compose 2.23 or later and the synthetic service image (`make image`). It uses the current Docker context, or `DOCKER_HOST`. On Colima, give the VM enough CPUs for the design; the pre-flight check says when a design doesn't fit and which `--scale` does.
+`loadl run` needs Docker with Compose 2.23 or later and the synthetic service image (`make image`). `loadl doctor` checks all of it, and says how to fix what's missing. It uses the current Docker context, or `DOCKER_HOST`. On Colima, give the VM enough CPUs for the design; the pre-flight check says when a design doesn't fit and which `--scale` does.
 
 A run folder holds the exact `design.yaml`, the generated `compose.yaml` and `load.js`, `plan.json` (resources after scaling, and why), `events.jsonl` (load, faults, container deaths), `metrics/` (every series, exported from Prometheus before teardown), `logs/`, `containers.json`, `k6-summary.json`, `run.json`, and the `report.md` and `analysis.json` that `loadl run` writes at the end. Reports are made from the folder alone, so `loadl report` can regenerate them at any time.
 

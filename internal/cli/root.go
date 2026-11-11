@@ -75,6 +75,7 @@ func newRootCmd() *cobra.Command {
 		newHintCmd(g),
 		newScenarioCmd(g),
 		newDownCmd(g),
+		newDoctorCmd(g),
 		newVersionCmd(g),
 	)
 	return root
