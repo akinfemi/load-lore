@@ -387,7 +387,7 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 	if err != nil {
 		return fmt.Errorf("load: %w", err)
 	}
-	if lr.ExitCode != 0 && lr.ExitCode != 99 && !(stopped != nil && lr.ExitCode == driver.K6Stopped) {
+	if lr.ExitCode != 0 && lr.ExitCode != 99 && (stopped == nil || lr.ExitCode != driver.K6Stopped) {
 		return fmt.Errorf("the load generator exited with code %d", lr.ExitCode)
 	}
 	return nil

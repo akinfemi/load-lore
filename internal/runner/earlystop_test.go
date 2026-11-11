@@ -26,20 +26,21 @@ func sample(served, errs, p99 float64) *driver.Sample {
 	return &driver.Sample{Offered: 10, Served: &served, Errors: &errs, P99Ms: &p99}
 }
 
-func feed(b *breakWatch, from, to int, s *driver.Sample) (time.Duration, bool) {
-	var at time.Duration
+// feed adds s at each 10 s from from to to, and reports whether the last
+// add stops the load.
+func feed(b *breakWatch, from, to int, s *driver.Sample) bool {
 	var ok bool
 	for i := from; i <= to; i++ {
-		at, ok = b.add(time.Duration(i)*10*time.Second, s)
+		_, ok = b.add(time.Duration(i)*10*time.Second, s)
 	}
-	return at, ok
+	return ok
 }
 
 func TestBreakWatch(t *testing.T) {
 	p := watchPlan(t) // 10 rps for 10 minutes, 500 ms SLO
 
 	b := newBreakWatch(p)
-	if _, ok := feed(b, 1, 30, sample(10, 0, 5)); ok {
+	if feed(b, 1, 30, sample(10, 0, 5)) {
 		t.Error("a healthy run stopped")
 	}
 
@@ -58,7 +59,7 @@ func TestBreakWatch(t *testing.T) {
 	// p99 alone needs 3 windows at 10x the low-load p99 and the SLO.
 	b = newBreakWatch(p)
 	feed(b, 1, 10, sample(10, 0, 5))
-	if _, ok := feed(b, 11, 12, sample(10, 0, 600)); ok {
+	if feed(b, 11, 12, sample(10, 0, 600)) {
 		t.Error("two slow windows stopped the run")
 	}
 	if _, ok := b.add(130*time.Second, sample(10, 0, 600)); !ok {
@@ -68,7 +69,7 @@ func TestBreakWatch(t *testing.T) {
 	// A break the profile ends about as soon as the stop would: no stop.
 	b = newBreakWatch(p)
 	feed(b, 1, 56, sample(10, 0, 5))
-	if _, ok := feed(b, 57, 58, sample(8, 0.2, 5)); ok {
+	if feed(b, 57, 58, sample(8, 0.2, 5)) {
 		t.Error("stopped a run that ends anyway")
 	}
 }

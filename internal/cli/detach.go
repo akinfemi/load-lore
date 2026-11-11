@@ -77,7 +77,7 @@ func runDetached(cmd *cobra.Command, g *globalOpts, args []string) error {
 		select {
 		case err := <-exited:
 			b, _ := os.ReadFile(logPath)
-			return fmt.Errorf("the run ended before it started (%v):\n%s", err, strings.TrimSpace(string(b)))
+			return fmt.Errorf("the run ended before it started (%w):\n%s", err, strings.TrimSpace(string(b)))
 		case <-deadline:
 			return fmt.Errorf("the run hasn't printed its id after %s; see %s", detachWait, logPath)
 		case <-tick.C:
