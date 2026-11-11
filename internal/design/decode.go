@@ -137,6 +137,10 @@ func isNull(n *yaml.Node) bool {
 
 var unmarshalerType = reflect.TypeFor[yaml.Unmarshaler]()
 
+// shorthand is a struct that can also be written as one scalar, which sets
+// the named field: a pool's size, say.
+type shorthand interface{ shorthandField() string }
+
 func (d *decoder) decode(n *yaml.Node, v reflect.Value, path string, tag tagInfo) {
 	n = resolveAlias(n)
 	if isNull(n) {
@@ -168,6 +172,11 @@ func (d *decoder) decode(n *yaml.Node, v reflect.Value, path string, tag tagInfo
 		d.decode(n, nv.Elem(), path, tag)
 		v.Set(nv)
 	case reflect.Struct:
+		if sh, ok := v.Addr().Interface().(shorthand); ok && n.Kind == yaml.ScalarNode {
+			f := structFields(v.Type()).byName[sh.shorthandField()]
+			d.decode(n, v.Field(f.index), path, f.tag)
+			return
+		}
 		d.decodeStruct(n, v, path)
 	case reflect.Map:
 		d.decodeMap(n, v, path, tag)

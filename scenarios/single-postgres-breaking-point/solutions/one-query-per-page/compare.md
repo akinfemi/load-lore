@@ -9,7 +9,7 @@ _A: run `single-postgres-breaking-point-20261111-015507` · B: run `single-postg
 | Most served | 2,950 rps at 2:50 | 4,085 rps at 4:00 |
 | Worst 10-second p99 | 4.18 s | 3.86 s |
 | Worst error rate | 0% | 0% |
-| Diagnoses | Queueing knee (db CPU) from 2:30 | Queueing knee (db CPU) from 3:10 |
+| Diagnoses | Connection storm (api → db) from 2:00; Queueing knee (db CPU) from 2:30 | Connection storm (api → db) from 1:00; Queueing knee (db CPU) from 3:10 |
 | Predictions held | 1 of 2 | 2 of 2 |
 | Peak offered | 5,000 rps | 5,000 rps |
 | Scale, seed | 1, 1 | 1, 1 |
@@ -119,10 +119,12 @@ xychart-beta
 
 ### A
 
+- **Connection storm (api → db), from 2:00.** At 2:00, api's pools opened 66 connections to db within 10 seconds, at 2,142 rps offered, and p99 reached 588 ms (2.9 ms at low load). The pools open connections only when callers need them, so when a short slowdown leaves requests waiting, every replica opens more at once. Each new Postgres connection starts a server process and authenticates, which takes db's CPU from queries just when it is short of it.
 - **Queueing knee (db CPU), from 2:30.** From 2:30, p99 stayed above 13 ms (2.9 ms at low load) with db CPU at 75%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
 
 ### B
 
+- **Connection storm (api → db), from 1:00.** At 1:00, api's pools opened 81 connections to db within 10 seconds, at 1,162 rps offered, and p99 reached 174 ms (2.4 ms at low load). The pools open connections only when callers need them, so when a short slowdown leaves requests waiting, every replica opens more at once. Each new Postgres connection starts a server process and authenticates, which takes db's CPU from queries just when it is short of it.
 - **Queueing knee (db CPU), from 3:10.** From 3:10, p99 stayed above 12 ms (2.4 ms at low load) with db CPU at 74%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
 
 ## Predictions

@@ -34,6 +34,7 @@ type metrics struct {
 	retries      *prometheus.CounterVec   // target, op
 	cacheLookups *prometheus.CounterVec   // target, result
 	poolWait     *prometheus.HistogramVec // target
+	connects     *prometheus.HistogramVec // target, outcome
 	asyncDropped prometheus.Counter
 }
 
@@ -77,6 +78,7 @@ func newMetrics(cfg *Config, pools func() []poolSnapshot) *metrics {
 	m.retries = counter("call_retries_total", "Retries of outbound calls.", "target", "op")
 	m.cacheLookups = counter("cache_lookups_total", "Cache gets, by result (hit or miss).", "target", "result")
 	m.poolWait = hist("pool_wait_seconds", "Time spent waiting for a connection from a target's pool (postgres and http targets).", latencyBuckets, "target")
+	m.connects = hist("pool_connect_seconds", "New connections a target's pool opened, by outcome (ok or error), and how long each took to open: TCP, startup and authentication (postgres targets).", latencyBuckets, "target", "outcome")
 	m.asyncDropped = counter("async_calls_failed_total", "Async calls that failed; they never fail the request.").WithLabelValues()
 
 	f(&poolCollector{labels: labels, snapshots: pools})

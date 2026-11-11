@@ -100,6 +100,9 @@ type Target struct {
 	Kind  string   `json:"kind"`
 	Addrs []string `json:"addrs"` // host:port
 	Pool  int      `json:"pool"`  // connections per replica
+	// PoolMin is how many connections each replica opens before it reports
+	// ready and keeps open (postgres only); 0 opens them on demand.
+	PoolMin int `json:"pool_min,omitempty"`
 
 	// Postgres.
 	Database       string `json:"database,omitempty"`
@@ -171,6 +174,10 @@ func (c *Config) Validate() error {
 			bad("target %s: a %s target has exactly one addr", name, t.Kind)
 		case t.Pool < 1:
 			bad("target %s: pool %d", name, t.Pool)
+		case t.PoolMin < 0 || t.PoolMin > t.Pool:
+			bad("target %s: pool_min %d with pool %d", name, t.PoolMin, t.Pool)
+		case t.PoolMin > 0 && t.Kind != KindPostgres:
+			bad("target %s: pool_min is for postgres targets", name)
 		case t.Kind == KindPostgres && (t.Rows < 1 || t.RowBytes < 1):
 			bad("target %s: postgres needs rows and row_bytes", name)
 		}

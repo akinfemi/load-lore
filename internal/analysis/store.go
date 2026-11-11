@@ -315,7 +315,26 @@ func (s *store) classicBuckets(name string, m matcher, a, b float64) []bucket {
 // values at a and b are interpolated between the samples around them, as
 // Prometheus's rate() does, so a window counts what happened inside it
 // even though samples don't land on its edges.
+// increaseFromFirst is increase, except that a series whose first sample
+// is in the window counts from that sample, not from zero: for counters a
+// service may have run up before it was first scraped, such as the
+// connections a pool opens before the load starts.
+func (s *store) increaseFromFirst(name string, m matcher, a, b float64) (float64, bool) {
+	total, found := 0.0, false
+	for _, ss := range s.match(name, m) {
+		if inc, ok := s.increaseFrom(ss, a, b, true); ok {
+			total += inc
+			found = true
+		}
+	}
+	return total, found
+}
+
 func (s *store) increaseOne(ss *series, a, b float64) (float64, bool) {
+	return s.increaseFrom(ss, a, b, false)
+}
+
+func (s *store) increaseFrom(ss *series, a, b float64, fromFirst bool) (float64, bool) {
 	ps := ss.points
 	if len(ps) == 0 || ps[0].t > b {
 		return 0, false
@@ -323,6 +342,9 @@ func (s *store) increaseOne(ss *series, a, b float64) (float64, bool) {
 	prev, ok := counterAt(ps, a)
 	if !ok {
 		prev = 0 // born in the window
+		if fromFirst {
+			prev = ps[0].v
+		}
 	}
 	inc := 0.0
 	step := func(v float64) {

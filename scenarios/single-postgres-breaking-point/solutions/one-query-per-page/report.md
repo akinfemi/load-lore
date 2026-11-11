@@ -113,7 +113,22 @@ xychart-beta
 
 ## Diagnosis
 
-### 1. Queueing knee (db CPU), from 3:10
+### 1. Connection storm (api → db), from 1:00
+
+At 1:00, api's pools opened 81 connections to db within 10 seconds, at 1,162 rps offered, and p99 reached 174 ms (2.4 ms at low load). The pools open connections only when callers need them, so when a short slowdown leaves requests waiting, every replica opens more at once. Each new Postgres connection starts a server process and authenticates, which takes db's CPU from queries just when it is short of it.
+
+Evidence:
+
+- 81 new connections to db from 1:00 to 1:10: from 15 open to 96 of 96 <sub>(loadlore_pool_connections (in use and idle, summed over replicas))</sub>
+- p99 174 ms at 1:00, against 2.4 ms at low load <sub>(k6_http_req_duration_seconds (k6 histogram, end to end))</sub>
+- up to 62 requests waiting for a connection at 1:00 <sub>(loadlore_pool_pending (callers waiting for a connection))</sub>
+- db CPU at 31% of its limit at 1:00 <sub>(container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit)</sub>
+- db was CPU-throttled for 6.1 s (summed over its threads) in the window from 1:00, while its average CPU was 31% of its limit: bursts of work hit the 0.5-CPU limit and waited for the next period <sub>(container_cpu_cfs_throttled_seconds_total (cAdvisor))</sub>
+- api's calls to db took 3.2 ms each once they had a connection at 1:00, against 0.2 ms at low load <sub>(loadlore_call_duration_seconds minus loadlore_pool_wait_seconds, per call (time with a connection))</sub>
+
+**Try next:** Open the connections before the load arrives: give the pool a minimum (pools: { db: { size: 24, min: 24 } }) and re-run to compare a warm pool with this cold one. PgBouncer in front of db also keeps server connections open.
+
+### 2. Queueing knee (db CPU), from 3:10
 
 From 3:10, p99 stayed above 12 ms (2.4 ms at low load) with db CPU at 74%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
 
@@ -125,7 +140,7 @@ Evidence:
 
 **Try next:** Add capacity or cut per-request work on db, then re-run the ramp.
 
-<sub>Rules version 3. Rules are deterministic and offline; their thresholds are listed below.</sub>
+<sub>Rules version 4. Rules are deterministic and offline; their thresholds are listed below.</sub>
 
 ## Predictions
 
@@ -162,6 +177,7 @@ The design lists no assumptions.
 - **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than 1.0% of a window's arrivals, or the load generator or Toxiproxy used 90% or more of its CPU budget, or was stalled at its CPU limit in 5.0% or more of its scheduling periods (from 1.0% it's noted as a caveat). The first 10 s of load are a warm-up and don't count: the load generator starts its VUs and connections open then. A cause is named only with evidence: on a Linux host, the hypervisor giving 2.0% or more of CPU time to other virtual machines (steal), or other programs using 10% or more of the host's CPUs (at least 0.5); inside a VM on this machine, only as a possibility.
 - **Connection pool exhausted:** for two windows in a row, a pool at 95% or more of its size with callers waiting, while the target wasn't busy (busy: its CPU at 80% or more, or its time per call with a connection at least 3x the low-load value and 1 ms above it; CPU throttling alone doesn't count) and the caller's CPU stayed below 90%.
 - **Queueing knee:** for 3 windows in a row, p99 at least 3x the low-load p99 and 10 ms above it, with a CPU or pool at 70% or more. When that is a pool whose target was busy in any of those windows, or a service's CPU whose requests spent 50% or more of their time in calls to a busy target, the knee is the target's.
+- **Connection storm:** up to the break, a service's pools to a Postgres opening at least 50% of their combined size, and 10 or more connections, in one window, while p99 in that window or the next was at least 10x the low-load p99 and 10 ms above it. New connections are counted by loadlore_pool_connect_seconds (new connections the pools opened, and how long each took), or for runs from before it, from the rise in open connections.
 
 ## Environment
 

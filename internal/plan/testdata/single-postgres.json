@@ -375,6 +375,11 @@
       "field": "services.lb timeouts",
       "value": "connect 5s, server 60s",
       "why": "HAProxy's own timeouts, with its defaults otherwise. A request already sent to a replica that dies waits for the server timeout (or the load generator's); health checks only stop new requests going there"
+    },
+    {
+      "field": "services.api.pools.db.min",
+      "value": "0",
+      "why": "the default, as pgxpool's: each replica opens connections only when callers need them, so a pool fills as load rises, and a burst opens many at once"
     }
   ]
 }

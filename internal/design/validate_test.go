@@ -201,6 +201,13 @@ func TestValidationDiagnostics(t *testing.T) {
 		// Pools.
 		{"pool for unknown service", map[string]string{"services.api.pools": "{nope: 3}"}, []string{"error services.api.pools.nope unknown-service"}},
 		{"pool never used", map[string]string{"services.cache": "{kind: redis}", "services.api.pools": "{cache: 3}"}, []string{"warning services.api.pools.cache unused-pool"}},
+		{"pool size below 1", map[string]string{"services.api.pools": "{db: 0}"}, []string{"error services.api.pools.db range"}},
+		{"pool object form", map[string]string{"services.api.pools": "{db: {size: 24, min: 24}}"}, nil},
+		{"pool min alone", map[string]string{"services.api.pools": "{db: {min: 5}}"}, nil},
+		{"pool min over size", map[string]string{"services.api.pools": "{db: {size: 4, min: 5}}"}, []string{"error services.api.pools.db.min range"}},
+		{"pool min over default size", map[string]string{"services.api.pools": "{db: {min: 11}}"}, []string{"error services.api.pools.db.min range"}},
+		{"pool min not for http", map[string]string{"services.web": "{image: loadlore/synthetic, behavior: {calls: [{target: api, op: http}]}, pools: {api: {min: 2}}}"}, []string{"error services.web.pools.api.min not-applicable", "warning services.web.behavior.calls[0].target no-lb"}},
+		{"pool unknown field", map[string]string{"services.api.pools": "{db: {size: 4, warm: true}}"}, []string{"error services.api.pools.db.warm unknown-field"}},
 
 		// Workload.
 		{"unknown entry", map[string]string{"workload.entry": "apo"}, []string{"error workload.entry unknown-service"}},
@@ -380,8 +387,9 @@ func TestDefaults(t *testing.T) {
 		{"read query", api.Behavior.Calls[0].Query, "point"},
 		{"range rows", *api.Behavior.Calls[1].Rows, DefaultRangeRows},
 		{"get has no query", api.Behavior.Calls[2].Query, ""},
-		{"pool db", api.Pools["db"], DefaultPool},
-		{"pool cache", api.Pools["cache"], DefaultPool},
+		{"pool db", *api.Pools["db"].Size, DefaultPool},
+		{"pool db min", *api.Pools["db"].Min, 0},
+		{"pool cache", *api.Pools["cache"].Size, DefaultPool},
 		{"postgres version", db.Version, "17"},
 		{"row bytes", *db.Dataset.RowBytes, DefaultRowBytes},
 		{"redis version", cache.Version, "8"},

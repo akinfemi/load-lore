@@ -65,8 +65,12 @@ func Annotated(d *design.Design, an *Annotations) *mermaid.Flowchart {
 		case s.Behavior != nil:
 			for _, e := range callEdges(s) {
 				lines := []string{strings.Join(e.ops, ", ")}
-				if pool, ok := s.Pools[e.target]; ok {
-					lines = append(lines, fmt.Sprintf("pool %d", pool))
+				if pool, ok := s.Pools[e.target]; ok && pool.Size != nil {
+					l := fmt.Sprintf("pool %d", *pool.Size)
+					if pool.Min != nil && *pool.Min > 0 {
+						l += fmt.Sprintf(", min %d", *pool.Min)
+					}
+					lines = append(lines, l)
 				}
 				style := mermaid.Solid
 				if e.async {

@@ -60,6 +60,8 @@ api:
   concurrency: { model: threads, max: 200 }   # threads (default) | event-loop | workers
 ```
 
+A pool is a size, or `{ size, min }`. `min` (default `0`, postgres and pgbouncer targets only) is how many connections each replica opens before the load starts and keeps open: a warm pool. With `0`, connections open only when callers need them, as pgxpool does by default, so a burst can make every replica open many Postgres connections at once (the connection storm rule names it). `pools: { db: { size: 24, min: 24 } }` opens all 24 up front. The report prints each pool's `min` as an assumption.
+
 `concurrency` approximates the real runtime:
 
 | `model` | `max` means | Default `max` |

@@ -150,6 +150,15 @@ type PoolWindow struct {
 	// time minus pool wait. It's the target's own latency, network
 	// included, without the queue for a connection in front of it.
 	HeldMs *float64 `json:"held_ms"`
+	// Open is the most connections open at once (in use or idle) and
+	// OpenEnd how many were open at the window's end. Opened is how many
+	// new connections the pools opened, and ConnectMs the mean time each
+	// took to open, from the connect histogram; runs from before it have
+	// only the open counts.
+	Open      *float64 `json:"open"`
+	OpenEnd   *float64 `json:"open_end"`
+	Opened    *float64 `json:"opened,omitempty"`
+	ConnectMs *float64 `json:"connect_ms,omitempty"`
 }
 
 // EdgeWindow is the traffic on one connection between components.
@@ -658,6 +667,22 @@ func (b *builder) appEdges(w *Window, s *plan.Service, wa, wb float64) {
 		if mx, _, ok := st.gaugeSum("loadlore_pool_max_connections", m, wa, wb); ok {
 			pw.Max = num(mx, true)
 		}
+		if open := st.gaugeGrid("loadlore_pool_connections", m, wa, wb); len(open) > 0 {
+			pw.Open, pw.OpenEnd = num(slices.Max(open), true), num(open[len(open)-1], true)
+		}
+		// The services are first scraped at about the load's start, so in
+		// the first window a pool's connections count from that scrape:
+		// the ones a minimum opened before the load don't count.
+		inc := st.increase
+		if w.Index == 0 {
+			inc = st.increaseFromFirst
+		}
+		if n, ok := inc("loadlore_pool_connect_seconds_count", m, wa, wb); ok {
+			pw.Opened = num(n, true)
+			if secs, ok := inc("loadlore_pool_connect_seconds_sum", m, wa, wb); ok && n > 0 {
+				pw.ConnectMs = num(secs/n*1000, true)
+			}
+		}
 		if mx, _, ok := st.gaugeSum("loadlore_pool_pending", m, wa, wb); ok {
 			pw.Pending = num(mx, true)
 		}
@@ -699,6 +724,8 @@ const (
 	SrcPoolInUse        = `loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections`
 	SrcPoolPending      = "loadlore_pool_pending (callers waiting for a connection)"
 	SrcPoolWait         = "loadlore_pool_wait_seconds (time to get a connection)"
+	SrcPoolOpen         = "loadlore_pool_connections (in use and idle, summed over replicas)"
+	SrcPoolConnect      = "loadlore_pool_connect_seconds (new connections the pools opened, and how long each took)"
 	SrcPoolHeld         = "loadlore_call_duration_seconds minus loadlore_pool_wait_seconds, per call (time with a connection)"
 	SrcPGConns          = "pg_stat_activity_count and pg_settings_max_connections (postgres_exporter)"
 	SrcHitRate          = "redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter)"

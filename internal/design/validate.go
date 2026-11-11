@@ -312,12 +312,22 @@ func (v *validator) pools(name, p string, s *Service) {
 	}
 	for _, t := range sortedKeys(s.Pools) {
 		pp := pathKey(pathKey(p, "pools"), t)
-		if s.Pools[t] < 1 {
+		pool := s.Pools[t]
+		if pool.Size != nil && *pool.Size < 1 {
 			v.errorf(pp, CodeRange, "pool size must be at least 1")
 		}
-		if _, ok := v.d.Services[t]; !ok {
+		ts, ok := v.d.Services[t]
+		if !ok {
 			v.unknownService(pp, t)
 			continue
+		}
+		if pool.Min != nil && *pool.Min > 0 {
+			switch {
+			case ts.Kind != "postgres" && ts.Kind != "pgbouncer":
+				v.errorf(pathKey(pp, "min"), CodeNotApplicable, "a pool minimum only applies to postgres and pgbouncer targets; %s is %s", t, describeKind(ts))
+			case pool.Size != nil && *pool.Min > *pool.Size:
+				v.errorf(pathKey(pp, "min"), CodeRange, "min %d is more than the pool's size, %d", *pool.Min, *pool.Size)
+			}
 		}
 		if !targets[t] {
 			v.warnf(pp, CodeUnusedPool, "%s has a pool for %s but never calls it", name, t)
@@ -878,4 +888,12 @@ func splitPath(path string) ([]pathSeg, error) {
 		}
 	}
 	return segs, nil
+}
+
+// describeKind names what a service is, for messages.
+func describeKind(s *Service) string {
+	if s.Kind != "" {
+		return "a " + s.Kind
+	}
+	return "an application service"
 }

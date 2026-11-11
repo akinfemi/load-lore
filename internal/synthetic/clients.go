@@ -52,6 +52,7 @@ func newClient(name string, t Target, timeout time.Duration, m *metrics) (client
 
 type pgClient struct {
 	name    string
+	min     int
 	pool    *pgxpool.Pool
 	spec    dataset.Spec
 	payload string
@@ -72,7 +73,11 @@ func newPGClient(name string, t Target, m *metrics) (*pgClient, error) {
 		return nil, fmt.Errorf("target %s: %w", name, err)
 	}
 	cfg.MaxConns = int32(t.Pool)
-	cfg.MinConns = 0
+	// With a minimum, pgxpool opens that many connections in the
+	// background at once and keeps them open; without one, it opens
+	// connections only when callers need them.
+	cfg.MinConns = int32(t.PoolMin)
+	cfg.ConnConfig.Tracer = &connectTracer{target: name, m: m}
 	if t.SimpleProtocol {
 		// pgbouncer in transaction mode can't keep server-side prepared
 		// statements across transactions.
@@ -84,7 +89,7 @@ func newPGClient(name string, t Target, m *metrics) (*pgClient, error) {
 	}
 	spec := dataset.Spec{Rows: t.Rows, RowBytes: t.RowBytes}
 	return &pgClient{
-		name: name, pool: pool, spec: spec, m: m,
+		name: name, min: t.PoolMin, pool: pool, spec: spec, m: m,
 		payload: strings.Repeat("w", spec.PayloadLen()),
 	}, nil
 }
@@ -152,8 +157,49 @@ func (p *pgClient) snapshot() poolSnapshot {
 	}
 }
 
-func (p *pgClient) ping(ctx context.Context) error { return p.pool.Ping(ctx) }
-func (p *pgClient) close()                         { p.pool.Close() }
+// ping checks the database answers and, for a pool with a minimum, that
+// the minimum is open, so the load starts on a warm pool.
+func (p *pgClient) ping(ctx context.Context) error {
+	if err := p.pool.Ping(ctx); err != nil {
+		return err
+	}
+	s := p.pool.Stat()
+	if open := int(s.AcquiredConns() + s.IdleConns()); open < p.min {
+		return fmt.Errorf("%d of the pool's minimum %d connections open", open, p.min)
+	}
+	return nil
+}
+
+// connectTracer times each new connection a pool opens.
+type connectTracer struct {
+	target string
+	m      *metrics
+}
+
+type connectStartKey struct{}
+
+func (t *connectTracer) TraceConnectStart(ctx context.Context, _ pgx.TraceConnectStartData) context.Context {
+	return context.WithValue(ctx, connectStartKey{}, time.Now())
+}
+
+func (t *connectTracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndData) {
+	start, ok := ctx.Value(connectStartKey{}).(time.Time)
+	if !ok {
+		return
+	}
+	outcome := "ok"
+	if data.Err != nil {
+		outcome = "error"
+	}
+	t.m.connects.WithLabelValues(t.target, outcome).Observe(time.Since(start).Seconds())
+}
+
+// pgx calls these for every query; only connections are traced.
+func (t *connectTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+func (t *connectTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+func (p *pgClient) close()                                                               { p.pool.Close() }
 
 // poolWaitErr labels an error that ended a wait for a pool connection. A
 // deadline means the pool was the bottleneck; a cancel means the caller left.

@@ -6,6 +6,7 @@ package plan
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -582,7 +583,8 @@ func (p *Plan) syntheticConfigs(d *design.Design, name string, s *Service, byNam
 		for _, x := range p.proxiesInto(name, target) {
 			addrs = append(addrs, x.Addr())
 		}
-		st := synthetic.Target{Addrs: addrs, Pool: ds.Pools[target]}
+		pool := ds.Pools[target]
+		st := synthetic.Target{Addrs: addrs, Pool: *pool.Size, PoolMin: *pool.Min}
 		switch t.Kind {
 		case "app", "lb":
 			st.Kind = synthetic.KindHTTP
@@ -859,6 +861,21 @@ func (p *Plan) assume(d *design.Design) {
 				Field: "services." + name + " timeouts", Value: "connect 5s, server 60s",
 				Why: "HAProxy's own timeouts, with its defaults otherwise. A request already sent to a replica that dies waits for the server timeout (or the load generator's); health checks only stop new requests going there",
 			})
+		}
+	}
+	for _, name := range d.ServiceNames() {
+		s := d.Services[name]
+		for _, t := range slices.Sorted(maps.Keys(s.Pools)) {
+			ts, pool := d.Services[t], s.Pools[t]
+			if ts == nil || ts.Kind != "postgres" || pool.Min == nil {
+				continue
+			}
+			a := Assumption{Field: "services." + name + ".pools." + t + ".min", Value: strconv.Itoa(*pool.Min),
+				Why: "the default, as pgxpool's: each replica opens connections only when callers need them, so a pool fills as load rises, and a burst opens many at once"}
+			if *pool.Min > 0 {
+				a.Why = fmt.Sprintf("set in the design: each replica opens %d connections before the load starts and keeps them open", *pool.Min)
+			}
+			p.Assumptions = append(p.Assumptions, a)
 		}
 	}
 	for _, name := range d.ServiceNames() {

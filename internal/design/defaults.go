@@ -180,11 +180,12 @@ func defaultApp(s *Service, services map[string]*Service) {
 		}
 		if _, known := services[c.Target]; known {
 			if s.Pools == nil {
-				s.Pools = map[string]int{}
+				s.Pools = map[string]Pool{}
 			}
-			if _, ok := s.Pools[c.Target]; !ok {
-				s.Pools[c.Target] = DefaultPool
-			}
+			pool := s.Pools[c.Target]
+			setDefault(&pool.Size, DefaultPool)
+			setDefault(&pool.Min, 0)
+			s.Pools[c.Target] = pool
 		}
 	})
 }

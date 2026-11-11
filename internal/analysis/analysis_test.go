@@ -299,6 +299,10 @@ func TestCounterResetsAndBirths(t *testing.T) {
 	if v, ok := st.increase("c", nil, 0, 3); !ok || v != 10+5+10+9 {
 		t.Errorf("increase %v", v)
 	}
+	// Counting from the first sample, the born series adds only its growth.
+	if v, ok := st.increaseFromFirst("c", nil, 0, 3); !ok || v != 10+5+10+2 {
+		t.Errorf("increase from first %v", v)
+	}
 }
 
 func TestGaugesFromUnalignedScrapes(t *testing.T) {
@@ -486,11 +490,7 @@ func TestKneeFollowsPoolToBusyTarget(t *testing.T) {
 	if want := "Most saturated then: api → db pool 96 of 96 connections in use, waiting on db (CPU 100%, CPU-throttled 45.8 s, 22 ms per call with a connection, 0.4 ms at low load)."; !strings.Contains(a.Verdict.Summary, want) {
 		t.Errorf("summary lacks %q:\n%s", want, a.Verdict.Summary)
 	}
-	ds := diagnose(a)
-	if len(ds) != 1 || ds[0].Rule != "queueing-knee" {
-		t.Fatalf("diagnoses %+v", ds)
-	}
-	d := ds[0]
+	d := byRule(t, diagnose(a), "queueing-knee")
 	if d.Title != "Queueing knee (db CPU)" || d.From != 110 || !strings.Contains(d.Next, "on db,") {
 		t.Errorf("%s from %v, next %q", d.Title, d.From, d.Next)
 	}
@@ -524,12 +524,12 @@ func TestKneeFollowsCallerToBusyTarget(t *testing.T) {
 	}
 	a.Plan, a.PeakOffered = &p, p.Workload.PeakRate
 	a.Verdict = verdict(a)
-	ds := diagnose(a)
-	if len(ds) != 1 || ds[0].Title != "Queueing knee (db CPU)" || ds[0].From != 200 || !strings.Contains(ds[0].Next, "on db,") {
-		t.Fatalf("diagnoses %+v", ds)
+	knee := byRule(t, diagnose(a), "queueing-knee")
+	if knee.Title != "Queueing knee (db CPU)" || knee.From != 200 || !strings.Contains(knee.Next, "on db,") {
+		t.Fatalf("knee %+v", knee)
 	}
 	text := ""
-	for _, e := range ds[0].Evidence {
+	for _, e := range knee.Evidence {
 		text += e.Text + "\n"
 	}
 	for _, want := range []string{
@@ -562,6 +562,66 @@ func TestKneeFollowsCallerToBusyTarget(t *testing.T) {
 	}
 	if !slices.Contains(titles, "Queueing knee (api CPU)") {
 		t.Errorf("idle db: %v", titles)
+	}
+}
+
+func byRule(t *testing.T, ds []*Diagnosis, rule string) *Diagnosis {
+	t.Helper()
+	var found *Diagnosis
+	for _, d := range ds {
+		if d.Rule == rule {
+			if found != nil {
+				t.Fatalf("two %s diagnoses", rule)
+			}
+			found = d
+		}
+	}
+	if found == nil {
+		t.Fatalf("no %s diagnosis", rule)
+	}
+	return found
+}
+
+// Regression, from the same run: at 1:30 api's pools to db went from 25
+// to 96 open connections in one window as p99 reached 1.00 s (2.8 ms at
+// low load), a stall in the timeline. Runs from before the connect
+// histogram have only the open counts.
+func TestConnectionStorm(t *testing.T) {
+	dir := filepath.Join("testdata", "caller-waits-on-db")
+	a := &Analysis{}
+	var p plan.Plan
+	if err := readJSON(filepath.Join(dir, "plan.json"), &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := readJSON(filepath.Join(dir, "windows.json"), &a.Windows); err != nil {
+		t.Fatal(err)
+	}
+	a.Plan, a.PeakOffered = &p, p.Workload.PeakRate
+	a.Verdict = verdict(a)
+	d := byRule(t, diagnose(a), "connection-storm")
+	if d.Title != "Connection storm (api → db)" || d.From != 90 || d.To != 100 {
+		t.Errorf("%s from %v to %v", d.Title, d.From, d.To)
+	}
+	for _, want := range []string{"At 1:30, api's pools opened 71 connections to db within 10 seconds, at 1,652 rps offered, and p99 reached 1.00 s (2.8 ms at low load)", "pools: { db: { size: 24, min: 24 } }"} {
+		if !strings.Contains(d.Summary+d.Next, want) {
+			t.Errorf("lacks %q:\n%s\n%s", want, d.Summary, d.Next)
+		}
+	}
+	if e := d.Evidence[0]; e.Text != "71 new connections to db from 1:30 to 1:40: from 25 open to 96 of 96" || e.Source != SrcPoolOpen {
+		t.Errorf("evidence %+v", e)
+	}
+
+	// Counted by the connect histogram, a warm pool opens none, so no storm.
+	for _, w := range a.Windows {
+		for _, pw := range w.Pools {
+			zero := 0.0
+			pw.Opened = &zero
+		}
+	}
+	for _, d := range diagnose(a) {
+		if d.Rule == "connection-storm" {
+			t.Errorf("warm pool: %s", d.Summary)
+		}
 	}
 }
 

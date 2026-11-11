@@ -25,10 +25,10 @@ type Service struct {
 	Resources *Resources `yaml:"resources,omitempty" json:"resources,omitempty" jsonschema_description:"Default 1 CPU and 512m; lb defaults to 0.5 CPU and 256m."`
 
 	// Application services.
-	Role        string         `yaml:"role,omitempty" json:"role,omitempty" jsonschema:"enum=server,default=server" jsonschema_description:"server handles HTTP requests."`
-	Behavior    *Behavior      `yaml:"behavior,omitempty" json:"behavior,omitempty" jsonschema_description:"What the synthetic service does per request. Only for loadlore/synthetic."`
-	Pools       map[string]int `yaml:"pools,omitempty" json:"pools,omitempty" jsonschema_description:"Connections per replica, per call target. Default 10 for each target."`
-	Concurrency *Concurrency   `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	Role        string          `yaml:"role,omitempty" json:"role,omitempty" jsonschema:"enum=server,default=server" jsonschema_description:"server handles HTTP requests."`
+	Behavior    *Behavior       `yaml:"behavior,omitempty" json:"behavior,omitempty" jsonschema_description:"What the synthetic service does per request. Only for loadlore/synthetic."`
+	Pools       map[string]Pool `yaml:"pools,omitempty" json:"pools,omitempty" jsonschema_description:"Connection pool per call target: a size (connections per replica, default 10), or {size, min}."`
+	Concurrency *Concurrency    `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
 
 	// Datastores and infrastructure.
 	Version string                 `yaml:"version,omitempty" json:"version,omitempty" jsonschema_description:"Major version. postgres default \"17\"; redis default \"8\"."`
@@ -218,4 +218,11 @@ type Modes struct {
 // LocalMode overrides for local Docker runs.
 type LocalMode struct {
 	Scale *float64 `yaml:"scale,omitempty" json:"scale,omitempty" jsonschema:"exclusiveMinimum=0,default=1" jsonschema_description:"Shrinks resources and load together. The --scale flag overrides it."`
+}
+
+// Pool is a service's connection pool to one target, per replica. A plain
+// number is its size.
+type Pool struct {
+	Size *int `yaml:"size,omitempty" json:"size,omitempty" jsonschema:"minimum=1,default=10" jsonschema_description:"Connections per replica."`
+	Min  *int `yaml:"min,omitempty" json:"min,omitempty" jsonschema:"minimum=0,default=0" jsonschema_description:"Connections each replica opens before the load starts and keeps open: a warm pool. postgres and pgbouncer targets only. Default 0: connections open only when callers need them, as pgxpool does by default."`
 }

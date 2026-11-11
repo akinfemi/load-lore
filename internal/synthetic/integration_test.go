@@ -333,3 +333,32 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// A pool with a minimum opens it before the service reports ready; one
+// without opens connections as callers need them. Each new connection is
+// counted and timed.
+func TestIntegrationPoolMinimum(t *testing.T) {
+	env := startPostgres(t)
+	warm := pgTarget(env, 6)
+	warm.PoolMin = 5
+	s := newService(t, &Config{
+		Service:    "api",
+		Resilience: Resilience{TimeoutMs: 5000},
+		Targets:    map[string]Target{"db": warm, "cold": pgTarget(env, 6)},
+		Calls:      []Call{call("db", "read"), call("cold", "read")},
+	})
+	ctx := context.Background()
+	waitFor(t, func() bool { return s.clients["db"].ping(ctx) == nil })
+	if n := metricValue(t, s, "loadlore_pool_connect_seconds", map[string]string{"target": "db", "outcome": "ok"}); n < 5 {
+		t.Errorf("warm pool opened %v connections before the load, want 5", n)
+	}
+	if err := s.clients["cold"].ping(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := metricValue(t, s, "loadlore_pool_connect_seconds", map[string]string{"target": "cold", "outcome": "ok"}); n != 1 {
+		t.Errorf("cold pool opened %v connections for one ping, want 1", n)
+	}
+	if open := s.clients["db"].snapshot(); open.inUse+open.idle < 5 {
+		t.Errorf("warm pool has %d open", open.inUse+open.idle)
+	}
+}

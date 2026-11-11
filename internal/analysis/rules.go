@@ -29,7 +29,7 @@ type Evidence struct {
 
 // RuleIDs are the diagnosis rules this version runs, by the id a
 // Diagnosis carries in Rule.
-var RuleIDs = []string{"pool-exhausted", "queueing-knee"}
+var RuleIDs = []string{"pool-exhausted", "queueing-knee", "connection-storm"}
 
 // Rule thresholds. Rules are deterministic and versioned with the code.
 const (
@@ -55,11 +55,12 @@ const (
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
-const RuleVersion = "3"
+const RuleVersion = "4"
 
 func diagnose(a *Analysis) []*Diagnosis {
 	out := []*Diagnosis{}
 	out = append(out, poolExhausted(a)...)
+	out = append(out, connectionStorm(a)...)
 	if d := queueingKnee(a); d != nil {
 		out = append(out, d)
 	}

@@ -270,3 +270,18 @@ func (ConfigValue) JSONSchema() *jsonschema.Schema {
 		OneOf: []*jsonschema.Schema{{Type: "string"}, {Type: "number"}, {Type: "boolean"}},
 	}
 }
+
+func (Pool) shorthandField() string { return "size" }
+
+// JSONSchema describes Pool in the generated schema: a size, or the
+// object form.
+func (Pool) JSONSchema() *jsonschema.Schema {
+	props := jsonschema.NewProperties()
+	props.Set("size", &jsonschema.Schema{Type: "integer", Minimum: json.Number("1"), Default: DefaultPool, Description: "Connections per replica."})
+	props.Set("min", &jsonschema.Schema{Type: "integer", Minimum: json.Number("0"), Default: 0,
+		Description: "Connections each replica opens before the load starts and keeps open: a warm pool. postgres and pgbouncer targets only. Default 0: connections open only when callers need them."})
+	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+		{Type: "integer", Minimum: json.Number("1"), Description: "Connections per replica."},
+		{Type: "object", Properties: props, AdditionalProperties: jsonschema.FalseSchema},
+	}}
+}
