@@ -480,10 +480,10 @@ func TestKneeFollowsPoolToBusyTarget(t *testing.T) {
 	}
 	a.Plan, a.PeakOffered = &p, p.Workload.PeakRate
 	a.Verdict = verdict(a)
-	if b := a.Verdict.Break; b == nil || b.At != 170 {
+	if b := a.Verdict.Break; b == nil || b.At != 210 { // 3:30: p99 1.66 s, over the 500 ms default SLO
 		t.Fatalf("break %+v", b)
 	}
-	if want := "Most saturated then: api → db pool 96 of 96 connections in use, waiting on db (CPU 87%, CPU-throttled 17.1 s, 7.8 ms per call with a connection, 0.4 ms at low load)."; !strings.Contains(a.Verdict.Summary, want) {
+	if want := "Most saturated then: api → db pool 96 of 96 connections in use, waiting on db (CPU 100%, CPU-throttled 45.8 s, 22 ms per call with a connection, 0.4 ms at low load)."; !strings.Contains(a.Verdict.Summary, want) {
 		t.Errorf("summary lacks %q:\n%s", want, a.Verdict.Summary)
 	}
 	ds := diagnose(a)
@@ -538,5 +538,38 @@ func TestFullPoolFollowsTarget(t *testing.T) {
 	w.HeldS = func(float64) float64 { return 0.0005 }
 	if got := titles(w); len(got) == 0 || got[0] != "Connection pool exhausted (api → db)" || slices.Contains(got, "Queueing knee (db CPU)") {
 		t.Errorf("db throttled but answering at its usual speed: diagnoses %q", got)
+	}
+}
+
+// A break on latency alone while k6 was stalled is cross-checked against
+// the service's own p99: when that stays below the limit, the break is
+// doubtful, but the verdict stays what it was.
+func TestLatencyBreakCrossCheck(t *testing.T) {
+	dir := filepath.Join("testdata", "one-query-per-page")
+	load := func() *Analysis {
+		a := &Analysis{}
+		var p plan.Plan
+		if err := readJSON(filepath.Join(dir, "plan.json"), &p); err != nil {
+			t.Fatal(err)
+		}
+		if err := readJSON(filepath.Join(dir, "windows.json"), &a.Windows); err != nil {
+			t.Fatal(err)
+		}
+		a.Plan, a.PeakOffered = &p, p.Workload.PeakRate
+		return a
+	}
+	// As measured: k6 stalled 6.4% at 3:30 and api's p99 agreed (1.90 s).
+	a := load()
+	a.Verdict = verdict(a)
+	if a.Verdict.Doubt != "" {
+		t.Errorf("api's p99 agreed, yet: %s", a.Verdict.Doubt)
+	}
+	// The same run if api had answered in 200 ms at 3:40.
+	a = load()
+	fast := 200.0
+	a.Windows[22].Services["api"].P99 = &fast
+	a.Verdict = verdict(a)
+	if a.Verdict.Kind != VerdictInconclusive || !strings.Contains(a.Verdict.Doubt, "api's own p99 was 200 ms at 3:40") || !strings.Contains(a.Verdict.Summary, "Doubtful: ") {
+		t.Errorf("kind %s, doubt %q", a.Verdict.Kind, a.Verdict.Doubt)
 	}
 }

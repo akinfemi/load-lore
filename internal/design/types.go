@@ -139,6 +139,13 @@ type Workload struct {
 	Keys      *Keys    `yaml:"keys,omitempty" json:"keys,omitempty"`
 	PayloadKB *float64 `yaml:"payload_kb,omitempty" json:"payload_kb,omitempty" jsonschema:"minimum=0,default=1"`
 	TimeoutMs *int     `yaml:"timeout_ms,omitempty" json:"timeout_ms,omitempty" jsonschema:"minimum=1,default=10000" jsonschema_description:"How long the load generator waits for a response before counting the request as failed."`
+	SLO       *SLO     `yaml:"slo,omitempty" json:"slo,omitempty"`
+}
+
+// SLO is the latency users accept. The verdict counts a break on latency
+// alone only above it.
+type SLO struct {
+	P99Ms *float64 `yaml:"p99_ms,omitempty" json:"p99_ms,omitempty" jsonschema:"exclusiveMinimum=0,default=500" jsonschema_description:"End-to-end p99 users accept, in ms. A break on p99 alone needs p99 at or above this and at least 10x the low-load p99."`
 }
 
 // Step is one stage of the load profile. Exactly one field is set.

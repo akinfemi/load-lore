@@ -22,15 +22,15 @@ Everything else is the same: the same 0.5-CPU Postgres, the same pools, the same
 
 The starting design broke when Postgres ran out of CPU. For a lookup by primary key, most of that CPU isn't spent finding the row. It goes on everything around it, once per statement: receiving the query, binding its parameters, starting the executor, sending the result back, and the network round trip. Three statements per page pay that three times; one statement pays it once. In a pgbench run on the same 0.5-CPU Postgres with reads only, it managed 10,951 single-row lookups per second, but only 5,830 batches of three rows: fetching three rows in one statement cost about twice as much as fetching one, not three times.
 
-In the reference runs (8-vCPU machine, `--scale 1`, seed 1), the most the system served in any 10-second window went from 2,791 requests per second to 3,422 (1.23×), and Postgres reached 98% CPU 20 seconds later in the ramp (3:10 instead of 2:50).
+In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 1012 and 951), the most the system served in any 10-second window went from 2,950 requests per second to 4,085 (1.38×), and Postgres reached 98% CPU 70 seconds later in the ramp (4:10 instead of 3:00). Peaks vary from run to run: an earlier pair, before Loadlore gave the load generator more CPU, measured 1.23×. Compare your own pair of runs, not these numbers.
 
 The gain is smaller than a database benchmark predicts. With pgbench on the same 0.5-CPU Postgres and the same mix of 10% writes, one batched statement served 6,537 pages per second against 4,187 for three single-row queries (1.56×). In the full run, the api, the load balancer and Toxiproxy add their own latency, and the database is CPU-throttled in bursts (next section).
 
-## Why it doesn't break later
+## Bursts on the way up
 
-The verdict marks both designs as broken at 2:50, at 2,958 rps offered, though this one served 1.23× more at its best. Before that, its timeline shows three stalls, at 1:30, 1:50 and 2:20: p99 reached 212–558 ms for 10–20 s at a time while at least 90% of the offered load was still served. At about 1:30, the api's connection pools grew from about 20 connections to 96 at once. From then on, bursts of up to 96 active queries used up the database's CPU quota early in each 100 ms scheduling period, and Postgres sat stalled until the next one. p50 stayed at about 1.3 ms while the database averaged 60–80% CPU. A p99 spike alone counts as a break only after 30 s, so these are stalls, not the break; the report shows the throttling under the queueing-knee diagnosis.
+The verdict marks this design as broken at 4:10, at 4,265 rps offered, against 3:00 and 3,122 rps for the starting design. Before that it isn't smooth. From 2:40, the api's connection pools grew from a few connections to 30–60 in bursts, and p99 rose to 44–92 ms in some windows, while every offered request was still served and p50 stayed at 1–1.4 ms. Bursts of active queries use up the database's CPU quota early in each 100 ms scheduling period, and Postgres sits throttled until the next one, at 48–78% CPU on average. Those windows stay under the 500 ms SLO (`workload.slo.p99_ms`), so they aren't a break. In an earlier run of the same design, the pools jumped to 96 at once and p99 reached 558 ms for 10 s: the report lists such a short episode as a stall.
 
-The starting design had the same storm at 1:50 but recovered for a while. Small CPU limits are bursty, so compare peak throughput and the shape of the curves, not just the break time. Fewer connections in the pool would likely smooth it out; that's the subject of the connection pool scenario.
+Small CPU limits are bursty, so compare peak throughput and the shape of the curves, not just the break time. Fewer connections in the pool would likely smooth it out; that's the subject of the connection pool scenario.
 
 ## What it costs
 

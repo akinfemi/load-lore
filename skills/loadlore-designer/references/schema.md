@@ -147,9 +147,12 @@ workload:
   keys: { distribution: zipf, skew: 1.1, count: 5000000 }
   payload_kb: 2                           # default 1
   timeout_ms: 10000                       # default 10000: the load generator's request timeout
+  slo: { p99_ms: 500 }                    # default 500: the p99 users accept
 ```
 
 Each profile step has exactly one of `ramp`, `hold` or `spike`. Load is open-model: the rate is what arrives, whether or not the system keeps up.
+
+`slo.p99_ms` is the end-to-end p99 users accept. The verdict calls a break on latency alone only when p99 stays at or above both this and 10x the low-load p99 for 30 seconds; errors and a shortfall in served requests break regardless. Set it to what the system's users would tolerate, and keep it when comparing runs.
 
 `keys`:
 

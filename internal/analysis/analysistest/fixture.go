@@ -18,7 +18,7 @@ import (
 )
 
 // Design ramps 0→1000 rps over 100 s: one api replica in front of
-// one postgres, pool 10.
+// one postgres, pool 10, with a 100 ms SLO.
 const Design = `version: 1
 name: fixture
 services:
@@ -34,6 +34,7 @@ services:
 workload:
   entry: api
   profile: [ { ramp: { from: 0, to: 1000, over: 100s } } ]
+  slo: { p99_ms: 100 }
 expect:
   - p99_ms < 50 until load_rps >= 500
   - error_rate < 1%

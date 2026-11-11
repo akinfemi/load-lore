@@ -401,6 +401,9 @@ func throttled(a *Analysis, w *Window, name string) (Evidence, bool) {
 // entryApp is the application service that receives the load, looking
 // through an lb.
 func entryApp(a *Analysis) string {
+	if a.Plan == nil {
+		return ""
+	}
 	name := a.Plan.Workload.Entry
 	if s := a.Plan.Service(name); s != nil && s.LB != nil {
 		name = s.LB.Target

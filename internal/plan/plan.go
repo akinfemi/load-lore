@@ -138,6 +138,7 @@ type Workload struct {
 	MaxVUs       int      `json:"max_vus"`
 	PreVUs       int      `json:"pre_vus"`
 	Timeout      Dur      `json:"timeout"` // per request, in the load generator
+	SLOP99Ms     float64  `json:"slo_p99_ms"`
 }
 
 // Stage moves the arrival rate linearly to Target over Duration. A zero
@@ -220,23 +221,31 @@ type Options struct {
 // core), Toxiproxy 0.65 at about 11,600 proxied calls/s (about 18,000 per
 // core), Prometheus 0.02, cAdvisor 0.03 and postgres_exporter 0.01. At scale
 // 1 with an lb, Toxiproxy relayed about 20,000 calls/s per core. The budgets
-// below leave k6 about 1.5x and Toxiproxy about 1.2x headroom over those
-// rates; reports mark a run inconclusive if either still reaches 90% of its
-// budget before the system breaks.
+// below leave Toxiproxy about 1.2x headroom over those rates, and
+// Prometheus and cAdvisor about 2x over theirs (peaks of 0.045 and 0.06 at
+// scale 1); reports mark a run inconclusive if a tool still reaches 90% of
+// its budget before the system breaks.
+//
+// k6's average use misleads: on the first scenario's solution at scale 1
+// (5,000 rps peak), k6 at 1.5 CPU averaged 35% of its budget but was
+// stalled at its CPU limit in 2.5-4% of its scheduling periods as the
+// system neared its break and 10-12.5% once slow responses piled up VUs,
+// which inflates the p99 it measures. At 2 CPU it wasn't stalled at all
+// (2.5 and 3 CPU the same), so k6 gets one CPU per 2,500 rps of peak.
 //
 // Toxiproxy's memory grows with open connections: when the spec example
 // broke, it went from 17 MB to over 245 MB as requests queued, and was
 // OOM-killed at a 256 MB limit. It gets 1 GiB.
 const (
-	k6RatePerCPU   = 4500.0
+	k6RatePerCPU   = 2500.0
 	proxyOpsPerCPU = 15000.0
 	proxyMemory    = 1 << 30
 	minLoadCPU     = 1.0
 	maxLoadCPU     = 4.0
 	minProxyCPU    = 0.5
 	maxProxyCPU    = 4.0
-	promCPU        = 0.25
-	cadvisorCPU    = 0.25
+	promCPU        = 0.1
+	cadvisorCPU    = 0.1
 	exporterCPU    = 0.1
 	maxVUsCap      = 4000
 	minMemoryApp   = 32 << 20
@@ -648,7 +657,7 @@ func convertCalls(calls []*design.Call) []synthetic.Call {
 func (p *Plan) workload(d *design.Design, byName map[string]*Service, scale float64) {
 	w := d.Workload
 	entry := byName[w.Entry]
-	pw := Workload{Entry: w.Entry, ReadShare: *w.Mix.Read, PayloadBytes: int(*w.PayloadKB * 1024), Timeout: Dur(time.Duration(*w.TimeoutMs) * time.Millisecond)}
+	pw := Workload{Entry: w.Entry, ReadShare: *w.Mix.Read, PayloadBytes: int(*w.PayloadKB * 1024), Timeout: Dur(time.Duration(*w.TimeoutMs) * time.Millisecond), SLOP99Ms: *w.SLO.P99Ms}
 	if xs := p.proxiesInto(loadGeneratorKey, w.Entry); len(xs) > 0 {
 		for _, x := range xs {
 			pw.URLs = append(pw.URLs, "http://"+x.Addr())
@@ -833,6 +842,13 @@ func (p *Plan) assume(d *design.Design) {
 	}
 	p.Assumptions = append(p.Assumptions, Assumption{
 		Field: "workload.timeout_ms", Value: p.Workload.Timeout.D().String(), Why: why,
+	})
+	why = "the default; a break on p99 alone needs p99 at or above this as well as 10x the low-load p99, so latency users would still accept isn't called a break"
+	if d.Workload.SLO != nil && d.Workload.SLO.P99Ms != nil && *d.Workload.SLO.P99Ms != design.DefaultSLOP99Ms {
+		why = "set in the design; a break on p99 alone needs p99 at or above this as well as 10x the low-load p99"
+	}
+	p.Assumptions = append(p.Assumptions, Assumption{
+		Field: "workload.slo.p99_ms", Value: fmtF(p.Workload.SLOP99Ms) + " ms", Why: why,
 	})
 	p.assumePeriods(d)
 	for _, name := range d.ServiceNames() {

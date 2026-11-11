@@ -141,7 +141,11 @@ func shortVerdict(x *analysis.Analysis) string {
 	case v.Kind == analysis.VerdictInconclusive:
 		return "inconclusive"
 	case v.Break != nil:
-		return fmt.Sprintf("broke at %s (%s rps offered)", analysis.Clock(v.Break.At), analysis.Rate(v.Break.Offered))
+		s := fmt.Sprintf("broke at %s (%s rps offered)", analysis.Clock(v.Break.At), analysis.Rate(v.Break.Offered))
+		if v.Doubt != "" {
+			s += ", doubtful"
+		}
+		return s
 	case v.Kind == analysis.VerdictHeld:
 		return "held"
 	}

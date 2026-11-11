@@ -191,17 +191,17 @@ func TestInfraBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 5,000 rps at 4,500 rps per k6 CPU, rounded up to a half core.
+	// 5,000 rps at 2,500 rps per k6 CPU, rounded up to a half core.
 	// Proxied calls: 5,000 lb → api, plus 5,000 × (3 reads + 0.1 writes)
 	// api → db = 20,500, at 15,000 per Toxiproxy CPU, rounded up.
-	if p.Infra.LoadCPU != 1.5 || p.Infra.ExpectedOps != 20500 || p.Infra.ProxyCPU != 1.5 {
+	if p.Infra.LoadCPU != 2 || p.Infra.ExpectedOps != 20500 || p.Infra.ProxyCPU != 1.5 {
 		t.Errorf("infra %+v", p.Infra)
 	}
 	want := 0.0
 	for _, s := range p.Services {
 		want += s.CPU * float64(len(s.Containers))
 	}
-	want += 1.5 + 1.5 + 0.25 + 0.25 + 0.1 // k6, Toxiproxy, Prometheus, cAdvisor, postgres_exporter
+	want += 2 + 1.5 + 0.1 + 0.1 + 0.1 // k6, Toxiproxy, Prometheus, cAdvisor, postgres_exporter
 	if got := p.TotalCPU(); math.Abs(got-want) > 1e-9 || got > 8 {
 		t.Errorf("total CPU %v, want %v and at most 8 (the spec: it fits an 8-vCPU machine at scale 1)", got, want)
 	}

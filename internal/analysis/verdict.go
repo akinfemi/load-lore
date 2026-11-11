@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/driver"
 )
 
@@ -26,9 +27,8 @@ const (
 // compare, and every report prints them.
 const (
 	BreakErrorRate     = 0.01 // a window with at least 1% failed requests
-	BreakLatencyFactor = 10.0 // p99 at least 10x the low-load p99 ...
-	BreakLatencyMinMs  = 100.0
-	BreakShortfall     = 0.9 // successful responses below 90% of the offered rate
+	BreakLatencyFactor = 10.0 // p99 at least 10x the low-load p99 and the SLO
+	BreakShortfall     = 0.9  // successful responses below 90% of the offered rate
 	// A shortfall or errors break in 2 windows in a row; p99 alone needs 3,
 	// since a short latency episode, such as a CPU-throttling stall, often
 	// recovers by itself. Shorter episodes are stalls in the timeline.
@@ -56,7 +56,10 @@ type Verdict struct {
 	Inconclusive []string    `json:"inconclusive,omitempty"`
 	Caveats      []string    `json:"caveats,omitempty"`            // tooling strain too small to make the run inconclusive
 	Cause        string      `json:"inconclusive_cause,omitempty"` // what took CPU from the tooling, when there's evidence
+	Doubt        string      `json:"doubt,omitempty"`              // why a latency break may be partly the load generator's own
 	BaselineP99  *float64    `json:"baseline_p99_ms,omitempty"`
+	SLOP99Ms     float64     `json:"slo_p99_ms"`
+	LatencyLimit *float64    `json:"latency_limit_ms,omitempty"` // p99 at or above this is a latency signal
 	MaxRPS       *float64    `json:"max_rps,omitempty"`
 	MaxRPSAt     float64     `json:"max_rps_at_s"`
 	WorstP99     *float64    `json:"worst_p99_ms,omitempty"`
@@ -106,15 +109,22 @@ func verdict(a *Analysis) Verdict {
 		v.WorstErrors = maxPtr(v.WorstErrors, w.ErrorRate)
 	}
 
+	v.SLOP99Ms = design.DefaultSLOP99Ms
+	if a.Plan != nil && a.Plan.Workload.SLOP99Ms > 0 {
+		v.SLOP99Ms = a.Plan.Workload.SLOP99Ms // runs planned before the SLO existed get the default
+	}
+	if lim, ok := LatencyLimit(v.BaselineP99, v.SLOP99Ms); ok {
+		v.LatencyLimit = &lim
+	}
 	sig := make([][]string, len(ws))
 	for i, w := range ws {
 		sig[i] = hard[i]
-		if lim, ok := LatencyLimit(v.BaselineP99); ok && w.P99 != nil && *w.P99 >= lim {
+		if v.LatencyLimit != nil && w.P99 != nil && *w.P99 >= *v.LatencyLimit {
 			sig[i] = append([]string{"latency"}, hard[i]...)
 		}
 	}
 	breakAt := findBreak(hard, sig)
-	a.Timeline = withStalls(a.Timeline, ws, sig, breakAt, v.BaselineP99)
+	a.Timeline = withStalls(a.Timeline, ws, sig, breakAt, v.BaselineP99, v.LatencyLimit)
 	v.Moment = v.momentWindow(ws, breakAt)
 	if breakAt >= 0 {
 		w := ws[breakAt]
@@ -128,7 +138,14 @@ func verdict(a *Analysis) Verdict {
 	if a.Cutoff != "" && breakAt < 0 {
 		v.Inconclusive = append([]string{"before the system broke, " + a.Cutoff}, v.Inconclusive...)
 	}
+	hardBreak := breakAt >= 0 && breakAt+1 < len(hard) && len(hard[breakAt]) > 0 && len(hard[breakAt+1]) > 0
+	if breakAt >= 0 && !hardBreak { // made by latency alone
+		v.Doubt = latencyDoubt(a, ws[breakAt:min(breakAt+BreakLatencyWindows, len(ws))], *v.LatencyLimit)
+	}
 	v.Summary = v.summary(a)
+	if v.Doubt != "" {
+		v.Summary += " Doubtful: " + v.Doubt + "."
+	}
 	if breakAt >= 0 {
 		v.Summary += afterBreak(a, ws[breakAt+1:])
 	}
@@ -197,12 +214,13 @@ func baselineFrom(healthy []*Window, peak float64) *float64 {
 	return &m
 }
 
-// LatencyLimit is the p99 above which a window counts as broken.
-func LatencyLimit(baseline *float64) (float64, bool) {
+// LatencyLimit is the p99 at or above which a window counts as broken:
+// 10x the low-load p99, and at least the SLO.
+func LatencyLimit(baseline *float64, sloMs float64) (float64, bool) {
 	if baseline == nil {
 		return 0, false
 	}
-	return math.Max(BreakLatencyFactor**baseline, BreakLatencyMinMs), true
+	return math.Max(BreakLatencyFactor**baseline, sloMs), true
 }
 
 // hardSignals are the signs that requests weren't served: errors and a
@@ -245,7 +263,7 @@ func findBreak(hard, sig [][]string) int {
 // withStalls adds to the timeline each episode before the break (or in
 // the whole run, if nothing broke) that had a break signal but was too
 // short to count as one.
-func withStalls(tl []Event, ws []*Window, sig [][]string, breakAt int, baseline *float64) []Event {
+func withStalls(tl []Event, ws []*Window, sig [][]string, breakAt int, baseline, limit *float64) []Event {
 	end := len(ws)
 	if breakAt >= 0 {
 		end = breakAt
@@ -260,7 +278,7 @@ func withStalls(tl []Event, ws []*Window, sig [][]string, breakAt int, baseline 
 		for j < end && len(sig[j]) > 0 {
 			j++
 		}
-		tl = append(tl, Event{At: ws[i].Start, Kind: "stall", Detail: stallDetail(ws[i:j], baseline, j == len(ws))})
+		tl = append(tl, Event{At: ws[i].Start, Kind: "stall", Detail: stallDetail(ws[i:j], baseline, limit, j == len(ws))})
 		added = true
 		i = j
 	}
@@ -270,7 +288,7 @@ func withStalls(tl []Event, ws []*Window, sig [][]string, breakAt int, baseline 
 	return tl
 }
 
-func stallDetail(ws []*Window, baseline *float64, last bool) string {
+func stallDetail(ws []*Window, baseline, limit *float64, last bool) string {
 	var p99, errs, served *float64
 	for _, w := range ws {
 		p99 = maxPtr(p99, w.P99)
@@ -283,7 +301,7 @@ func stallDetail(ws []*Window, baseline *float64, last bool) string {
 		}
 	}
 	var parts []string
-	if lim, ok := LatencyLimit(baseline); ok && p99 != nil && *p99 >= lim {
+	if limit != nil && p99 != nil && *p99 >= *limit {
 		parts = append(parts, fmt.Sprintf("p99 reached %s (%s at low load)", Ms(*p99), Ms(*baseline)))
 	}
 	if errs != nil && *errs >= BreakErrorRate {
@@ -386,6 +404,35 @@ func MostSaturated(ss []Saturation) (Saturation, bool) {
 		return ss[0], true
 	}
 	return Saturation{}, false
+}
+
+// latencyDoubt cross-checks a break made by latency alone when the load
+// generator was stalled at its CPU limit in one of its windows: its stalls
+// add to the very latency it measures. The entry service's own p99 has no
+// such bias; if it stayed below the limit in any of the windows, it
+// wouldn't have made the break. It returns "" when the check agrees or
+// can't be made.
+func latencyDoubt(a *Analysis, ws []*Window, limit float64) string {
+	app := entryApp(a)
+	var stall float64
+	var below []string
+	for _, w := range ws {
+		if w.LoadThrottled != nil {
+			stall = math.Max(stall, *w.LoadThrottled)
+		}
+		sw := w.Services[app]
+		if app == "" || sw == nil || sw.P99 == nil {
+			return ""
+		}
+		if *sw.P99 < limit {
+			below = append(below, fmt.Sprintf("%s at %s", Ms(*sw.P99), Clock(w.Start)))
+		}
+	}
+	if stall < ToolThrottleNote || len(below) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("the load generator was stalled at its CPU limit in up to %s of its scheduling periods in the break's windows (%s), while %s's own p99 was %s (%s), below the %s limit. Part of the latency the break rests on may be the load generator's own",
+		Pct(stall), SrcThrottledPeriods, app, joinAnd(below), SrcAppLatency, Ms(limit))
 }
 
 // waitingOn names a full pool's target when the target was busy: the pool

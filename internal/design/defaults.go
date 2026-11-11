@@ -28,6 +28,7 @@ const (
 	DefaultHotspotFraction = 0.01
 	DefaultPayloadKB       = 1.0
 	DefaultClientTimeoutMs = 10000
+	DefaultSLOP99Ms        = 500.0
 	DefaultScale           = 1.0
 	DefaultLBCPU           = 0.5
 	DefaultLBMemory        = Size(256 << 20)
@@ -214,6 +215,10 @@ func defaultWorkload(w *Workload) {
 	}
 	setDefault(&w.PayloadKB, DefaultPayloadKB)
 	setDefault(&w.TimeoutMs, DefaultClientTimeoutMs)
+	if w.SLO == nil {
+		w.SLO = &SLO{}
+	}
+	setDefault(&w.SLO.P99Ms, DefaultSLOP99Ms)
 }
 
 // walkCalls visits every call, including on_miss calls, depth first.

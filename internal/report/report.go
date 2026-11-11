@@ -89,7 +89,7 @@ func Markdown(a *analysis.Analysis) string {
 	expectSection(&d, a)
 	timelineSection(&d, a)
 	assumptionsSection(&d, a)
-	thresholdsSection(&d)
+	thresholdsSection(&d, a)
 	environmentSection(&d, a)
 	if len(a.Windows) > 0 {
 		windowsSection(&d, a)
@@ -110,6 +110,9 @@ func verdictSection(d *doc, a *analysis.Analysis) {
 		analysis.VerdictBroke: "Broke", analysis.VerdictHeld: "Held",
 		analysis.VerdictInconclusive: "Inconclusive", analysis.VerdictNoData: "No data",
 	}[v.Kind]
+	if v.Doubt != "" && v.Kind == analysis.VerdictBroke {
+		label = "Broke (doubtful)"
+	}
 	d.line("## Verdict")
 	d.line("")
 	d.p("**%s.** %s", label, strings.TrimPrefix(v.Summary, "Inconclusive: "))
@@ -606,11 +609,15 @@ func assumptionsSection(d *doc, a *analysis.Analysis) {
 	}
 }
 
-func thresholdsSection(d *doc) {
-	lat := fmt.Sprintf("%gx the low-load p99 (the median p99 of windows offered at most %s of the peak, before errors or a shortfall in 2 windows in a row) and at least %g ms", analysis.BreakLatencyFactor, analysis.Pct(analysis.BaselineShare), analysis.BreakLatencyMinMs)
+func thresholdsSection(d *doc, a *analysis.Analysis) {
+	lat := fmt.Sprintf("%gx the low-load p99 (the median p99 of windows offered at most %s of the peak, before errors or a shortfall in 2 windows in a row) and at least the SLO, %s (workload.slo.p99_ms)", analysis.BreakLatencyFactor, analysis.Pct(analysis.BaselineShare), analysis.Ms(a.Verdict.SLOP99Ms))
+	if l := a.Verdict.LatencyLimit; l != nil {
+		lat += fmt.Sprintf(": %s in this run", analysis.Ms(*l))
+	}
 	d.line("## Thresholds")
 	d.line("")
 	d.line("- **Broke:** %d windows in a row with at least %s of requests failing or successful responses below %s of the offered rate, or %d windows in a row with any of those or p99 at least %s. A shorter episode is shown as a stall in the timeline, not a break.", analysis.BreakWindows, analysis.Pct(analysis.BreakErrorRate), analysis.Pct(analysis.BreakShortfall), analysis.BreakLatencyWindows, lat)
+	d.line("- **Doubtful:** a break on p99 alone, when the load generator was stalled at its CPU limit in %s or more of its scheduling periods in one of the break's windows and the entry service's own p99 (%s) was below the limit in one of them. The verdict stays what it was.", analysis.Pct(analysis.ToolThrottleNote), analysis.SrcAppLatency)
 	d.line("- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than %s of a window's arrivals, or the load generator or Toxiproxy used %s or more of its CPU budget, or was stalled at its CPU limit in %s or more of its scheduling periods (from %s it's noted as a caveat). The first %g s of load are a warm-up and don't count: the load generator starts its VUs and connections open then. A cause is named only with evidence: on a Linux host, the hypervisor giving %s or more of CPU time to other virtual machines (steal), or other programs using %s or more of the host's CPUs (at least %g); inside a VM on this machine, only as a possibility.", analysis.Pct(analysis.DroppedShareLimit), analysis.Pct(analysis.ToolCPULimit), analysis.Pct(analysis.ToolThrottleLimit), analysis.Pct(analysis.ToolThrottleNote), analysis.ToolWarmupSeconds, analysis.Pct(analysis.HostStealLimit), analysis.Pct(analysis.HostOthersShare), analysis.HostOthersMin)
 	busy := fmt.Sprintf("its CPU at %s or more, or its time per call with a connection at least %gx the low-load value and %g ms above it; CPU throttling alone doesn't count", analysis.Pct(analysis.PoolTargetCPUMax), analysis.TargetSlowFactor, analysis.TargetSlowMinMs)
 	d.line("- **Connection pool exhausted:** for two windows in a row, a pool at %s or more of its size with callers waiting, while the target wasn't busy (busy: %s) and the caller's CPU stayed below %s.", analysis.Pct(analysis.PoolFullShare), busy, analysis.Pct(analysis.PoolCallerCPUMax))
