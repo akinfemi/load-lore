@@ -107,6 +107,9 @@ type World struct {
 	// ReadMs and WriteMs, when set (and HeldS isn't), are api's time per
 	// read and per write call to db; a tenth of requests write.
 	ReadMs, WriteMs func(t float64) float64
+
+	// LockWaits, when set, is db's backends waiting on locks.
+	LockWaits func(t float64) float64
 }
 
 // Event is an events.jsonl line at At seconds into the load.
@@ -249,6 +252,10 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 		blksHit = newC(counters, "pg_stat_database_blks_hit", map[string]string{"service": "db", "datname": plan.DBName})
 		blksRead = newC(counters, "pg_stat_database_blks_read", map[string]string{"service": "db", "datname": plan.DBName})
 	}
+	var lockWaits *counter
+	if w.LockWaits != nil {
+		lockWaits = newC(gauges, "pg_lock_waits_waiting", map[string]string{"service": "db"})
+	}
 	var hits, misses, cacheCalls, dbCalls *counter
 	if w.CacheHit != nil {
 		hits = newC(counters, "redis_keyspace_hits_total", map[string]string{"service": "cache"})
@@ -364,6 +371,9 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			add(waitSum, w.WaitS(el)*ok)
 			add(waitCnt, ok)
 			set(inUse, w.InUse(el))
+			if lockWaits != nil {
+				set(lockWaits, w.LockWaits(el))
+			}
 			set(pending, w.Pending(el))
 			// 98% of requests at p50, 2% at p99, in narrow buckets.
 			for _, part := range []struct{ share, v float64 }{{0.98, w.P50(el)}, {0.02, w.P99(el)}} {
@@ -397,6 +407,9 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 				}
 			}
 			set(inUse, 0)
+			if lockWaits != nil {
+				set(lockWaits, 0)
+			}
 			set(pending, 0)
 		}
 		set(maxC, 10)

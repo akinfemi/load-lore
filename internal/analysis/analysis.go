@@ -138,6 +138,9 @@ type ServiceWindow struct {
 	// blocks per second it read from outside them (the OS cache or disk).
 	BufferHitRate *float64 `json:"buffer_hit_rate,omitempty"`
 	BlockReads    *float64 `json:"block_reads,omitempty"`
+	// Postgres: backends waiting on a heavyweight lock, such as a row lock,
+	// on average over the window's scrapes.
+	LockWaits *float64 `json:"lock_waits,omitempty"`
 
 	// Redis.
 	HitRate   *float64 `json:"hit_rate,omitempty"`
@@ -310,6 +313,12 @@ func Analyze(dir string) (*Analysis, error) {
 	}
 	if !st.has("k6_http_reqs_total") {
 		a.Warnings = append(a.Warnings, "no load generator metrics were exported (k6_http_reqs_total), so end-to-end throughput, latency and errors are missing")
+	}
+
+	// The lock-wait query rides on an exporter flag marked deprecated; say
+	// so when it stops reporting, rather than letting hot rows go quiet.
+	if st.has("pg_stat_database_blks_read") && !st.has("pg_lock_waits_waiting") {
+		a.Warnings = append(a.Warnings, "postgres_exporter didn't report pg_lock_waits_waiting (Loadlore's lock-wait query, loaded with --extend.query-path), so hot rows couldn't be checked")
 	}
 
 	a.Analyzed = len(a.Windows)
@@ -652,6 +661,9 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 		if ok1 && ok2 {
 			sw.BlockReads = num(read/(wb-wa), true)
 			sw.BufferHitRate = num(hit/(hit+read), hit+read > 0)
+		}
+		if _, mean, ok := st.gaugeSum("pg_lock_waits_waiting", svc, wa, wb); ok {
+			sw.LockWaits = num(mean, true)
 		}
 	case "pgbouncer":
 		db := and(svc, eq("database", plan.DBName))

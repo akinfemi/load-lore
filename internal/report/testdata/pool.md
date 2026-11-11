@@ -124,7 +124,7 @@ Evidence:
 
 **Try next:** Add PgBouncer, or resize the pools across replicas: 1 replica × 10 connections = 10.
 
-<sub>Rules version 6. Rules are deterministic and offline; their thresholds are listed below.</sub>
+<sub>Rules version 7. Rules are deterministic and offline; their thresholds are listed below.</sub>
 
 ## Predictions
 
@@ -177,7 +177,7 @@ The design lists no assumptions.
 - **Retry storm:** for two windows in a row, a caller that retries sending 1.5x or more of its low-load calls per request to a target, with retries 20% or more of them, while the target failed 1.0% or more of its calls or its p99 was 3x its low-load value.
 - **Cold cache:** a cache's hit rate falling to 50% of its level before or lower while its callers' reads of the database behind it reach 2x their rate before.
 - **Working set doesn't fit:** for two windows in a row, a Postgres answering less than 90% of block reads from shared_buffers and reading 100 blocks a second or more from outside them, while p99 was 3x the low-load p99 or more.
-- **Hot rows:** for two windows in a row, a caller's writes to a Postgres taking 3x their low-load time or more (and 2 ms more) while its reads stayed within 1.5x of theirs and the database's CPU was below 80%.
+- **Hot rows:** for two windows in a row, 1 or more of a Postgres's backends waiting on locks on average, while a caller's writes to it took 3x their low-load time or more (and 2 ms more), its reads stayed within 1.5x of theirs and the database's CPU was below 80%. Windows with a disk_slow fault on the database don't count.
 
 ## Environment
 

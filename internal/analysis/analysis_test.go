@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -494,30 +495,88 @@ func TestWorkingSet(t *testing.T) {
 	}
 }
 
-// From 1:00 writes take 20 ms while reads stay at 1 ms and db has CPU to
-// spare: writes queue on row locks.
+// From 1:00 writes take 20 ms while reads stay at 1 ms, db has CPU to
+// spare and 6 backends wait on locks: writes queue on row locks.
 func TestHotRows(t *testing.T) {
-	w := analysistest.Healthy()
-	w.ReadMs = func(float64) float64 { return 1 }
-	w.WriteMs = func(t float64) float64 {
-		if t > 60 {
-			return 20
+	hot := func() analysistest.World {
+		w := analysistest.Healthy()
+		w.ReadMs = func(float64) float64 { return 1 }
+		w.WriteMs = func(t float64) float64 {
+			if t > 60 {
+				return 20
+			}
+			return 2
 		}
-		return 2
+		w.LockWaits = func(t float64) float64 {
+			if t > 60 {
+				return 6
+			}
+			return 0
+		}
+		return w
 	}
-	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	fired := func(a *Analysis) bool {
+		return slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "hot-rows" })
+	}
+	a := analyze(t, analysistest.WriteRun(t, hot(), 1))
 	i := slices.IndexFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "hot-rows" })
 	if i < 0 {
 		t.Fatalf("no hot rows: %+v", a.Diagnoses)
 	}
-	if d := a.Diagnoses[i]; d.From != 60 || !strings.Contains(d.Summary, "api's writes to db took 20 ms each, 10.0x their 2.0 ms at low load, while its reads stayed at 1.0 ms") {
+	d := a.Diagnoses[i]
+	if d.From != 60 || !strings.Contains(d.Summary, "api's writes to db took 20 ms each, 10.0x their 2.0 ms at low load, while its reads stayed at 1.0 ms and 5.4 backends of db waited on locks") {
 		t.Errorf("diagnosis %+v", d)
 	}
+	if !slices.ContainsFunc(d.Evidence, func(e Evidence) bool { return e.Source == SrcLockWaits }) {
+		t.Errorf("no lock-wait evidence: %+v", d.Evidence)
+	}
+
 	// Reads slow too: that's the database, not row locks.
+	w := hot()
 	w.ReadMs = w.WriteMs
-	a = analyze(t, analysistest.WriteRun(t, w, 1))
-	if slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "hot-rows" }) {
+	if fired(analyze(t, analysistest.WriteRun(t, w, 1))) {
 		t.Error("fired when reads slowed as much as writes")
+	}
+
+	// A slow disk: writes slow and reads don't, but nothing waits on a lock.
+	w = hot()
+	w.LockWaits = func(float64) float64 { return 0 }
+	if fired(analyze(t, analysistest.WriteRun(t, w, 1))) {
+		t.Error("fired with no lock waits")
+	}
+
+	// No lock-wait metric while the exporter's others came through: quiet,
+	// with a warning that hot rows couldn't be checked.
+	w = hot()
+	w.LockWaits = nil
+	w.BufferHit = func(float64) float64 { return 0.99 }
+	w.BlockReads = func(float64) float64 { return 10 }
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if fired(a) {
+		t.Error("fired without the lock-wait metric")
+	}
+	if !slices.ContainsFunc(a.Warnings, func(s string) bool { return strings.Contains(s, "pg_lock_waits_waiting") }) {
+		t.Errorf("no warning for the missing metric: %q", a.Warnings)
+	}
+
+	// A disk_slow fault on db covers the slowdown: quiet, even with lock waits.
+	dir := analysistest.WriteRun(t, hot(), 1)
+	pf := filepath.Join(dir, "plan.json")
+	raw, err := os.ReadFile(pf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p plan.Plan
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	p.Faults = append(p.Faults, &plan.Fault{Inject: "disk_slow", Target: "db", At: plan.Dur(50 * time.Second), AddMs: 20})
+	raw, _ = json.Marshal(&p)
+	if err := os.WriteFile(pf, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if fired(analyze(t, dir)) {
+		t.Error("fired during a disk_slow fault on db")
 	}
 }
 

@@ -93,6 +93,19 @@ type composeVolume struct {
 	Name     string `yaml:"name"`
 }
 
+// pgExporterQueries adds pg_lock_waits_waiting: the backends of the run's
+// database waiting on a heavyweight lock, such as a row lock, at the scrape.
+const (
+	pgExporterQueriesPath = "/etc/loadlore/pg-queries.yaml"
+	pgExporterQueries     = `pg_lock_waits:
+  query: "SELECT count(*) AS waiting FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()"
+  metrics:
+    - waiting:
+        usage: "GAUGE"
+        description: "Backends waiting on a heavyweight lock"
+`
+)
+
 type composeConfig struct {
 	Content string `yaml:"content"`
 }
@@ -171,6 +184,10 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 				"DATA_SOURCE_URI":  fmt.Sprintf("%s:%d/%s?sslmode=disable", s.Name, plan.PostgresPort, plan.DBName),
 				"DATA_SOURCE_USER": plan.DBUser, "DATA_SOURCE_PASS": plan.DBPassword,
 			}
+			// The exporter has no lock-wait metric of its own; this query adds one.
+			exp.Environment["PG_EXPORTER_EXTEND_QUERY_PATH"] = pgExporterQueriesPath
+			cf.Configs["pgexp-queries"] = &composeConfig{Content: pgExporterQueries}
+			exp.Configs = []composeConfigRef{{Source: "pgexp-queries", Target: pgExporterQueriesPath}}
 			exp.DependsOn = map[string]composeDepend{s.Name: {Condition: "service_healthy"}}
 			cf.Services["lore-pgexp-"+s.Name] = exp
 		case "redis":

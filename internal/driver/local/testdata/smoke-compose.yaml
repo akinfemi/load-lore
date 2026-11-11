@@ -225,6 +225,7 @@ services:
       DATA_SOURCE_PASS: loadlore
       DATA_SOURCE_URI: db:5432/lab?sslmode=disable
       DATA_SOURCE_USER: loadlore
+      PG_EXPORTER_EXTEND_QUERY_PATH: /etc/loadlore/pg-queries.yaml
     cpus: 0.1
     mem_limit: 128m
     memswap_limit: 128m
@@ -235,6 +236,9 @@ services:
       io.loadlore.service: db
     networks:
       - lab
+    configs:
+      - source: pgexp-queries
+        target: /etc/loadlore/pg-queries.yaml
     depends_on:
       db:
         condition: service_healthy
@@ -357,6 +361,14 @@ configs:
   k6:
     content: |
       // script
+  pgexp-queries:
+    content: |
+      pg_lock_waits:
+        query: "SELECT count(*) AS waiting FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()"
+        metrics:
+          - waiting:
+              usage: "GAUGE"
+              description: "Backends waiting on a heavyweight lock"
   prometheus:
     content: |
       global:
