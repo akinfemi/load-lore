@@ -1,0 +1,27 @@
+title: The connection pool trap
+level: 1
+concepts: [connection pools, max_connections, PgBouncer]
+minutes: 45
+
+# Available to Docker at --scale 1, Loadlore's own containers included.
+# reference and speed: the machine its numbers come from and its host speed
+# index; loadl run warns below 75% of this.
+host:
+  cpus: 8
+  memory: 8g
+  reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
+  speed: 1000
+
+# What `loadl scenario check` verifies, at --scale 1.
+check:
+  problem:
+    verdict: broke
+    diagnoses: [pool-exhausted]
+  solutions:
+    # helps: holds, or serves min_gain x the starting design's peak
+    # throughput or more.
+    pgbouncer: {}
+    release-between-queries: {}
+  variants:
+    # The obvious fix: pools 3x bigger run into max_connections.
+    bigger-pools: { verdict: broke, signals: [errors] }

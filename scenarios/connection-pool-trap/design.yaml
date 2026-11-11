@@ -1,0 +1,60 @@
+version: 1
+name: connection-pool-trap
+
+# A checkout service: every request reads the cart from Postgres, then asks
+# the payment provider to authorize the card, and one in ten also writes
+# the order. Like Rails and Django, the api's framework checks out a
+# database connection when a request first needs one and keeps it until the
+# response.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 4
+    resources: { cpu: 0.6, memory: 512m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: db, op: read }                          # the cart
+        - { target: payments, op: http }                    # authorize the card
+        - { target: db, op: write, when: write }            # the order
+    pools:
+      db: { size: 10, hold: request }   # 4 replicas x 10 = 40 connections
+      payments: 50
+
+  payments:
+    image: loadlore/synthetic
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 0.05
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 1, memory: 1g }
+    config: { max_connections: 100, shared_buffers: 256MB }
+    dataset: { rows: 1000000, row_bytes: 512 }
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 100, to: 1400, over: 5m }
+    - hold: { rps: 1400, for: 2m }
+  mix: { read: 0.9, write: 0.1 }
+  keys: { distribution: zipf, skew: 1.1, count: 1000000 }
+
+# The payment provider is outside your system and answers in about 80 ms,
+# modeled as network latency on the way to it for the whole run.
+scenario:
+  - { at: 0s, inject: latency, target: payments, add_ms: 80 }
+
+# Your predictions, scored in the report. Replace these with your own
+# before you run it.
+expect:
+  - p99_ms < 300 until load_rps >= 1000
+  - error_rate < 1% throughout
