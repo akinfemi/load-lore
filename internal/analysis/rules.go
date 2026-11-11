@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -48,10 +49,13 @@ const (
 	// speed. When throttling does slow it, the time per call shows it.
 	TargetSlowFactor = 3.0 // at least 3x its low-load value ...
 	TargetSlowMinMs  = 1.0 // ... and at least 1 ms above it
+	// A caller's CPU tops a knee, but its requests spent at least this
+	// share of their time in calls to a busy target: the target is named.
+	KneeDownstreamShare = 0.5
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
-const RuleVersion = "2"
+const RuleVersion = "3"
 
 func diagnose(a *Analysis) []*Diagnosis {
 	out := []*Diagnosis{}
@@ -232,12 +236,68 @@ func queueingKnee(a *Analysis) *Diagnosis {
 				}
 				top = &Saturation{Component: target, What: "CPU", Value: *c,
 					Detail: fmt.Sprintf("%s CPU at %s of its limit", target, Pct(*c)), Source: SrcCPU}
-				return kneeDiagnosis(a, k, *top, &pool, why)
+				symptom := Evidence{Text: fmt.Sprintf("%s at %s: a symptom, since connections stayed in use longer while %s was slow to answer", pool.Detail, Clock(w.Start), target), Source: pool.Source}
+				return kneeDiagnosis(a, k, *top, &symptom, why)
+			}
+		}
+		// A caller's CPU near its limit isn't where requests queue when
+		// most of their time went to calls to a busy target: that target
+		// is the slow part, and the caller is waiting on it.
+		if top.What == "CPU" {
+			for j := k; j < k+KneeWindows; j++ {
+				target, why := downstreamBusy(a, ws[j], top.Component)
+				c := cpuOf(w, target)
+				if target == "" || c == nil {
+					continue
+				}
+				caller := *top
+				top = &Saturation{Component: target, What: "CPU", Value: *c,
+					Detail: fmt.Sprintf("%s CPU at %s of its limit", target, Pct(*c)), Source: SrcCPU}
+				symptom := Evidence{Text: fmt.Sprintf("%s at %s: not where requests queued, since most of their time went to calls to %s", caller.Detail, Clock(w.Start), target), Source: caller.Source}
+				return kneeDiagnosis(a, k, *top, &symptom, why)
 			}
 		}
 		return kneeDiagnosis(a, k, *top, nil, nil)
 	}
 	return nil
+}
+
+// downstreamBusy finds a target svc's requests spent most of their time
+// calling in w, at least KneeDownstreamShare of it, while the target was
+// busy. It returns the target and the evidence, or "" when there is none.
+func downstreamBusy(a *Analysis, w *Window, svc string) (string, []Evidence) {
+	sw := w.Services[svc]
+	if sw == nil || sw.RPS == nil || sw.MeanMs == nil || *sw.RPS <= 0 || *sw.MeanMs <= 0 {
+		return "", nil
+	}
+	for _, p := range w.Pools {
+		if p.Service != svc || p.HeldMs == nil || p.WaitMs == nil {
+			continue
+		}
+		var calls *float64
+		for _, e := range w.Edges {
+			if e.From == svc && e.To == p.Target {
+				calls = e.RPS
+			}
+		}
+		if calls == nil {
+			continue
+		}
+		perReq, perCall := *calls / *sw.RPS, *p.HeldMs+*p.WaitMs
+		share := perReq * perCall / *sw.MeanMs
+		if share < KneeDownstreamShare {
+			continue
+		}
+		busy := targetBusy(a, w, svc, p.Target)
+		if len(busy) == 0 {
+			continue
+		}
+		e := Evidence{Text: fmt.Sprintf("%s's requests spent %s of their time in calls to %s at %s: %s calls per request × %s each, against %s per request",
+			svc, Pct(math.Min(share, 1)), p.Target, Clock(w.Start), strconv.FormatFloat(math.Round(perReq*10)/10, 'f', -1, 64), Ms(perCall), Ms(*sw.MeanMs)),
+			Source: SrcCalls + "; " + SrcCallLatency + "; " + SrcAppLatency}
+		return p.Target, append([]Evidence{e}, busy...)
+	}
+	return "", nil
 }
 
 // targetBusy is the evidence that a pool's target was the slow part in a
@@ -277,7 +337,7 @@ func heldBaseline(a *Analysis, svc, target string) (float64, bool) {
 
 // kneeDiagnosis names r. pool, when set, is the full pool in front of r
 // and why says r was busy.
-func kneeDiagnosis(a *Analysis, k int, r Saturation, pool *Saturation, why []Evidence) *Diagnosis {
+func kneeDiagnosis(a *Analysis, k int, r Saturation, symptom *Evidence, why []Evidence) *Diagnosis {
 	ws := a.Windows
 	base := *a.Verdict.BaselineP99
 	util := func(w *Window) (float64, bool) {
@@ -339,11 +399,8 @@ func kneeDiagnosis(a *Analysis, k int, r Saturation, pool *Saturation, why []Evi
 		Text:   fmt.Sprintf("%s to %s: p99 %s with %s %s", Clock(w.Start), Clock(ws[k+KneeWindows-1].Start+WindowSeconds), strings.Join(ps, ", "), name, strings.Join(us, ", ")),
 		Source: SrcK6Latency + "; " + r.Source,
 	})
-	if pool != nil {
-		d.Evidence = append(d.Evidence, Evidence{
-			Text:   fmt.Sprintf("%s at %s: a symptom, since connections stayed in use longer while %s was slow to answer", pool.Detail, Clock(w.Start), r.Component),
-			Source: pool.Source,
-		})
+	if symptom != nil {
+		d.Evidence = append(d.Evidence, *symptom)
 		d.Evidence = append(d.Evidence, why...)
 	}
 

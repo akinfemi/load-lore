@@ -505,6 +505,66 @@ func TestKneeFollowsPoolToBusyTarget(t *testing.T) {
 	}
 }
 
+// Regression, from run single-postgres-breaking-point-one-query-per-page-
+// 20261111-052813: api CPU (70%) was the most saturated resource when p99
+// first stayed high at 3:20, ahead of db (62%), but api's requests spent
+// 92% of their time in calls to db, which took 1.6 ms each with a
+// connection against 0.2 ms at low load; db reached 91% CPU a window later
+// and broke the run. The knee is db's; blaming api's CPU would point at
+// the wrong fix.
+func TestKneeFollowsCallerToBusyTarget(t *testing.T) {
+	dir := filepath.Join("testdata", "caller-waits-on-db")
+	a := &Analysis{}
+	var p plan.Plan
+	if err := readJSON(filepath.Join(dir, "plan.json"), &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := readJSON(filepath.Join(dir, "windows.json"), &a.Windows); err != nil {
+		t.Fatal(err)
+	}
+	a.Plan, a.PeakOffered = &p, p.Workload.PeakRate
+	a.Verdict = verdict(a)
+	ds := diagnose(a)
+	if len(ds) != 1 || ds[0].Title != "Queueing knee (db CPU)" || ds[0].From != 200 || !strings.Contains(ds[0].Next, "on db,") {
+		t.Fatalf("diagnoses %+v", ds)
+	}
+	text := ""
+	for _, e := range ds[0].Evidence {
+		text += e.Text + "\n"
+	}
+	for _, want := range []string{
+		"api CPU at 70% of its limit at 3:20: not where requests queued",
+		"api's requests spent 92% of their time in calls to db at 3:20: 1.1 calls per request × 5.3 ms each, against 6.4 ms per request",
+		"1.6 ms each once they had a connection at 3:20, against 0.2 ms at low load",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("evidence lacks %q:\n%s", want, text)
+		}
+	}
+
+	// With db answering at its usual speed, api's CPU is the knee.
+	for _, w := range a.Windows {
+		for _, pw := range w.Pools {
+			if pw.HeldMs != nil {
+				v := 0.2
+				pw.HeldMs = &v
+			}
+		}
+		if c := w.Services["db"].CPU; c != nil && *c >= PoolTargetCPUMax {
+			v := 0.6
+			w.Services["db"].CPU = &v
+		}
+	}
+	// (The full pool after the break is then the pool's fault too.)
+	var titles []string
+	for _, d := range diagnose(a) {
+		titles = append(titles, d.Title)
+	}
+	if !slices.Contains(titles, "Queueing knee (api CPU)") {
+		t.Errorf("idle db: %v", titles)
+	}
+}
+
 // A full pool in front of a database whose calls slowed down is the
 // database's knee, not pool exhaustion, even with its average CPU at 50%.
 // With the same throttling but calls at their usual speed, the pool is to
