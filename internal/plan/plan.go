@@ -722,9 +722,11 @@ func (p *Plan) workload(d *design.Design, byName map[string]*Service, scale floa
 	// two seconds; past that, k6 reports dropped iterations, which the
 	// report shows as the load generator unable to keep the rate. VUs
 	// started mid-run take time to initialize and drop arrivals meanwhile,
-	// so enough for 250 ms of latency at peak are allocated up front.
+	// which during a stall lightens the load just as the system struggles,
+	// so enough to ride out latency up to the SLO at peak are allocated up
+	// front.
 	pw.MaxVUs = int(math.Min(maxVUsCap, math.Max(100, math.Ceil(pw.PeakRate*2))))
-	pw.PreVUs = int(math.Min(float64(pw.MaxVUs), math.Max(20, math.Ceil(pw.PeakRate/4))))
+	pw.PreVUs = int(math.Min(float64(pw.MaxVUs), math.Max(20, math.Ceil(pw.PeakRate*pw.SLOP99Ms/1000))))
 	p.Workload = pw
 }
 

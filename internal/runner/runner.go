@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/akinfemi/load-lore/internal/analysis"
+	"github.com/akinfemi/load-lore/internal/bench"
 	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/driver"
 	"github.com/akinfemi/load-lore/internal/hoststat"
@@ -42,7 +43,24 @@ type Options struct {
 	ReuseData      bool      // skip the fresh dataset copy
 	Root           string    // runs folder; default rundir.Root
 	Progress       io.Writer // plain progress lines
+
+	// CoolTo is a speed index to wait for before starting, the first run's
+	// in a series: pre-flight re-runs the benchmark until the host is
+	// within CoolTolerance of it, for up to CoolLimit. 0 = don't wait.
+	CoolTo int
+	// Series places the run in a run --repeat series; nil for one run.
+	Series *analysis.SeriesRef
 }
+
+// A machine slows as it heats up, so runs in a series wait for the host to
+// get back within CoolTolerance of the first run's speed index, checking
+// every coolEvery, for up to CoolLimit.
+const (
+	CoolTolerance = 0.05
+	CoolLimit     = 10 * time.Minute
+)
+
+var coolEvery = 30 * time.Second
 
 // Run statuses.
 const (
@@ -54,25 +72,26 @@ const (
 
 // Result is the run's outcome, also written to run.json.
 type Result struct {
-	RunID       string             `json:"run_id"`
-	Dir         string             `json:"dir"`
-	Design      string             `json:"design"`
-	DesignPath  string             `json:"design_path"` // the file run, absolute
-	Status      string             `json:"status"`
-	Error       string             `json:"error,omitempty"`
-	Scale       float64            `json:"scale"`
-	Seed        int64              `json:"seed"`
-	ReuseData   bool               `json:"reuse_data"`
-	Started     time.Time          `json:"started"`
-	LoadStarted *time.Time         `json:"load_started,omitempty"`
-	LoadEnded   *time.Time         `json:"load_ended,omitempty"`
-	Finished    time.Time          `json:"finished"`
-	Host        *driver.Host       `json:"host,omitempty"`
-	Warnings    []string           `json:"warnings"`
-	Notes       []string           `json:"notes"`
-	Load        *driver.LoadResult `json:"load,omitempty"`
-	Kept        bool               `json:"kept"`
-	Loadl       string             `json:"loadl_version"`
+	RunID       string              `json:"run_id"`
+	Dir         string              `json:"dir"`
+	Design      string              `json:"design"`
+	DesignPath  string              `json:"design_path"` // the file run, absolute
+	Status      string              `json:"status"`
+	Error       string              `json:"error,omitempty"`
+	Scale       float64             `json:"scale"`
+	Seed        int64               `json:"seed"`
+	ReuseData   bool                `json:"reuse_data"`
+	Started     time.Time           `json:"started"`
+	LoadStarted *time.Time          `json:"load_started,omitempty"`
+	LoadEnded   *time.Time          `json:"load_ended,omitempty"`
+	Finished    time.Time           `json:"finished"`
+	Host        *driver.Host        `json:"host,omitempty"`
+	Warnings    []string            `json:"warnings"`
+	Notes       []string            `json:"notes"`
+	Load        *driver.LoadResult  `json:"load,omitempty"`
+	Kept        bool                `json:"kept"`
+	Loadl       string              `json:"loadl_version"`
+	Series      *analysis.SeriesRef `json:"series,omitempty"`
 
 	// From the report, once written: broke, held, inconclusive or no_data.
 	Verdict        string `json:"verdict,omitempty"`
@@ -85,6 +104,41 @@ const setupAllowance = 15 * time.Minute
 
 // scrapeSettle is how long to wait after the load for the last scrapes.
 var scrapeSettle = 3 * time.Second
+
+// coolDown waits until the host speed index is within CoolTolerance of
+// target, re-running the benchmark every coolEvery, for up to CoolLimit or
+// until ctx ends. It returns the last measurement. Only a slower host
+// waits: a faster one has nothing to cool from.
+func coolDown(ctx context.Context, drv driver.Driver, p *plan.Plan, target int, sp *bench.Speed, out io.Writer) (*bench.Speed, *driver.Cooldown) {
+	c := &driver.Cooldown{Target: target, Tolerance: CoolTolerance, First: sp.Index}
+	floor := (1 - CoolTolerance) * float64(target)
+	if float64(sp.Index) >= floor {
+		c.Reached = true
+		return sp, c
+	}
+	start := time.Now()
+	for float64(sp.Index) < floor {
+		if time.Since(start) >= CoolLimit {
+			c.Waited = time.Since(start).Seconds()
+			return sp, c
+		}
+		fmt.Fprintf(out, "  cooling down: speed index %d, waiting for %d or more (the first run's %d, less %s)\n", sp.Index, int(math.Ceil(floor)), target, fmtF(CoolTolerance*100)+"%")
+		select {
+		case <-ctx.Done():
+			c.Waited = time.Since(start).Seconds()
+			return sp, c
+		case <-time.After(coolEvery):
+		}
+		next, err := drv.Speed(ctx, p)
+		if err != nil {
+			fmt.Fprintf(out, "  warning: the speed benchmark failed while cooling down: %v\n", err)
+			continue
+		}
+		sp = next
+	}
+	c.Waited, c.Reached = time.Since(start).Seconds(), true
+	return sp, c
+}
 
 // Run runs a design. Diagnostics from an invalid design come back as
 // *InvalidDesignError.
@@ -114,7 +168,7 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 	}
 	defer dir.Close()
 	designPath, _ := filepath.Abs(opt.DesignPath)
-	res := &Result{RunID: id, Dir: dir.Path, Design: d.Name, DesignPath: designPath, Started: started.UTC(), Seed: opt.Seed, ReuseData: opt.ReuseData, Loadl: version.Version, Warnings: []string{}}
+	res := &Result{RunID: id, Dir: dir.Path, Design: d.Name, DesignPath: designPath, Started: started.UTC(), Seed: opt.Seed, ReuseData: opt.ReuseData, Loadl: version.Version, Warnings: []string{}, Series: opt.Series}
 	if err := dir.Write("design.yaml", raw); err != nil {
 		return nil, err
 	}
@@ -139,6 +193,13 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 	pf, err := drv.Preflight(parent, p)
 	if err != nil {
 		return nil, fmt.Errorf("preflight: %w", err)
+	}
+	if opt.CoolTo > 0 && pf.Host.Speed != nil {
+		pf.Host.Speed, pf.Host.Cooled = coolDown(parent, drv, p, opt.CoolTo, pf.Host.Speed, out)
+		if c := pf.Host.Cooled; !c.Reached {
+			pf.Warnings = append(pf.Warnings, fmt.Sprintf("the host's speed index was still %d after waiting %s, against %d for the first run of the series: this run may break at a lower load because the host is slower, not the design",
+				pf.Host.Speed.Index, CoolLimit, c.Target))
+		}
 	}
 	res.Host = &pf.Host
 	if sp := pf.Host.Speed; sp != nil {

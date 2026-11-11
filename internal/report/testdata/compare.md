@@ -18,6 +18,10 @@ _A: run `fixture-run` · B: run `fixture-run`_
 
 <sub>Sources as in each run's report: served from k6_http_reqs_total{expected_response="true"} (k6: successful responses), p99 from k6_http_req_duration_seconds (k6 histogram, end to end), errors from k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6).</sub>
 
+**Before reading the difference:**
+
+- Both are single runs. The same design varies from run to run on one machine, so a small difference may be noise: `loadl run --repeat 3` on each design measures how much on this host.
+
 ## Verdicts
 
 **A.** Held the whole profile: up to 1,000 rps offered, 950 rps served at best, worst 10-second p99 5.0 ms, at most 0% errors.

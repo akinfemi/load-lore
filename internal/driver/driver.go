@@ -17,6 +17,8 @@ type Driver interface {
 	// Preflight checks the environment can run the plan, before anything
 	// is created.
 	Preflight(ctx context.Context, p *plan.Plan) (*Preflight, error)
+	// Speed runs the host speed benchmark again, as pre-flight did.
+	Speed(ctx context.Context, p *plan.Plan) (*bench.Speed, error)
 	// Up creates and starts everything except the load: datasets, the
 	// stack, monitoring. It returns when the stack is healthy.
 	Up(ctx context.Context, p *plan.Plan, dir *rundir.Dir, progress func(string)) error
@@ -63,6 +65,21 @@ type Host struct {
 	// Speed is the host speed benchmark pre-flight ran, against the
 	// reference machine; nil when it couldn't run.
 	Speed *bench.Speed `json:"speed,omitempty"`
+
+	// Cooled is the wait before the run for the host to get back near an
+	// earlier run's speed, in a series such as --repeat; nil when there was
+	// none to wait for.
+	Cooled *Cooldown `json:"cooled,omitempty"`
+}
+
+// Cooldown is how long pre-flight waited for the host speed index to get
+// back within a share of Target, re-running the benchmark meanwhile.
+type Cooldown struct {
+	Target    int     `json:"target"`    // the speed index waited for: the series' first run's
+	Tolerance float64 `json:"tolerance"` // the share below Target that counts as close enough
+	First     int     `json:"first"`     // the index pre-flight measured first
+	Waited    float64 `json:"waited_s"`  // seconds waited; 0 when First was already close enough
+	Reached   bool    `json:"reached"`   // false when it stopped waiting at the limit
 }
 
 // Values of Host.HostCPU.

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/akinfemi/load-lore/internal/analysis"
+	"github.com/akinfemi/load-lore/internal/bench"
 )
 
 // RunFunc runs one design and returns its run folder. A run that started
@@ -38,6 +39,9 @@ type RunCheck struct {
 	Diagnoses []string      `json:"diagnoses"`
 	Claims    []ClaimResult `json:"claims"`
 	OK        bool          `json:"ok"`
+
+	SpeedIndex int      `json:"speed_index,omitempty"` // the host speed index this run measured
+	Warnings   []string `json:"warnings"`              // reasons to read the claims with care
 }
 
 // ClaimResult is one claim and whether the run showed it.
@@ -76,7 +80,7 @@ func Check(ctx context.Context, s *Scenario, dir string, run RunFunc) *CheckResu
 }
 
 func runOne(ctx context.Context, run RunFunc, name, designPath string) *RunCheck {
-	rc := &RunCheck{Name: name, Design: designPath, Diagnoses: []string{}, Claims: []ClaimResult{}}
+	rc := &RunCheck{Name: name, Design: designPath, Diagnoses: []string{}, Claims: []ClaimResult{}, Warnings: []string{}}
 	dir, err := run(ctx, designPath)
 	rc.RunDir = dir
 	if err != nil {
@@ -89,6 +93,9 @@ func runOne(ctx context.Context, run RunFunc, name, designPath string) *RunCheck
 		return rc
 	}
 	rc.Verdict, rc.Summary = string(a.Verdict.Kind), a.Verdict.Summary
+	if h := a.Environment.Host; h != nil && h.Speed != nil {
+		rc.SpeedIndex = h.Speed.Index
+	}
 	rc.PeakRPS = a.Verdict.MaxRPS
 	if b := a.Verdict.Break; b != nil {
 		at, load := b.At, b.Offered
@@ -138,6 +145,11 @@ func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck) {
 		rc.claim("verdict "+c.Verdict, rc.Verdict == c.Verdict, rc.Summary)
 	}
 	rc.diagnosisClaims(c)
+
+	if problem != nil && problem.SpeedIndex > 0 && rc.SpeedIndex > 0 && bench.Gap(problem.SpeedIndex, rc.SpeedIndex) > bench.Tolerance {
+		rc.Warnings = append(rc.Warnings, fmt.Sprintf("the host's speed index was %d, against %d in the starting design's run, %s apart, more than %s: part of any difference may be the host's speed, not the design",
+			rc.SpeedIndex, problem.SpeedIndex, analysis.Pct(bench.Gap(problem.SpeedIndex, rc.SpeedIndex)), analysis.Pct(bench.Tolerance)))
+	}
 
 	gain := DefaultMinGain
 	if c.MinGain != nil {

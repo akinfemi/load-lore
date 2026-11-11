@@ -564,6 +564,11 @@ func localSocket(host string) bool {
 	return host == "" || strings.HasPrefix(host, "unix://") || strings.HasPrefix(host, "npipe://")
 }
 
+// Speed runs the host speed benchmark again.
+func (d *Driver) Speed(ctx context.Context, p *plan.Plan) (*bench.Speed, error) {
+	return d.speed(ctx, p.Infra.SyntheticImg)
+}
+
 // speed runs the host speed benchmark in a container limited to one CPU,
 // the way the design's own containers are limited.
 func (d *Driver) speed(ctx context.Context, image string) (*bench.Speed, error) {

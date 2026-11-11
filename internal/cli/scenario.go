@@ -274,7 +274,10 @@ solution run in turn and must show what meta.yaml's check block claims.
 A solution helps when it holds, or its peak throughput (the most successful
 responses per second in any window) is at least min_gain times the starting
 design's (default 1.2). --static skips the runs. Runs are
-stored like any other, so each has its report.`,
+stored like any other, so each has its report. Runs after the first wait
+for the host speed index to get back near the first run's, since a machine
+slows as it heats up, and a solution whose run was more than 10% faster or
+slower than the starting design's gets a warning.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := scenario.Find(args[0])
@@ -298,13 +301,19 @@ stored like any other, so each has its report.`,
 			}
 			var run scenario.RunFunc
 			if !static {
+				// Later runs wait for the host to cool back to the first
+				// run's speed, so a solution isn't judged on a hotter machine.
+				coolTo := 0
 				run = func(ctx context.Context, designPath string) (string, error) {
 					rel, _ := filepath.Rel(dir, designPath)
 					fmt.Fprintf(progress, "\n== %s: %s\n", s.Name, rel)
-					res, err := runner.Run(ctx, runner.Options{DesignPath: designPath, Scale: scale, Seed: seed, SyntheticImage: image, Progress: progress},
+					res, err := runner.Run(ctx, runner.Options{DesignPath: designPath, Scale: scale, Seed: seed, SyntheticImage: image, Progress: progress, CoolTo: coolTo},
 						func(ctx context.Context) (driver.Driver, error) { return local.New(ctx) })
 					if res == nil {
 						return "", err
+					}
+					if coolTo == 0 && res.Host != nil && res.Host.Speed != nil {
+						coolTo = res.Host.Speed.Index
 					}
 					return res.Dir, err
 				}
@@ -357,6 +366,9 @@ func printCheck(w io.Writer, r *scenario.CheckResult, static bool) {
 				mark = "FAIL"
 			}
 			fmt.Fprintf(w, "    %s %s: %s\n", mark, c.Claim, c.Detail)
+		}
+		for _, x := range rc.Warnings {
+			fmt.Fprintf(w, "    warning: %s\n", x)
 		}
 	}
 	switch {

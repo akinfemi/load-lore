@@ -10,6 +10,8 @@ import (
 
 	"github.com/akinfemi/load-lore/internal/analysis"
 	"github.com/akinfemi/load-lore/internal/analysis/analysistest"
+	"github.com/akinfemi/load-lore/internal/bench"
+	"github.com/akinfemi/load-lore/internal/driver"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -151,6 +153,59 @@ func TestNiceCeil(t *testing.T) {
 	for in, want := range map[float64]float64{0: 1, 0.7: 0.8, 3: 3, 12: 12, 13: 15, 4100: 5000, 5250: 6000, 100: 100} {
 		if got := niceCeil(in); got != want {
 			t.Errorf("niceCeil(%v) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestCompareSpreadAndSpeed(t *testing.T) {
+	run := func(id string, speed int, at, peak float64, s *analysis.Series) *analysis.Analysis {
+		p99 := 900.0
+		return &analysis.Analysis{RunID: id, Name: "d", Scale: 1, Seed: 1, Series: s,
+			Verdict:     analysis.Verdict{Kind: analysis.VerdictBroke, MaxRPS: &peak, Break: &analysis.Break{At: at, P99: &p99}},
+			Environment: analysis.Environment{Host: &driver.Host{CPUs: 8, MemoryBytes: 8 << 30, Speed: &bench.Speed{Score: bench.Score{Index: speed}}}}}
+	}
+	single := strings.Join(caveats(run("a", 1012, 180, 2950, nil), run("b", 874, 250, 4085, nil)), "\n")
+	for _, want := range []string{"Both are single runs", "speed index 1012 and 874 (A, then B), 14% apart, more than 10%"} {
+		if !strings.Contains(single, want) {
+			t.Errorf("caveats lack %q:\n%s", want, single)
+		}
+	}
+	if strings.Contains(single, "different hosts") {
+		t.Errorf("a speed difference isn't a different host:\n%s", single)
+	}
+
+	s := &analysis.Series{BreakAt: &analysis.Spread{N: 3, Min: 160, Median: 180, Max: 220}, PeakServed: &analysis.Spread{N: 3, Min: 2800, Median: 2950, Max: 3100}}
+	got := strings.Join(caveats(run("a", 1000, 180, 2950, s), run("b", 980, 210, 4085, nil)), "\n")
+	if !strings.Contains(got, "The break time differs by 0:30, within the 1:00 spread of run A's series (3 runs, 2:40 to 3:40)") {
+		t.Errorf("break time within spread:\n%s", got)
+	}
+	if strings.Contains(got, "peak served differs") || strings.Contains(got, "single runs") || strings.Contains(got, "different speeds") {
+		t.Errorf("unexpected caveat:\n%s", got)
+	}
+}
+
+func TestSeriesSummary(t *testing.T) {
+	at1, at2, peak := 180.0, 220.0, 2950.0
+	s := &analysis.Series{ID: "s", Design: "d", Scale: 1, Seed: 7, Planned: 2,
+		Runs: []analysis.SeriesRun{
+			{RunID: "r1", Verdict: analysis.VerdictBroke, Speed: 1000, BreakAt: &at1, PeakServed: &peak},
+			{RunID: "r2", Verdict: analysis.VerdictBroke, Speed: 960, BreakAt: &at2, PeakServed: &peak,
+				Cooled: &driver.Cooldown{Target: 1000, Tolerance: 0.05, First: 900, Waited: 150, Reached: true}},
+		},
+		BreakAt:    &analysis.Spread{N: 2, Min: 180, Median: 200, Max: 220},
+		PeakServed: &analysis.Spread{N: 2, Min: 2950, Median: 2950, Max: 2950},
+		Warnings:   []string{"the runs disagree"},
+	}
+	md := Series(s)
+	for _, want := range []string{
+		"| 2. `r2` | 960 | waited 2m30s (900 to 960) | broke | 3:40 |",
+		"- Break time: 3:00 to 3:40 (median 3:20), 0:40 (20% of the median) apart over 2 runs that broke",
+		"- Peak served: 2,950 rps in all 2 runs that were conclusive",
+		"- p99 at the break: no conclusive run gave one",
+		"- The runs disagree",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("lacks %q:\n%s", want, md)
 		}
 	}
 }

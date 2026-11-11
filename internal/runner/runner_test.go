@@ -26,13 +26,29 @@ type fakeDriver struct {
 	loadFor  time.Duration
 	injected []string
 	undone   []string
+	speeds   []int // speed indexes pre-flight and then each Speed call measure
 }
 
 func (f *fakeDriver) log(s string) { f.mu.Lock(); f.calls = append(f.calls, s); f.mu.Unlock() }
 
 func (f *fakeDriver) Preflight(context.Context, *plan.Plan) (*driver.Preflight, error) {
 	f.log("preflight")
-	return &driver.Preflight{Host: driver.Host{Driver: "fake", CPUs: 64}}, nil
+	pf := &driver.Preflight{Host: driver.Host{Driver: "fake", CPUs: 64}}
+	if len(f.speeds) > 0 {
+		pf.Host.Speed = &bench.Speed{Score: bench.Score{Index: f.speeds[0]}}
+		f.speeds = f.speeds[1:]
+	}
+	return pf, nil
+}
+
+func (f *fakeDriver) Speed(context.Context, *plan.Plan) (*bench.Speed, error) {
+	f.log("speed")
+	if len(f.speeds) == 0 {
+		return nil, errors.New("no more speeds")
+	}
+	sp := &bench.Speed{Score: bench.Score{Index: f.speeds[0]}}
+	f.speeds = f.speeds[1:]
+	return sp, nil
 }
 
 func (f *fakeDriver) Up(_ context.Context, _ *plan.Plan, dir *rundir.Dir, _ func(string)) error {
@@ -204,6 +220,36 @@ func TestInvalidDesignCreatesNothing(t *testing.T) {
 	}
 }
 
+func TestCoolDownWaitsForTheFirstRunsSpeed(t *testing.T) {
+	defer func(d time.Duration) { coolEvery = d }(coolEvery)
+	coolEvery = time.Millisecond
+
+	// 874 and 940 are more than 5% below 1000; 960 is within it.
+	f := &fakeDriver{loadFor: time.Millisecond, speeds: []int{874, 940, 960}}
+	res, err := runFake(t, f, context.Background(), Options{CoolTo: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.calls, ","); got != "preflight,speed,speed,up,load,collect,down" {
+		t.Errorf("calls %s", got)
+	}
+	c := res.Host.Cooled
+	if c == nil || !c.Reached || c.First != 874 || c.Target != 1000 || res.Host.Speed.Index != 960 {
+		t.Errorf("cooled %+v, speed %+v", c, res.Host.Speed)
+	}
+
+	// A faster host, or no series, doesn't wait.
+	f = &fakeDriver{loadFor: time.Millisecond, speeds: []int{1100}}
+	res, _ = runFake(t, f, context.Background(), Options{CoolTo: 1000})
+	if strings.Contains(strings.Join(f.calls, ","), "speed") || res.Host.Cooled == nil || res.Host.Cooled.Waited != 0 {
+		t.Errorf("fast host: calls %v, cooled %+v", f.calls, res.Host.Cooled)
+	}
+	f = &fakeDriver{loadFor: time.Millisecond, speeds: []int{500}}
+	if res, _ = runFake(t, f, context.Background(), Options{}); res.Host.Cooled != nil {
+		t.Errorf("no series: cooled %+v", res.Host.Cooled)
+	}
+}
+
 func TestScenarioHostWarnings(t *testing.T) {
 	sc := &scenario.Scenario{Name: "s", Meta: scenario.Meta{Host: scenario.Host{CPUs: 8, Memory: 8 << 30, Reference: "ref machine", Speed: 1000}}}
 	host := driver.Host{CPUs: 8, MemoryBytes: 10 << 30, Speed: &bench.Speed{Score: bench.Score{Index: 800}}}
@@ -218,5 +264,47 @@ func TestScenarioHostWarnings(t *testing.T) {
 	host.Speed, host.CPUs = nil, 4
 	if w := scenarioHostWarnings(sc, 1, host); len(w) != 1 || !strings.Contains(w[0], "try --scale 0.5") {
 		t.Errorf("small: %v", w)
+	}
+}
+
+func TestRepeatRunsASeries(t *testing.T) {
+	defer func(d time.Duration) { coolEvery = d }(coolEvery)
+	coolEvery = time.Millisecond
+
+	path := filepath.Join(t.TempDir(), "design.yaml")
+	if err := os.WriteFile(path, []byte(designSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	// Run 2 starts hot (900 against 1000) and cools to 980; run 3 doesn't wait.
+	f := &fakeDriver{loadFor: time.Millisecond, speeds: []int{1000, 900, 980, 990}}
+	opt := Options{DesignPath: path, Root: filepath.Join(base, "runs")}
+	sr, err := Repeat(context.Background(), opt, 3, func(context.Context) (driver.Driver, error) { return f, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sr.Runs) != 3 || len(sr.Series.Runs) != 3 || filepath.Dir(sr.Dir) != filepath.Join(base, "series") {
+		t.Fatalf("series %+v", sr)
+	}
+	seed := sr.Runs[0].Seed
+	for i, r := range sr.Runs {
+		if r.Seed == 0 || r.Seed != seed || r.Series == nil || r.Series.Index != i+1 || r.Series.Of != 3 {
+			t.Errorf("run %d: seed %d, series %+v", i+1, r.Seed, r.Series)
+		}
+	}
+	if c := sr.Runs[1].Host.Cooled; c == nil || !c.Reached || c.First != 900 || c.Target != 1000 {
+		t.Errorf("run 2 cooled %+v", c)
+	}
+	if c := sr.Runs[2].Host.Cooled; c == nil || c.Waited != 0 {
+		t.Errorf("run 3 cooled %+v", c)
+	}
+	for _, name := range []string{"series.json", "series.md"} {
+		if _, err := os.Stat(filepath.Join(sr.Dir, name)); err != nil {
+			t.Error(err)
+		}
+	}
+	// The fake runs have no metrics, so none is conclusive.
+	if len(sr.Series.Warnings) == 0 || !strings.Contains(sr.Series.Warnings[0], "left out of the spreads") {
+		t.Errorf("warnings %v", sr.Series.Warnings)
 	}
 }

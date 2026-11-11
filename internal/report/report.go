@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/akinfemi/load-lore/internal/analysis"
 	"github.com/akinfemi/load-lore/internal/bench"
@@ -627,11 +628,18 @@ func thresholdsSection(d *doc, a *analysis.Analysis) {
 
 // --- environment ---
 
+func waited(s float64) string {
+	return (time.Duration(s) * time.Second).Round(time.Second).String()
+}
+
 func environmentSection(d *doc, a *analysis.Analysis) {
 	e := a.Environment
 	d.line("## Environment")
 	d.line("")
 	d.line("- loadl %s, profile %s, scale %g, seed %d", e.Loadl, e.Duration, a.Scale, a.Seed)
+	if r := a.SeriesRef; r != nil {
+		d.line("- Run %d of %d in series `%s` (loadl run --repeat), summarized in the series folder's %s", r.Index, r.Of, r.ID, SeriesFileName)
+	}
 	if h := e.Host; h != nil {
 		d.line("- Host: %d CPUs, %s memory, %s (%s, kernel %s), cgroup v%s", h.CPUs, gib(h.MemoryBytes), h.OS, h.Arch, h.Kernel, h.CgroupVersion)
 		d.line("- Docker %s, Compose %s", h.EngineVersion, h.ComposeVersion)
@@ -639,6 +647,16 @@ func environmentSection(d *doc, a *analysis.Analysis) {
 			d.line("- Host speed index %d (hash %d, memory %d, syscalls %d): one CPU's work against the reference machine's 1000 (%s). CPU limits are fractions of this host's cores, so a lower index means the design breaks at a lower load", sp.Index, sp.Hash, sp.Memory, sp.Syscalls, bench.ReferenceMachine)
 		} else {
 			d.line("- Host speed index: not measured")
+		}
+		if c := h.Cooled; c != nil {
+			switch {
+			case c.Waited == 0:
+				d.line("- Cool-down: none needed; the first benchmark (%d) was within %s of the series' first run (%d)", c.First, analysis.Pct(c.Tolerance), c.Target)
+			case c.Reached:
+				d.line("- Cool-down: waited %s for the host to cool, from speed index %d to within %s of the series' first run (%d)", waited(c.Waited), c.First, analysis.Pct(c.Tolerance), c.Target)
+			default:
+				d.line("- Cool-down: waited %s, but the speed index stayed more than %s below the series' first run (%d, from %d first)", waited(c.Waited), analysis.Pct(c.Tolerance), c.Target, c.First)
+			}
 		}
 		switch h.HostCPU {
 		case driver.HostCPUSampled:

@@ -64,6 +64,11 @@ type Analysis struct {
 	Notes       []string       `json:"notes"`    // the plan's notes: scaling and budgets
 	Warnings    []string       `json:"warnings"` // from the run and from analysis
 
+	// SeriesRef places the run in a run --repeat series, and Series is that
+	// series as written when the run was analyzed; nil for a single run.
+	SeriesRef *SeriesRef `json:"series_ref,omitempty"`
+	Series    *Series    `json:"series,omitempty"`
+
 	// For report rendering.
 	Design     *design.Design `json:"-"`
 	Plan       *plan.Plan     `json:"-"`
@@ -200,6 +205,7 @@ type runRecord struct {
 	Notes       []string           `json:"notes"`
 	Load        *driver.LoadResult `json:"load"`
 	Loadl       string             `json:"loadl_version"`
+	Series      *SeriesRef         `json:"series"`
 }
 
 // Analyze reads a run folder and analyzes it.
@@ -235,6 +241,10 @@ func Analyze(dir string) (*Analysis, error) {
 	}
 	if a.Assumptions.Loadlore == nil {
 		a.Assumptions.Loadlore = []plan.Assumption{}
+	}
+	a.SeriesRef = rec.Series
+	if a.Series, err = loadSeries(rec.Series); err != nil {
+		a.Warnings = append(a.Warnings, "the run's series: "+err.Error())
 	}
 	a.Environment = Environment{Host: rec.Host, Loadl: rec.Loadl, Load: rec.Load, Duration: p.Duration.String(), Images: images(dir)}
 

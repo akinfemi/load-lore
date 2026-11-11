@@ -287,7 +287,7 @@
     },
     "payload_bytes": 1024,
     "max_vus": 600,
-    "pre_vus": 75,
+    "pre_vus": 150,
     "timeout": "10s",
     "slo_p99_ms": 500
   },

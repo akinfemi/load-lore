@@ -25,7 +25,7 @@ const P = {
     "count": 20000,
     "skew": 1.1
   },
-  "preVUs": 75,
+  "preVUs": 150,
   "maxVUs": 600,
   "timeout": "10000ms",
   "seed": 7,

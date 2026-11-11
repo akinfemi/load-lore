@@ -186,3 +186,17 @@ func roundTrips(ctx context.Context, d time.Duration) (float64, error) {
 	}
 	return float64(n) / time.Since(start).Seconds(), nil
 }
+
+// Tolerance is how far apart two runs' speed indexes can be and still
+// count as the same speed: a fanless laptop lost about 14% over four
+// back-to-back runs as it heated up, and its break times moved with it.
+const Tolerance = 0.10
+
+// Gap is how far apart two speed indexes are, as a share of the faster.
+func Gap(x, y int) float64 {
+	hi := max(x, y)
+	if hi <= 0 {
+		return 0
+	}
+	return math.Abs(float64(x-y)) / float64(hi)
+}

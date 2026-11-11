@@ -34,6 +34,8 @@ Scenarios are guided experiments in [`scenarios/`](scenarios/): a starting desig
 
 Each run starts from a fresh copy of the seeded dataset. `--reuse-data` skips the copy for quick iteration; the report then says which earlier runs wrote to the data.
 
+Results vary from run to run, and a laptop slows as it heats up. `loadl run --repeat 3` runs a design three times with the same seed and writes the spread of break time, peak served and p99 at the break to `.loadlore/series/<id>/series.md`. Runs after the first wait until the host speed index is back within 5% of the first run's. `loadl compare` says when a difference is within a series' spread, and flags runs whose speed index differs by more than 10%.
+
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and the Docker behaviors the local driver depends on.

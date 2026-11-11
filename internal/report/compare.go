@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/akinfemi/load-lore/internal/analysis"
+	"github.com/akinfemi/load-lore/internal/bench"
 	"github.com/akinfemi/load-lore/internal/mermaid"
 )
 
@@ -159,16 +160,22 @@ func optMs(p *float64) string {
 	return analysis.Ms(*p)
 }
 
-// Hosts count as the same size within these shares. A VM's reported
-// memory moves by a few KiB between runs, and the speed index by about
-// 10% on one machine.
-const (
-	HostMemoryTolerance = 0.05
-	HostSpeedTolerance  = 0.15
-)
+// Hosts count as the same size within HostMemoryTolerance: a VM's
+// reported memory moves by a few KiB between runs.
+const HostMemoryTolerance = 0.05
 
 func apart(x, y, share float64) bool {
 	return math.Abs(x-y) > share*math.Max(x, y)
+}
+
+// speedCaveat says when two runs' host speed indexes are more than
+// bench.Tolerance apart, or "" when they aren't or one is missing.
+func speedCaveat(x, y *bench.Speed, order string) string {
+	if x == nil || y == nil || bench.Gap(x.Index, y.Index) <= bench.Tolerance {
+		return ""
+	}
+	return fmt.Sprintf("The host ran at different speeds: speed index %d and %d (%s), %s apart, more than %s. A machine slows as it heats up or on battery, and CPU limits are fractions of its cores, so the slower run can break at a lower load for that reason alone.",
+		x.Index, y.Index, order, analysis.Pct(bench.Gap(x.Index, y.Index)), analysis.Pct(bench.Tolerance))
 }
 
 // caveats are differences that make a comparison less than like for like.
@@ -188,13 +195,14 @@ func caveats(a, b *analysis.Analysis) []string {
 		if apart(float64(ha.MemoryBytes), float64(hb.MemoryBytes), HostMemoryTolerance) {
 			diff = append(diff, fmt.Sprintf("%s and %s of memory", gib(ha.MemoryBytes), gib(hb.MemoryBytes)))
 		}
-		if ha.Speed != nil && hb.Speed != nil && apart(float64(ha.Speed.Index), float64(hb.Speed.Index), HostSpeedTolerance) {
-			diff = append(diff, fmt.Sprintf("speed index %d and %d", ha.Speed.Index, hb.Speed.Index))
-		}
 		if len(diff) > 0 {
 			out = append(out, "The runs ran on different hosts: "+strings.Join(diff, ", ")+" (A, then B). CPU limits are fractions of the host's cores, so the same design can break at a different load.")
 		}
+		if c := speedCaveat(ha.Speed, hb.Speed, "A, then B"); c != "" {
+			out = append(out, c)
+		}
 	}
+	out = append(out, spreadCaveats(a, b)...)
 	if a.Seed != b.Seed || a.Seed == 0 {
 		out = append(out, "The runs didn't share a --seed, so they drew different keys and read/write sequences.")
 	}

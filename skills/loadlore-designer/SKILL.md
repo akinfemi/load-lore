@@ -89,7 +89,7 @@ Then offer the command to run it: `loadl run design.yaml` (local mode).
 | `loadl scenarios [search] --json` | Finding a library scenario to start from |
 | `loadl hint [scenario] --json` | The next hint for the scenario of the latest run, one at a time |
 | `loadl scenario check <folder> [--static] [--scale s]` | Checking a new scenario: files, diagram, claims, then a run of each design |
-| `loadl run <file> [--mode local]` | Running, when the user asks. `--scale` shrinks it for small hosts; `--seed` makes the workload repeatable; `--reuse-data` skips the fresh dataset copy (the report then says the data drifted) |
+| `loadl run <file> [--mode local]` | Running, when the user asks. `--scale` shrinks it for small hosts; `--seed` makes the workload repeatable; `--reuse-data` skips the fresh dataset copy (the report then says the data drifted); `--repeat N` runs it N times and reports the spread, so a small difference between designs can be told from noise |
 | `loadl report <run-id> --json` | Explaining a run: verdict, diagnoses with evidence, scored predictions, per-window numbers. `latest` names the newest run |
 | `loadl compare <run-a> <run-b>` | Before and after a design change, side by side |
 | `loadl profile <service>` | Measuring a real service to replace guessed numbers |

@@ -18,6 +18,10 @@ _A: run `single-postgres-breaking-point-20261111-015507` · B: run `single-postg
 
 <sub>Sources as in each run's report: served from k6_http_reqs_total{expected_response="true"} (k6: successful responses), p99 from k6_http_req_duration_seconds (k6 histogram, end to end), errors from k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6).</sub>
 
+**Before reading the difference:**
+
+- Both are single runs. The same design varies from run to run on one machine, so a small difference may be noise: `loadl run --repeat 3` on each design measures how much on this host.
+
 ## Verdicts
 
 **A.** Broke 3:00 into the load, at 3,122 rps offered: p99 reached 1.25 s (2.9 ms at low load). Most saturated then: db CPU at 101% of its limit. After the break the load generator couldn't send 54% of the arrivals the profile asked for (539,768 arrivals from 3:10; k6_dropped_iterations_total (k6: arrivals it couldn't start)): slow responses held its 4,000 VUs, so served throughput from then on is partly the generator's limit, not only the system's.
