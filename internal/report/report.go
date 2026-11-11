@@ -404,6 +404,7 @@ func chartsSection(d *doc, a *analysis.Analysis) {
 	mark(c)
 	c.Line(colErrors, errs)
 	chart(d, c, "Failed requests as a share of all responses ("+analysis.SrcErrors+"), timeouts included."+markNote+gapNote(g))
+	errorCauses(d, ws)
 
 	// CPU.
 	c = &mermaid.XYChart{Title: "CPU against each limit", XLabel: "seconds", XMax: xMax, YLabel: "% of limit", YMax: 100}
@@ -862,4 +863,21 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// errorCauses lists why services' requests failed over the run, under
+// the errors chart. The load generator's own failures (timeouts, refused
+// connections at the entry) don't appear: only services count causes.
+func errorCauses(d *doc, ws []*analysis.Window) {
+	ecs := analysis.ErrorCauses(ws)
+	if len(ecs) == 0 {
+		return
+	}
+	d.line("| Service | Failed requests | Share of its failures | Cause | From calls to | First seen | What it means |")
+	d.line("| --- | --- | --- | --- | --- | --- | --- |")
+	for _, ec := range ecs {
+		d.line("| %s | %s | %s | `%s` | %s | %s | %s |", ec.Service, analysis.Count(ec.Count), analysis.Pct(ec.Share), ec.Cause, cell(ec.Target), analysis.Clock(ec.First), cell(ec.Meaning))
+	}
+	d.line("")
+	d.p("<sub>Why requests failed, over the whole run (%s). A request that failed after retries counts once, by its last attempt's cause.</sub>", analysis.SrcErrorCauses)
 }

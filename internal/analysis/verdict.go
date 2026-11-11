@@ -590,6 +590,9 @@ func (v *Verdict) summary(a *Analysis) string {
 			}
 		}
 		s = fmt.Sprintf("Broke %s into the load, at %s rps offered: %s.", Clock(b.At), Rate(b.Offered), joinAnd(what))
+		if slices.Contains(b.Signals, "errors") {
+			s += causeSentence(a.Windows[b.Window : b.Window+1])
+		}
 		if top, ok := MostSaturated(b.Saturation); ok {
 			s += " Most saturated then: " + top.Detail + waitingOn(a, b.Window, top) + "."
 		}

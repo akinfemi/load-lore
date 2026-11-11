@@ -46,6 +46,9 @@ expect:
 type World struct {
 	Served   func(t, offered float64) float64 // successful responses/s
 	Failed   func(t float64) float64
+	// FailCause, when set, is the cause api counts each failed request
+	// under, as the synthetic service does, with the failed calls to db.
+	FailCause string
 	Dropped  func(t float64) float64
 	P50, P99 func(t float64) float64 // seconds
 	APICPU   func(t float64) float64 // fraction of limit
@@ -179,6 +182,11 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 		callSum = newC(counters, "loadlore_call_duration_seconds_sum", map[string]string{"service": "api", "target": "db", "op": "read"})
 		callCnt = newC(counters, "loadlore_call_duration_seconds_count", map[string]string{"service": "api", "target": "db", "op": "read"})
 	}
+	var reqErrs, callErrs *counter
+	if w.FailCause != "" {
+		reqErrs = newC(counters, "loadlore_request_errors_total", map[string]string{"service": "api", "cause": w.FailCause})
+		callErrs = newC(counters, "loadlore_call_errors_total", map[string]string{"service": "api", "target": "db", "op": "read", "cause": w.FailCause})
+	}
 	waitSum := newC(counters, "loadlore_pool_wait_seconds_sum", map[string]string{"service": "api", "target": "db"})
 	waitCnt := newC(counters, "loadlore_pool_wait_seconds_count", map[string]string{"service": "api", "target": "db"})
 	inUse := newC(gauges, "loadlore_pool_connections", map[string]string{"service": "api", "target": "db", "state": "in_use"})
@@ -212,6 +220,10 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			bad := w.Failed(el) * ok
 			add(okReqs, ok-bad)
 			add(badReqs, bad)
+			if reqErrs != nil {
+				add(reqErrs, bad)
+				add(callErrs, bad)
+			}
 			add(drops, w.Dropped(el)*offered)
 			add(apiCPU, w.APICPU(el)*p.Service("api").CPU)
 			add(dbCPU, w.DBCPU(el)*p.Service("db").CPU)
@@ -266,6 +278,10 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			if callSum != nil {
 				add(callSum, 0)
 				add(callCnt, 0)
+			}
+			if reqErrs != nil {
+				add(reqErrs, 0)
+				add(callErrs, 0)
 			}
 			set(inUse, 0)
 			set(pending, 0)

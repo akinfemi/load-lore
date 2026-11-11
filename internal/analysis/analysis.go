@@ -124,6 +124,8 @@ type ServiceWindow struct {
 	MeanMs       *float64 `json:"mean_ms,omitempty"`
 	Inflight     *float64 `json:"inflight,omitempty"`      // peak, summed over replicas
 	InflightMean *float64 `json:"inflight_mean,omitempty"` // mean, summed over replicas
+	// ErrorCauses counts failed requests by cause (synthetic.Cause*).
+	ErrorCauses map[string]float64 `json:"error_causes,omitempty"`
 
 	// Postgres.
 	Connections    *float64 `json:"connections,omitempty"`
@@ -174,6 +176,8 @@ type EdgeWindow struct {
 	ErrorRate *float64 `json:"error_rate"`
 	P99       *float64 `json:"p99_ms"`
 	P99Source string   `json:"p99_source,omitempty"`
+	// ErrorCauses counts failed call attempts by cause, retries included.
+	ErrorCauses map[string]float64 `json:"error_causes,omitempty"`
 }
 
 // Assumptions are the design's own and the ones Loadlore made for the run.
@@ -615,6 +619,9 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 		if mx, mean, ok := st.gaugeSum("loadlore_requests_inflight", svc, wa, wb); ok {
 			sw.Inflight, sw.InflightMean = num(mx, true), num(mean, true)
 		}
+		if c := st.increaseBy("loadlore_request_errors_total", svc, "cause", wa, wb); len(c) > 0 {
+			sw.ErrorCauses = c
+		}
 	case "postgres":
 		if mx, _, ok := st.gaugeSum("pg_stat_activity_count", svc, wa, wb); ok {
 			sw.Connections = num(mx, true)
@@ -675,6 +682,9 @@ func (b *builder) appEdges(w *Window, s *plan.Service, wa, wb float64) {
 			e.ErrorRate = num(bad/total, total > 0)
 		}
 		e.P99 = ms(quantile(st.classicBuckets("loadlore_call_duration_seconds", m, wa, wb), 0.99))
+		if c := st.increaseBy("loadlore_call_errors_total", m, "cause", wa, wb); len(c) > 0 {
+			e.ErrorCauses = c
+		}
 		w.Edges = append(w.Edges, e)
 
 		if tgt.Pool <= 0 || !st.has("loadlore_pool_max_connections") {

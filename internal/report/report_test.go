@@ -86,6 +86,44 @@ func TestReport(t *testing.T) {
 	}
 }
 
+// Failed requests get a table of their causes under the errors chart;
+// the pool run has no failures, so its report has none.
+func TestReportErrorCauses(t *testing.T) {
+	w := analysistest.Healthy()
+	w.Failed = func(t float64) float64 {
+		if t > 70 {
+			return 0.2
+		}
+		return 0
+	}
+	w.FailCause = "too_many_conns"
+	dir := analysistest.WriteRun(t, w, 1)
+	if _, err := Write(dir); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := string(b)
+	for _, want := range []string{
+		"| Service | Failed requests | Share of its failures | Cause | From calls to | First seen | What it means |",
+		"| `too_many_conns` | db | 1:10 | db refused new connections (Postgres max_connections) |",
+		"Of api's failed requests, 100% failed because db refused new connections",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("report lacks %q", want)
+		}
+	}
+	pool, err := os.ReadFile("testdata/pool.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(pool), "| Service | Failed requests |") {
+		t.Error("a run without failures shouldn't get a causes table")
+	}
+}
+
 func TestCompare(t *testing.T) {
 	a, err := analysis.Analyze(analysistest.WriteRun(t, analysistest.Healthy(), 1))
 	if err != nil {

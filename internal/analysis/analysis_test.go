@@ -241,12 +241,48 @@ func TestErrorsBreak(t *testing.T) {
 	w.Failed = func(t float64) float64 { return 0.2 * boolF(t > 70) }
 	a := analyze(t, analysistest.WriteRun(t, w, 1))
 	b := a.Verdict.Break
-	if b == nil || b.At != 70 || b.Signals[0] != "errors" || !strings.Contains(a.Verdict.Summary, "20% of requests failed") {
+	if b == nil || b.At != 70 || b.Signals[0] != "errors" || !strings.Contains(a.Verdict.Summary, "20% of requests failed") || strings.Contains(a.Verdict.Summary, "because") {
 		t.Errorf("verdict %+v", a.Verdict)
+	}
+	if ecs := ErrorCauses(a.Windows); len(ecs) != 0 {
+		t.Errorf("no service counted causes, got %+v", ecs)
 	}
 	for _, e := range a.Expect {
 		if e.Text == "error_rate < 1%" && (e.Status != ExpectBroken || e.BrokeAt == nil || *e.BrokeAt != 70) {
 			t.Errorf("error_rate line: %+v", e)
+		}
+	}
+}
+
+// The verdict says why requests failed, from the services' own counts,
+// and names the target the failing calls went to.
+func TestErrorsBreakNamesTheCause(t *testing.T) {
+	w := analysistest.Healthy()
+	w.Failed = func(t float64) float64 { return 0.2 * boolF(t > 70) }
+	w.FailCause = synthetic.CauseTooManyConns
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	want := "succeeded. Of api's failed requests, 100% failed because db refused new connections (Postgres max_connections). Most saturated"
+	if !strings.Contains(a.Verdict.Summary, want) {
+		t.Errorf("summary %q\nwant it to contain %q", a.Verdict.Summary, want)
+	}
+	ecs := ErrorCauses(a.Windows)
+	if len(ecs) != 1 || ecs[0].Service != "api" || ecs[0].Cause != synthetic.CauseTooManyConns || ecs[0].Target != "db" || ecs[0].First != 70 || ecs[0].Share != 1 || ecs[0].Count < 1 {
+		t.Errorf("causes %+v", ecs)
+	}
+}
+
+func TestCauseMeaning(t *testing.T) {
+	for _, tc := range []struct{ cause, target, want string }{
+		{"too_many_conns", "db", "db refused new connections (Postgres max_connections)"},
+		{"pool_timeout", "db", "they timed out waiting for a pool connection to db"},
+		{"timeout", "", "calls ran past their timeout"},
+		{"circuit_open", "payments", "the circuit breaker to payments was open"},
+		{"bulkhead_full", "payments", "the bulkhead in front of payments was full"},
+		{"upstream_error", "", "a dependency answered with error statuses"},
+		{"surprise", "db", "of other errors"},
+	} {
+		if got := causeMeaning(tc.cause, tc.target); got != tc.want {
+			t.Errorf("causeMeaning(%q, %q) = %q, want %q", tc.cause, tc.target, got, tc.want)
 		}
 	}
 }

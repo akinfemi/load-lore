@@ -179,6 +179,18 @@ func (s *store) increase(name string, m matcher, a, b float64) (float64, bool) {
 	return total, found
 }
 
+// increaseBy is increase split by one label's value, leaving out values
+// that didn't increase.
+func (s *store) increaseBy(name string, m matcher, label string, a, b float64) map[string]float64 {
+	out := map[string]float64{}
+	for _, ss := range s.match(name, m) {
+		if inc, ok := s.increaseOne(ss, a, b); ok && inc > 0 {
+			out[ss.labels[label]] += inc
+		}
+	}
+	return out
+}
+
 // gaugeStale is how old a scrape may be and still count. Targets are
 // scraped every second; beyond this the target has stopped (a replica
 // died).
