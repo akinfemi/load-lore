@@ -326,7 +326,9 @@ run, so they never run again.`,
 					return res.Dir, err
 				}
 			}
-			res := scenario.Check(cmd.Context(), s, dir, run)
+			ctx, stop := untilInterrupted(cmd.Context())
+			defer stop()
+			res := scenario.Check(ctx, s, dir, run)
 			if g.json {
 				if err := writeJSON(cmd.OutOrStdout(), res); err != nil {
 					return err

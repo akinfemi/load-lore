@@ -58,7 +58,9 @@ up; loadl compare uses the spread to say when a difference may be noise.`,
 			case repeat > 1 && keep:
 				return errors.New("--keep and --repeat don't go together: each run tears down before the next")
 			case repeat > 1:
-				sr, err := runner.Repeat(cmd.Context(), opt, repeat, newDriver)
+				ctx, stop := untilInterrupted(cmd.Context())
+				defer stop()
+				sr, err := runner.Repeat(ctx, opt, repeat, newDriver)
 				return finishRepeat(cmd, g, args[0], sr, err)
 			}
 			res, err := runner.Run(cmd.Context(), opt, newDriver)
