@@ -22,6 +22,7 @@ func newRunCmd(g *globalOpts) *cobra.Command {
 		seed    int64
 		keep    bool
 		full    bool
+		detach  bool
 		timeout time.Duration
 		image   string
 		reuse   bool
@@ -41,6 +42,9 @@ Once the run's live check sees a break (the same rule as the report's
 verdict), the load goes on for 60 s so the report can diagnose it, then
 stops. --full runs the whole profile instead.
 
+--detach starts the run in the background and returns its id at once,
+for AI agents and long runs; loadl status <run> shows how it's going.
+
 --repeat N runs the design N times with the same seed and writes a series
 summary to .loadlore/series/<id>/ with the spread of break time, peak
 served and p99 at the break. Runs after the first wait for the host speed
@@ -48,6 +52,12 @@ index to get back near the first run's, since a machine slows as it heats
 up; loadl compare uses the spread to say when a difference may be noise.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if detach {
+				if repeat > 1 {
+					return errors.New("--detach runs one design; it doesn't go with --repeat yet")
+				}
+				return runDetached(cmd, g, args)
+			}
 			if mode != "local" {
 				return fmt.Errorf("--mode %s isn't available yet; only local runs are", mode)
 			}
@@ -99,6 +109,7 @@ up; loadl compare uses the spread to say when a difference may be noise.`,
 	cmd.Flags().Float64Var(&scale, "scale", 0, "shrink resources and load together, such as 0.5 (default: the design's modes.local.scale, else 1)")
 	cmd.Flags().Int64Var(&seed, "seed", 0, "seed for the load generator's random keys and mix (0 = random)")
 	cmd.Flags().BoolVar(&keep, "keep", false, "leave the stack running after the load ends")
+	cmd.Flags().BoolVar(&detach, "detach", false, "run in the background and return the run id at once; loadl status follows it")
 	cmd.Flags().BoolVar(&full, "full", false, "run the whole profile; without it the load stops 60 s after the live check confirms a break")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "stop and tear down after this long (default: 15m setup + the profile + 5m)")
 	cmd.Flags().BoolVar(&reuse, "reuse-data", false, "skip the fresh copy of seeded data and reuse a shared one; earlier runs' writes carry over, and the report says so")

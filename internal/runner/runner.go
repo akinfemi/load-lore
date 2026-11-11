@@ -149,7 +149,7 @@ func coolDown(ctx context.Context, drv driver.Driver, p *plan.Plan, target int, 
 
 // Run runs a design. Diagnostics from an invalid design come back as
 // *InvalidDesignError.
-func Run(parent context.Context, opt Options, newDriver func(context.Context) (driver.Driver, error)) (*Result, error) {
+func Run(parent context.Context, opt Options, newDriver func(context.Context) (driver.Driver, error)) (_ *Result, runErr error) {
 	out := opt.Progress
 	if out == nil {
 		out = io.Discard
@@ -188,6 +188,20 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 	if err := dir.WriteJSON("plan.json", p); err != nil {
 		return nil, err
 	}
+	st := newStatusFile(dir, Status{RunID: id, Design: d.Name, PID: os.Getpid(), Log: detachedLog(), Phase: PhasePreflight, Started: started.UTC(), ProfileS: p.Duration.Seconds()})
+	defer func() {
+		// A run that ends before its report (pre-flight failed, say) is
+		// finished too, with what went wrong.
+		st.update(func(s *Status) {
+			if s.Phase == PhaseFinished {
+				return
+			}
+			s.Phase, s.Status = PhaseFinished, StatusFailed
+			if runErr != nil {
+				s.Error = runErr.Error()
+			}
+		})
+	}()
 	fmt.Fprintf(out, "run %s\n  folder %s\n", id, dir.Path)
 	for _, n := range p.Notes {
 		fmt.Fprintf(out, "  note: %s\n", n)
@@ -236,10 +250,11 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 	ctx, cancelTimeout := context.WithTimeout(ctx, timeout)
 	defer cancelTimeout()
 
-	runErr := runStack(ctx, drv, p, dir, res, out, !opt.Full)
+	st.phase(PhaseStarting)
+	stackErr := runStack(ctx, drv, p, dir, res, out, !opt.Full, st)
 
 	switch {
-	case runErr == nil:
+	case stackErr == nil:
 		res.Status = StatusCompleted
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		res.Status = StatusTimedOut
@@ -249,7 +264,7 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 		res.Error = "interrupted"
 	default:
 		res.Status = StatusFailed
-		res.Error = runErr.Error()
+		res.Error = stackErr.Error()
 	}
 
 	stopSignals()
@@ -257,6 +272,7 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 		res.Kept = true
 		fmt.Fprintf(out, "keeping the stack up (--keep); remove it with `loadl down`\n")
 	} else {
+		st.phase(PhaseTeardown)
 		fmt.Fprintf(out, "tearing down (press Ctrl-C again to skip; then run `loadl down`)\n")
 		tctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		start := time.Now()
@@ -288,6 +304,10 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 	if err := dir.WriteJSON("run.json", res); err != nil {
 		return res, err
 	}
+	st.update(func(s *Status) {
+		s.Phase, s.Status, s.Error = PhaseFinished, res.Status, res.Error
+		s.Verdict, s.VerdictSummary, s.Report = res.Verdict, res.VerdictSummary, res.Report
+	})
 	fmt.Fprintf(out, "%s: %s\n", res.Status, dir.Path)
 	if res.Status != StatusCompleted {
 		return res, fmt.Errorf("run %s: %s", res.Status, res.Error)
@@ -297,7 +317,7 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 
 // runStack brings the stack up, runs the load with its fault timeline and
 // progress lines, and collects the data.
-func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.Dir, res *Result, out io.Writer, earlyStop bool) error {
+func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.Dir, res *Result, out io.Writer, earlyStop bool, st *statusFile) error {
 	progress := func(s string) { fmt.Fprintf(out, "  %s\n", s) }
 	if err := drv.Up(ctx, p, dir, progress); err != nil {
 		// Keep the containers' logs and states: they say why.
@@ -317,13 +337,14 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 		t0 = t
 		ts := t.UTC()
 		res.LoadStarted = &ts
+		st.update(func(s *Status) { s.Phase, s.LoadStarted = PhaseLoad, &ts })
 		_ = dir.Event("load_start", map[string]any{"peak_rate": p.Workload.PeakRate, "duration": p.Duration.String()})
 		wg.Go(func() { timeline(loadCtx, t, p.Faults, drv, dir, out) })
 		var watch *breakWatch
 		if earlyStop {
 			watch = newBreakWatch(p)
 		}
-		wg.Go(func() { stopped = progressLines(loadCtx, t, drv, out, watch, dir) })
+		wg.Go(func() { stopped = progressLines(loadCtx, t, drv, out, watch, dir, st) })
 		if res.Host != nil && res.Host.HostCPU == driver.HostCPUSampled {
 			host = hoststat.Start(loadCtx, time.Second)
 		}
@@ -343,6 +364,7 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 	}
 	_ = dir.Event("load_end", fields)
 
+	st.phase(PhaseCollecting)
 	// Collect even when the load failed: whatever was measured is evidence.
 	// Wait for the last scrapes first.
 	fmt.Fprintf(out, "collecting metrics and logs\n")
@@ -439,7 +461,7 @@ var progressEvery = 10 * time.Second
 // With a watch, each sample also goes to the live break check, and once
 // it confirms a break the load stops EarlyStopAfter later. It returns the
 // early stop, if there was one.
-func progressLines(ctx context.Context, t0 time.Time, drv driver.Driver, out io.Writer, watch *breakWatch, dir *rundir.Dir) *analysis.EarlyStop {
+func progressLines(ctx context.Context, t0 time.Time, drv driver.Driver, out io.Writer, watch *breakWatch, dir *rundir.Dir, st *statusFile) *analysis.EarlyStop {
 	tick := time.NewTicker(progressEvery)
 	defer tick.Stop()
 	var stopTimer <-chan time.Time
@@ -482,12 +504,14 @@ func progressLines(ctx context.Context, t0 time.Time, drv driver.Driver, out io.
 			parts = append(parts, "cpu "+strings.Join(cpus, " "))
 		}
 		fmt.Fprintf(out, "[%s] %s\n", clock(elapsed), strings.Join(parts, " · "))
+		st.update(func(x *Status) { x.ElapsedS, x.Sample = elapsed.Seconds(), s })
 		if watch == nil || announced {
 			continue
 		}
 		if at, ok := watch.add(elapsed, s); ok {
 			announced = true
 			es := watch.stop
+			st.update(func(x *Status) { x.BreakAtS, x.BreakConfirmedS, x.StopsAtS = &es.BreakAt, &es.ConfirmedAt, &es.At })
 			fmt.Fprintf(out, "[%s] break confirmed (from %s); the load stops at %s\n", clock(elapsed), clock(time.Duration(es.BreakAt*float64(time.Second))), clock(at))
 			stopTimer = time.After(time.Until(t0.Add(at)))
 		}

@@ -92,6 +92,7 @@ Then offer the command to run it: `loadl run design.yaml` (local mode).
 | `loadl scenario check <folder> [--static] [--scale s]` | Checking a new scenario: files, diagram, claims, then a run of each design |
 | `loadl doctor --json` | Before a first run, or when runs fail to start or drift: Docker, capacity per scenario, image, host speed and power, each with its fix |
 | `loadl run <file> [--mode local]` | Running, when the user asks. `--scale` shrinks it for small hosts; `--seed` makes the workload repeatable; `--reuse-data` skips the fresh dataset copy (the report then says the data drifted); `--repeat N` runs it N times and reports the spread, so a small difference between designs can be told from noise; the load stops 60 s after a confirmed break, and `--full` runs the whole profile |
+| `loadl run <file> --detach --json` then `loadl status <run-id> --json` | Running from an agent: `--detach` returns the run id at once; poll `status` (about every 30 s) for the phase, the last 10 s of numbers and a confirmed break, until `phase` is `finished` |
 | `loadl report <run-id> --json` | Explaining a run: verdict, diagnoses with evidence, scored predictions, per-window numbers. `latest` names the newest run |
 | `loadl compare <run-a> <run-b>` | Before and after a design change, side by side |
 | `loadl profile <service>` | Measuring a real service to replace guessed numbers |

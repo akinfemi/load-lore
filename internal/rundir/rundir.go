@@ -62,6 +62,30 @@ func (d *Dir) Write(name string, data []byte) error {
 	return os.WriteFile(p, data, 0o644)
 }
 
+// WriteAtomic writes a file in the run folder by renaming a temporary
+// file over it, so a reader never sees it half written.
+func (d *Dir) WriteAtomic(name string, data []byte) error {
+	p := d.File(name)
+	tmp, err := os.CreateTemp(filepath.Dir(p), "."+filepath.Base(p)+".*")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return os.Rename(tmp.Name(), p)
+}
+
 // WriteJSON writes v as indented JSON.
 func (d *Dir) WriteJSON(name string, v any) error {
 	b, err := json.MarshalIndent(v, "", "  ")
@@ -106,13 +130,35 @@ func (d *Dir) Close() error {
 	return err
 }
 
-// Resolve finds a run folder from what a user typed: a path to the folder,
-// a run id, a unique prefix of one, or "latest".
+// Resolve finds a finished run's folder from what a user typed: a path
+// to the folder, a run id, a unique prefix of one, or "latest".
 func Resolve(root, ref string) (string, error) {
-	isRun := func(p string) bool {
-		_, err := os.Stat(filepath.Join(p, "run.json"))
-		return err == nil
+	return resolve(root, ref, []string{"run.json"}, "finished runs")
+}
+
+// ResolveAny is Resolve for runs still going too: a run's status.json
+// appears when it starts, its run.json when it ends. "latest" is the run
+// most recently written to.
+func ResolveAny(root, ref string) (string, error) {
+	return resolve(root, ref, []string{"run.json", StatusFile}, "runs")
+}
+
+// StatusFile is the progress file a run rewrites as it goes.
+const StatusFile = "status.json"
+
+func resolve(root, ref string, marks []string, what string) (string, error) {
+	// newest is the latest write to any of a run's mark files; zero when
+	// it has none.
+	newest := func(p string) time.Time {
+		var t time.Time
+		for _, m := range marks {
+			if fi, err := os.Stat(filepath.Join(p, m)); err == nil && fi.ModTime().After(t) {
+				t = fi.ModTime()
+			}
+		}
+		return t
 	}
+	isRun := func(p string) bool { return !newest(p).IsZero() }
 	if isRun(ref) {
 		return ref, nil
 	}
@@ -132,8 +178,8 @@ func Resolve(root, ref string) (string, error) {
 			continue
 		}
 		if ref == "latest" {
-			if fi, err := os.Stat(filepath.Join(p, "run.json")); err == nil && fi.ModTime().After(latestTime) {
-				latest, latestTime = p, fi.ModTime()
+			if t := newest(p); t.After(latestTime) {
+				latest, latestTime = p, t
 			}
 			continue
 		}
@@ -145,7 +191,7 @@ func Resolve(root, ref string) (string, error) {
 	case ref == "latest" && latest != "":
 		return latest, nil
 	case ref == "latest":
-		return "", fmt.Errorf("no finished runs in %s", root)
+		return "", fmt.Errorf("no %s in %s", what, root)
 	case len(matches) == 1:
 		return matches[0], nil
 	case len(matches) > 1:

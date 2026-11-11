@@ -133,6 +133,16 @@ scenario:
 
 func init() { scrapeSettle = 0 }
 
+func readStatus(t *testing.T, dir string) Status {
+	t.Helper()
+	var st Status
+	b, err := os.ReadFile(filepath.Join(dir, "status.json"))
+	if err != nil || json.Unmarshal(b, &st) != nil {
+		t.Fatalf("status.json: %v %s", err, b)
+	}
+	return st
+}
+
 func runFake(t *testing.T, f *fakeDriver, ctx context.Context, opt Options) (*Result, error) {
 	t.Helper()
 	return runFakeDesign(t, f, ctx, opt, designSrc)
@@ -160,6 +170,9 @@ func TestCompletedRunTearsDownAndRecords(t *testing.T) {
 	}
 	if res.Status != StatusCompleted || res.LoadStarted == nil || res.LoadEnded == nil {
 		t.Errorf("result %+v", res)
+	}
+	if st := readStatus(t, res.Dir); st.Phase != PhaseFinished || st.Status != StatusCompleted || st.Verdict != "no_data" || st.PID != os.Getpid() || st.LoadStarted == nil || st.ProfileS != 1 {
+		t.Errorf("status %+v", st)
 	}
 	// The short fault ended on time; the long one was ended with the load.
 	if len(f.injected) != 2 || len(f.undone) != 2 || f.undone[0] != "latency" {
@@ -192,6 +205,9 @@ func TestFailedUpStillTearsDown(t *testing.T) {
 	}
 	if got := strings.Join(f.calls, ","); got != "preflight,up,collect,down" {
 		t.Errorf("calls %s", got)
+	}
+	if st := readStatus(t, res.Dir); st.Phase != PhaseFinished || st.Status != StatusFailed || !strings.Contains(st.Error, "boom") {
+		t.Errorf("status %+v", st)
 	}
 }
 
@@ -375,6 +391,9 @@ func TestBrokenRunStopsEarly(t *testing.T) {
 	}
 	if !slices.Contains(f.calls, "stop") {
 		t.Errorf("calls %v", f.calls)
+	}
+	if st := readStatus(t, res.Dir); st.BreakConfirmedS == nil || st.StopsAtS == nil || st.Sample == nil || st.Phase != PhaseFinished {
+		t.Errorf("status %+v", st)
 	}
 	b, _ := os.ReadFile(filepath.Join(res.Dir, "events.jsonl"))
 	if !strings.Contains(string(b), `"kind":"load_stop"`) {

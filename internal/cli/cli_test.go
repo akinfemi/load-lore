@@ -10,6 +10,9 @@ import (
 	"testing"
 
 	"github.com/akinfemi/load-lore/internal/analysis/analysistest"
+	"github.com/akinfemi/load-lore/internal/driver"
+	"github.com/akinfemi/load-lore/internal/rundir"
+	"github.com/akinfemi/load-lore/internal/runner"
 	"github.com/akinfemi/load-lore/internal/scenario"
 )
 
@@ -384,5 +387,60 @@ func TestPredict(t *testing.T) {
 	}
 	if _, errOut, code := runCLI(t, "predict", "../../examples/smoke.yaml"); code == exitOK || !strings.Contains(errOut, "isn't part of a scenario") {
 		t.Errorf("not a scenario: exit %d, %s", code, errOut)
+	}
+}
+
+func TestStatus(t *testing.T) {
+	t.Chdir(t.TempDir())
+	dir := filepath.Join(rundir.Root, "demo-20261111-120000")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	served, p99 := 980.0, 12.0
+	confirmed, breakAt, stops := 120.0, 100.0, 180.0
+	write := func(st runner.Status) {
+		b, _ := json.Marshal(st)
+		if err := os.WriteFile(filepath.Join(dir, "status.json"), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st := runner.Status{RunID: "demo-20261111-120000", Design: "demo", PID: os.Getpid(), Phase: runner.PhaseLoad, ProfileS: 420, ElapsedS: 130,
+		Sample: &driver.Sample{Offered: 1000, Served: &served, P99Ms: &p99}, BreakConfirmedS: &confirmed, BreakAtS: &breakAt, StopsAtS: &stops}
+	write(st)
+	out, _, code := runCLI(t, "status")
+	for _, want := range []string{"run demo-20261111-120000 (demo)", "load 2:10 of 7:00 · offered 1,000 rps · served 980 rps · p99 12 ms", "break confirmed at 2:00 (from 1:40); the load stops at 3:00", "kill -INT"} {
+		if code != exitOK || !strings.Contains(out, want) {
+			t.Errorf("exit %d, output lacks %q:\n%s", code, want, out)
+		}
+	}
+
+	// Its process is gone: it stopped without finishing.
+	st.PID = 1 << 30
+	write(st)
+	out, _, _ = runCLI(t, "status", "demo", "--json")
+	var rs runStatus
+	if json.Unmarshal([]byte(out), &rs) != nil || rs.Alive {
+		t.Errorf("a dead run: %s", out)
+	}
+
+	// A finished run from before status.json.
+	os.Remove(filepath.Join(dir, "status.json"))
+	b, _ := json.Marshal(runner.Result{RunID: "demo-20261111-120000", Design: "demo", Status: runner.StatusCompleted, Verdict: "broke", VerdictSummary: "Broke 1:40 into the load."})
+	_ = os.WriteFile(filepath.Join(dir, "run.json"), b, 0o644)
+	if out, _, _ = runCLI(t, "status"); !strings.Contains(out, "completed\n  Broke 1:40 into the load.") {
+		t.Errorf("old run:\n%s", out)
+	}
+}
+
+func TestChildRunArgs(t *testing.T) {
+	g := &globalOpts{}
+	cmd := newRunCmd(g)
+	cmd.PersistentFlags().BoolVar(&g.json, "json", false, "")
+	if err := cmd.ParseFlags([]string{"--detach", "--seed", "7", "--json", "--full"}); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(childRunArgs(cmd, []string{"d.yaml"}), " ")
+	if got != "run --full=true --seed=7 d.yaml" {
+		t.Errorf("got %q", got)
 	}
 }
