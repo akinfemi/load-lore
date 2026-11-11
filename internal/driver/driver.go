@@ -25,6 +25,10 @@ type Driver interface {
 	// RunLoad starts the load generator, calls started once it runs, and
 	// blocks until it finishes or ctx ends.
 	RunLoad(ctx context.Context, started func(time.Time)) (*LoadResult, error)
+	// StopLoad ends the load before its profile does. The load generator
+	// stops as at the end of the profile: it still writes its summary,
+	// and RunLoad returns with K6Stopped as the exit code.
+	StopLoad(ctx context.Context) error
 	// Inject applies a fault. undo ends it, for faults that can end.
 	Inject(ctx context.Context, f *plan.Fault) (undo func(context.Context) error, err error)
 	// Sample reads current numbers for progress output.
@@ -87,6 +91,10 @@ const (
 	HostCPUSampled = "sampled"
 	HostCPUInVM    = "vm"
 )
+
+// K6Stopped is k6's exit code when a signal ended the test early
+// (errext.ExternalAbort).
+const K6Stopped = 105
 
 // LoadResult is the load generator's own account of the run.
 type LoadResult struct {

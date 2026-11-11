@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,26 @@ type fakeDriver struct {
 	injected []string
 	undone   []string
 	speeds   []int // speed indexes pre-flight and then each Speed call measure
+
+	sample   *driver.Sample // what Sample returns; nil: an empty sample
+	stopOnce sync.Once
+	stopCh   chan struct{} // closed by StopLoad
+}
+
+func (f *fakeDriver) stopped() chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.stopCh == nil {
+		f.stopCh = make(chan struct{})
+	}
+	return f.stopCh
+}
+
+func (f *fakeDriver) StopLoad(context.Context) error {
+	f.log("stop")
+	ch := f.stopped()
+	f.stopOnce.Do(func() { close(ch) })
+	return nil
 }
 
 func (f *fakeDriver) log(s string) { f.mu.Lock(); f.calls = append(f.calls, s); f.mu.Unlock() }
@@ -63,6 +84,8 @@ func (f *fakeDriver) RunLoad(ctx context.Context, started func(time.Time)) (*dri
 	select {
 	case <-time.After(f.loadFor):
 		return &driver.LoadResult{Requests: 10}, nil
+	case <-f.stopped():
+		return &driver.LoadResult{Requests: 5, ExitCode: driver.K6Stopped}, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -81,6 +104,9 @@ func (f *fakeDriver) Inject(_ context.Context, fl *plan.Fault) (func(context.Con
 }
 
 func (f *fakeDriver) Sample(context.Context, time.Duration) (*driver.Sample, error) {
+	if f.sample != nil {
+		return f.sample, nil
+	}
 	return &driver.Sample{}, nil
 }
 
@@ -109,8 +135,13 @@ func init() { scrapeSettle = 0 }
 
 func runFake(t *testing.T, f *fakeDriver, ctx context.Context, opt Options) (*Result, error) {
 	t.Helper()
+	return runFakeDesign(t, f, ctx, opt, designSrc)
+}
+
+func runFakeDesign(t *testing.T, f *fakeDriver, ctx context.Context, opt Options, src string) (*Result, error) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "design.yaml")
-	if err := os.WriteFile(path, []byte(designSrc), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	opt.DesignPath = path
@@ -306,5 +337,65 @@ func TestRepeatRunsASeries(t *testing.T) {
 	// The fake runs have no metrics, so none is conclusive.
 	if len(sr.Series.Warnings) == 0 || !strings.Contains(sr.Series.Warnings[0], "left out of the spreads") {
 		t.Errorf("warnings %v", sr.Series.Warnings)
+	}
+}
+
+// A long profile whose load keeps failing: the live check confirms the
+// break and stops the load EarlyStopAfter later, unless the run is --full.
+const longDesignSrc = `
+version: 1
+name: fake-long
+services:
+  api: { image: loadlore/synthetic, behavior: { calls: [ { target: db, op: read } ] } }
+  db: { kind: postgres, dataset: { rows: 100 } }
+workload:
+  entry: api
+  profile: [ { hold: { rps: 10, for: 10m } } ]
+`
+
+func failingSample() *driver.Sample {
+	served, errs := 5.0, 0.5
+	return &driver.Sample{Offered: 10, Served: &served, Errors: &errs}
+}
+
+func TestBrokenRunStopsEarly(t *testing.T) {
+	defer func(p, a time.Duration) { progressEvery, EarlyStopAfter = p, a }(progressEvery, EarlyStopAfter)
+	progressEvery, EarlyStopAfter = 20*time.Millisecond, 50*time.Millisecond
+	f := &fakeDriver{loadFor: 10 * time.Second, sample: failingSample()}
+	start := time.Now()
+	res, err := runFakeDesign(t, f, context.Background(), Options{}, longDesignSrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("the load wasn't stopped: the run took %s", time.Since(start))
+	}
+	if res.Status != StatusCompleted || res.StoppedEarly == nil || res.Load == nil || res.Load.ExitCode != driver.K6Stopped {
+		t.Fatalf("result %+v", res)
+	}
+	if !slices.Contains(f.calls, "stop") {
+		t.Errorf("calls %v", f.calls)
+	}
+	b, _ := os.ReadFile(filepath.Join(res.Dir, "events.jsonl"))
+	if !strings.Contains(string(b), `"kind":"load_stop"`) {
+		t.Error("events.jsonl lacks load_stop")
+	}
+	var rj Result
+	b, _ = os.ReadFile(filepath.Join(res.Dir, "run.json"))
+	if err := json.Unmarshal(b, &rj); err != nil || rj.StoppedEarly == nil {
+		t.Errorf("run.json: %v %s", err, b)
+	}
+}
+
+func TestFullRunDoesntStop(t *testing.T) {
+	defer func(p, a time.Duration) { progressEvery, EarlyStopAfter = p, a }(progressEvery, EarlyStopAfter)
+	progressEvery, EarlyStopAfter = 20*time.Millisecond, 50*time.Millisecond
+	f := &fakeDriver{loadFor: 400 * time.Millisecond, sample: failingSample()}
+	res, err := runFakeDesign(t, f, context.Background(), Options{Full: true}, longDesignSrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StoppedEarly != nil || slices.Contains(f.calls, "stop") {
+		t.Errorf("a --full run stopped early: %+v, calls %v", res.StoppedEarly, f.calls)
 	}
 }

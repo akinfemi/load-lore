@@ -116,13 +116,7 @@ func verdict(a *Analysis) Verdict {
 	if lim, ok := LatencyLimit(v.BaselineP99, v.SLOP99Ms); ok {
 		v.LatencyLimit = &lim
 	}
-	sig := make([][]string, len(ws))
-	for i, w := range ws {
-		sig[i] = hard[i]
-		if v.LatencyLimit != nil && w.P99 != nil && *w.P99 >= *v.LatencyLimit {
-			sig[i] = append([]string{"latency"}, hard[i]...)
-		}
-	}
+	sig := withLatency(ws, hard, v.LatencyLimit)
 	breakAt := findBreak(hard, sig)
 	a.Timeline = withStalls(a.Timeline, ws, sig, breakAt, v.BaselineP99, v.LatencyLimit)
 	v.Moment = v.momentWindow(ws, breakAt)
@@ -151,6 +145,9 @@ func verdict(a *Analysis) Verdict {
 	}
 	if a.Cutoff != "" && breakAt >= 0 {
 		v.Summary += " After that, " + a.Cutoff + "."
+	}
+	if es := a.StoppedEarly; es != nil {
+		v.Summary += fmt.Sprintf(" The load stopped at %s, %.0f s after the live check confirmed the break; `loadl run --full` runs the whole profile.", Clock(es.At), es.At-es.ConfirmedAt)
 	}
 	if len(v.Inconclusive) > 0 {
 		v.Kind = VerdictInconclusive
@@ -221,6 +218,35 @@ func LatencyLimit(baseline *float64, sloMs float64) (float64, bool) {
 		return 0, false
 	}
 	return math.Max(BreakLatencyFactor**baseline, sloMs), true
+}
+
+// BreakAt applies the verdict's break rule to ws, as a run's live check
+// does while the load runs: it returns the first window of a sustained
+// break, or -1. peak is the profile's peak offered rate and sloMs the
+// design's p99 target.
+func BreakAt(ws []*Window, peak, sloMs float64) int {
+	hard := make([][]string, len(ws))
+	for i, w := range ws {
+		hard[i] = hardSignals(w)
+	}
+	var limit *float64
+	if lim, ok := LatencyLimit(baselineP99(ws, peak), sloMs); ok {
+		limit = &lim
+	}
+	return findBreak(hard, withLatency(ws, hard, limit))
+}
+
+// withLatency adds the latency signal to each window whose p99 is at or
+// above limit (nil: no latency signal).
+func withLatency(ws []*Window, hard [][]string, limit *float64) [][]string {
+	sig := make([][]string, len(ws))
+	for i, w := range ws {
+		sig[i] = hard[i]
+		if limit != nil && w.P99 != nil && *w.P99 >= *limit {
+			sig[i] = append([]string{"latency"}, hard[i]...)
+		}
+	}
+	return sig
 }
 
 // hardSignals are the signs that requests weren't served: errors and a
@@ -616,6 +642,14 @@ func (v *Verdict) summary(a *Analysis) string {
 		}
 	} else {
 		s = fmt.Sprintf("Held the whole profile: up to %s rps offered", Rate(a.PeakOffered))
+		if ws := a.Windows; a.Plan != nil && len(ws) > 0 && float64(len(ws)*WindowSeconds) < a.Plan.Duration.Seconds()-WindowSeconds {
+			// The load ended early (interrupted, timed out): only what ran.
+			offered := 0.0
+			for _, w := range ws {
+				offered = math.Max(offered, w.Offered)
+			}
+			s = fmt.Sprintf("Held until the load ended at %s: up to %s rps offered", Clock(float64(len(ws)*WindowSeconds)), Rate(offered))
+		}
 		if v.MaxRPS != nil {
 			s += ", " + Rate(*v.MaxRPS) + " rps served at best"
 		}
@@ -643,7 +677,14 @@ func statusPrefix(a *Analysis) string {
 	if a.Status == "" || a.Status == "completed" {
 		return ""
 	}
-	return fmt.Sprintf("The run %s (%s), so this covers only the data collected. ", strings.ReplaceAll(a.Status, "_", " "), a.Error)
+	what, ok := map[string]string{"interrupted": "was interrupted", "timed_out": "timed out", "failed": "failed"}[a.Status]
+	if !ok {
+		what = strings.ReplaceAll(a.Status, "_", " ")
+	}
+	if a.Error != "" && a.Error != "interrupted" {
+		what += " (" + a.Error + ")"
+	}
+	return fmt.Sprintf("The run %s, so this covers only the data collected. ", what)
 }
 
 // --- formatting, shared with reports ---

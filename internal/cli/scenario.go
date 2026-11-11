@@ -277,7 +277,8 @@ A solution helps when it holds, or its peak throughput (the most successful
 responses per second in any window) is at least min_gain times the starting
 design's (default 1.2). A variant is a design a learner is likely to try,
 such as the fix the hints lead to; it must show its own claim, such as
-breaking with errors. --static skips the runs. Runs are
+breaking with errors. --static skips the runs. Runs are full (no early
+stop after a break, so peaks compare across designs) and are
 stored like any other, so each has its report.
 
 A machine slows as it heats up, so each solution's run waits for the host
@@ -318,7 +319,7 @@ run, so they never run again.`,
 				run = func(ctx context.Context, designPath string, coolTo int) (string, error) {
 					rel, _ := filepath.Rel(dir, designPath)
 					fmt.Fprintf(progress, "\n== %s: %s\n", s.Name, rel)
-					res, err := runner.Run(ctx, runner.Options{DesignPath: designPath, Scale: scale, Seed: seed, SyntheticImage: image, Progress: progress, CoolTo: coolTo},
+					res, err := runner.Run(ctx, runner.Options{DesignPath: designPath, Scale: scale, Seed: seed, SyntheticImage: image, Progress: progress, CoolTo: coolTo, Full: true},
 						func(ctx context.Context) (driver.Driver, error) { return local.New(ctx) })
 					if res == nil {
 						return "", err

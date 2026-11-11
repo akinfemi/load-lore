@@ -21,6 +21,7 @@ func newRunCmd(g *globalOpts) *cobra.Command {
 		scale   float64
 		seed    int64
 		keep    bool
+		full    bool
 		timeout time.Duration
 		image   string
 		reuse   bool
@@ -36,6 +37,10 @@ profile and the scenario's faults, collect metrics and logs into
 Teardown runs on success, failure, Ctrl-C and timeout. --keep leaves the
 stack up to poke at; remove it later with loadl down.
 
+Once the run's live check sees a break (the same rule as the report's
+verdict), the load goes on for 60 s so the report can diagnose it, then
+stops. --full runs the whole profile instead.
+
 --repeat N runs the design N times with the same seed and writes a series
 summary to .loadlore/series/<id>/ with the spread of break time, peak
 served and p99 at the break. Runs after the first wait for the host speed
@@ -50,7 +55,7 @@ up; loadl compare uses the spread to say when a difference may be noise.`,
 			if !g.json {
 				progress = cmd.OutOrStdout()
 			}
-			opt := runner.Options{DesignPath: args[0], Scale: scale, Seed: seed, Keep: keep, Timeout: timeout, SyntheticImage: image, ReuseData: reuse, Progress: progress}
+			opt := runner.Options{DesignPath: args[0], Scale: scale, Seed: seed, Keep: keep, Full: full, Timeout: timeout, SyntheticImage: image, ReuseData: reuse, Progress: progress}
 			newDriver := func(ctx context.Context) (driver.Driver, error) { return local.New(ctx) }
 			switch {
 			case repeat < 1:
@@ -94,6 +99,7 @@ up; loadl compare uses the spread to say when a difference may be noise.`,
 	cmd.Flags().Float64Var(&scale, "scale", 0, "shrink resources and load together, such as 0.5 (default: the design's modes.local.scale, else 1)")
 	cmd.Flags().Int64Var(&seed, "seed", 0, "seed for the load generator's random keys and mix (0 = random)")
 	cmd.Flags().BoolVar(&keep, "keep", false, "leave the stack running after the load ends")
+	cmd.Flags().BoolVar(&full, "full", false, "run the whole profile; without it the load stops 60 s after the live check confirms a break")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "stop and tear down after this long (default: 15m setup + the profile + 5m)")
 	cmd.Flags().BoolVar(&reuse, "reuse-data", false, "skip the fresh copy of seeded data and reuse a shared one; earlier runs' writes carry over, and the report says so")
 	cmd.Flags().StringVar(&image, "synthetic-image", "loadlore/synthetic:dev", "image for loadlore/synthetic services")

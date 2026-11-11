@@ -51,6 +51,9 @@ type Options struct {
 	CoolTo int
 	// Series places the run in a run --repeat series; nil for one run.
 	Series *analysis.SeriesRef
+	// Full runs the whole profile. Otherwise the load stops
+	// EarlyStopAfter after the live check confirms a break.
+	Full bool
 }
 
 // A machine slows as it heats up, so runs in a series wait for the host to
@@ -93,6 +96,9 @@ type Result struct {
 	Kept        bool                `json:"kept"`
 	Loadl       string              `json:"loadl_version"`
 	Series      *analysis.SeriesRef `json:"series,omitempty"`
+	// StoppedEarly is set when the load stopped after a break instead of
+	// finishing the profile.
+	StoppedEarly *analysis.EarlyStop `json:"stopped_early,omitempty"`
 
 	// From the report, once written: broke, held, inconclusive or no_data.
 	Verdict        string `json:"verdict,omitempty"`
@@ -230,7 +236,7 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 	ctx, cancelTimeout := context.WithTimeout(ctx, timeout)
 	defer cancelTimeout()
 
-	runErr := runStack(ctx, drv, p, dir, res, out)
+	runErr := runStack(ctx, drv, p, dir, res, out, !opt.Full)
 
 	switch {
 	case runErr == nil:
@@ -291,7 +297,7 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 
 // runStack brings the stack up, runs the load with its fault timeline and
 // progress lines, and collects the data.
-func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.Dir, res *Result, out io.Writer) error {
+func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.Dir, res *Result, out io.Writer, earlyStop bool) error {
 	progress := func(s string) { fmt.Fprintf(out, "  %s\n", s) }
 	if err := drv.Up(ctx, p, dir, progress); err != nil {
 		// Keep the containers' logs and states: they say why.
@@ -305,6 +311,7 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 	var wg sync.WaitGroup
 	var t0 time.Time
 	var host *hoststat.Sampler
+	var stopped *analysis.EarlyStop // written by the progress goroutine, read after wg.Wait
 	fmt.Fprintf(out, "load: %s, peak %s rps\n", p.Duration, fmtRate(p.Workload.PeakRate))
 	lr, err := drv.RunLoad(ctx, func(t time.Time) {
 		t0 = t
@@ -312,7 +319,11 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 		res.LoadStarted = &ts
 		_ = dir.Event("load_start", map[string]any{"peak_rate": p.Workload.PeakRate, "duration": p.Duration.String()})
 		wg.Go(func() { timeline(loadCtx, t, p.Faults, drv, dir, out) })
-		wg.Go(func() { progressLines(loadCtx, t, drv, out) })
+		var watch *breakWatch
+		if earlyStop {
+			watch = newBreakWatch(p)
+		}
+		wg.Go(func() { stopped = progressLines(loadCtx, t, drv, out, watch, dir) })
 		if res.Host != nil && res.Host.HostCPU == driver.HostCPUSampled {
 			host = hoststat.Start(loadCtx, time.Second)
 		}
@@ -325,6 +336,7 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 	end := time.Now().UTC()
 	res.LoadEnded = &end
 	res.Load = lr
+	res.StoppedEarly = stopped
 	fields := map[string]any{}
 	if lr != nil {
 		fields = map[string]any{"requests": lr.Requests, "dropped_iterations": lr.DroppedIterations, "failed_share": lr.FailedShare, "exit_code": lr.ExitCode}
@@ -353,7 +365,7 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 	if err != nil {
 		return fmt.Errorf("load: %w", err)
 	}
-	if lr.ExitCode != 0 && lr.ExitCode != 99 {
+	if lr.ExitCode != 0 && lr.ExitCode != 99 && !(stopped != nil && lr.ExitCode == driver.K6Stopped) {
 		return fmt.Errorf("the load generator exited with code %d", lr.ExitCode)
 	}
 	return nil
@@ -419,15 +431,36 @@ func describeFault(f *plan.Fault) string {
 	return s
 }
 
-// progressLines prints a progress line every 10 seconds. Every number comes from
-// the run's Prometheus, except offered load, which is the profile.
-func progressLines(ctx context.Context, t0 time.Time, drv driver.Driver, out io.Writer) {
-	tick := time.NewTicker(10 * time.Second)
+// progressEvery is how often progressLines samples the run.
+var progressEvery = 10 * time.Second
+
+// progressLines prints a progress line every 10 seconds. Every number comes
+// from the run's Prometheus, except offered load, which is the profile.
+// With a watch, each sample also goes to the live break check, and once
+// it confirms a break the load stops EarlyStopAfter later. It returns the
+// early stop, if there was one.
+func progressLines(ctx context.Context, t0 time.Time, drv driver.Driver, out io.Writer, watch *breakWatch, dir *rundir.Dir) *analysis.EarlyStop {
+	tick := time.NewTicker(progressEvery)
 	defer tick.Stop()
+	var stopTimer <-chan time.Time
+	announced := false
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
+		case <-stopTimer:
+			es := watch.stop
+			_ = dir.Event("load_stop", map[string]any{"break_at_s": es.BreakAt, "confirmed_at_s": es.ConfirmedAt, "at_s": es.At})
+			fmt.Fprintf(out, "[%s] stopping the load, %s after the break was confirmed (--full runs the whole profile)\n", clock(time.Since(t0)), EarlyStopAfter)
+			sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			err := drv.StopLoad(sctx)
+			cancel()
+			if err != nil {
+				fmt.Fprintf(out, "  warning: stopping the load: %v; it runs to the end of the profile\n", err)
+				stopTimer = nil
+				continue
+			}
+			return es
 		case <-tick.C:
 		}
 		elapsed := time.Since(t0)
@@ -449,6 +482,15 @@ func progressLines(ctx context.Context, t0 time.Time, drv driver.Driver, out io.
 			parts = append(parts, "cpu "+strings.Join(cpus, " "))
 		}
 		fmt.Fprintf(out, "[%s] %s\n", clock(elapsed), strings.Join(parts, " · "))
+		if watch == nil || announced {
+			continue
+		}
+		if at, ok := watch.add(elapsed, s); ok {
+			announced = true
+			es := watch.stop
+			fmt.Fprintf(out, "[%s] break confirmed (from %s); the load stops at %s\n", clock(elapsed), clock(time.Duration(es.BreakAt*float64(time.Second))), clock(at))
+			stopTimer = time.After(time.Until(t0.Add(at)))
+		}
 	}
 }
 

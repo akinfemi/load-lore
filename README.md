@@ -32,6 +32,8 @@ A run folder holds the exact `design.yaml`, the generated `compose.yaml` and `lo
 
 Scenarios are guided experiments in [`scenarios/`](scenarios/): a starting design, a story, a question to predict, hints and worked solutions. Start with [When do you need to scale your database?](scenarios/when-to-scale-your-database/), then [The connection pool trap](scenarios/connection-pool-trap/).
 
+A run stops its load 60 s after it sees the design break, by the same rule as the report's verdict, so a broken design costs minutes less; `--full` runs the whole profile.
+
 Each run starts from a fresh copy of the seeded dataset. `--reuse-data` skips the copy for quick iteration; the report then says which earlier runs wrote to the data.
 
 Results vary from run to run, and a laptop slows as it heats up. `loadl run --repeat 3` runs a design three times with the same seed and writes the spread of break time, peak served and p99 at the break to `.loadlore/series/<id>/series.md`. Runs after the first wait until the host speed index is back within 5% of the first run's. `loadl compare` says when a difference is within a series' spread, and flags runs whose speed index differs by more than 10%.

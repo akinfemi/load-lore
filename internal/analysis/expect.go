@@ -215,6 +215,10 @@ func score(a *Analysis, e *design.Expectation, ws []*Window) ExpectResult {
 	default:
 		r.Status = ExpectHeld
 	}
+	if es := a.StoppedEarly; es != nil && r.Status == ExpectHeld && to == len(ws) {
+		// Held, but the range went on past the stop: say what it covers.
+		notes = append(notes, fmt.Sprintf("held until the load stopped at %s; the rest of the profile didn't run (`loadl run --full` runs it)", Clock(es.At)))
+	}
 	r.Shown = Format(m.kind, *r.Actual)
 	if r.Missing > 0 {
 		notes = append(notes, fmt.Sprintf("%d of %d windows had no data", r.Missing, r.Windows))

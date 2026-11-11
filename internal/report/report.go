@@ -558,7 +558,7 @@ func timelineSection(d *doc, a *analysis.Analysis) {
 	d.line("| Time | Event |")
 	d.line("| --- | --- |")
 	for _, e := range a.Timeline {
-		kind := map[string]string{"fault_start": "fault started", "fault_end": "fault ended", "fault_error": "fault failed", "container": "container", "stall": "stall"}[e.Kind]
+		kind := map[string]string{"fault_start": "fault started", "fault_end": "fault ended", "fault_error": "fault failed", "container": "container", "stall": "stall", "load_stop": "load stopped"}[e.Kind]
 		d.line("| %s | %s: %s |", analysis.Clock(e.At), kind, cell(e.Detail))
 	}
 	d.line("")

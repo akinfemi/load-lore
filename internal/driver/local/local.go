@@ -294,6 +294,21 @@ func (d *Driver) RunLoad(ctx context.Context, started func(time.Time)) (*driver.
 	return res, nil
 }
 
+// StopLoad sends k6 SIGINT, on which it stops starting iterations, waits
+// for the running ones and writes its summary.
+func (d *Driver) StopLoad(ctx context.Context) error {
+	ids, err := d.containerIDs(ctx, svcLoad)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, id := range ids {
+		_, err := d.api.ContainerKill(ctx, id, client.ContainerKillOptions{Signal: "SIGINT"})
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
 func parseSummary(b []byte, res *driver.LoadResult) {
 	var s struct {
 		Metrics map[string]struct {

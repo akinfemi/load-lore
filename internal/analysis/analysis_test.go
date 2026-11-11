@@ -287,6 +287,50 @@ func TestCauseMeaning(t *testing.T) {
 	}
 }
 
+// A run stopped after its break: fewer windows, a line in the verdict,
+// and predictions that held until the stop are held, with a note.
+func TestStoppedEarly(t *testing.T) {
+	w := analysistest.Healthy()
+	w.Failed = func(t float64) float64 { return 0.2 * boolF(t > 40) }
+	w.EndEarly = 40 * time.Second // the profile is 100 s; stopped at 60
+	w.RunJSON = map[string]any{"stopped_early": map[string]any{"break_at_s": 40, "confirmed_at_s": 50, "at_s": 60}}
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.StoppedEarly == nil || len(a.Windows) != 6 || a.Verdict.Break == nil || a.Verdict.Break.At != 40 {
+		t.Fatalf("stopped %+v, %d windows, verdict %+v", a.StoppedEarly, len(a.Windows), a.Verdict)
+	}
+	if !strings.Contains(a.Verdict.Summary, "The load stopped at 1:00, 10 s after the live check confirmed the break") {
+		t.Errorf("summary %q", a.Verdict.Summary)
+	}
+	for _, e := range a.Expect {
+		switch e.Text {
+		case "error_rate < 1%": // broke before the stop: decided
+			if e.Status != ExpectBroken {
+				t.Errorf("%s: %+v", e.Text, e)
+			}
+		case "db.cpu < 90% after 50s": // held until the stop; its range runs to the end
+			if e.Status != ExpectHeld || !strings.Contains(e.Message, "held until the load stopped at 1:00; the rest of the profile didn't run") {
+				t.Errorf("%s: %+v", e.Text, e)
+			}
+		}
+	}
+	// The live check and the verdict apply the same rule.
+	if i := BreakAt(a.Windows, a.PeakOffered, a.Verdict.SLOP99Ms); i != a.Verdict.Break.Window {
+		t.Errorf("BreakAt %d, verdict's break %d", i, a.Verdict.Break.Window)
+	}
+}
+
+// An interrupted run that hadn't broken says what ran, not the profile.
+func TestInterruptedHeldRun(t *testing.T) {
+	w := analysistest.Healthy()
+	w.EndEarly = 70 * time.Second // 30 s of a 100 s ramp to 1,000 rps
+	w.RunJSON = map[string]any{"status": "interrupted", "error": "interrupted"}
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	want := "The run was interrupted, so this covers only the data collected. Held until the load ended at 0:30: up to 250 rps offered"
+	if !strings.HasPrefix(a.Verdict.Summary, want) {
+		t.Errorf("summary %q\nwant prefix %q", a.Verdict.Summary, want)
+	}
+}
+
 func TestExpectRangesAndScaling(t *testing.T) {
 	w := analysistest.Healthy()
 	w.P99 = func(t float64) float64 { return 0.005 + 0.1*boolF(t > 60) } // 105 ms after 60 s

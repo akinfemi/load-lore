@@ -44,16 +44,16 @@ expect:
 
 // World describes what the fake system did at each second of the load.
 type World struct {
-	Served   func(t, offered float64) float64 // successful responses/s
-	Failed   func(t float64) float64
+	Served func(t, offered float64) float64 // successful responses/s
+	Failed func(t float64) float64
 	// FailCause, when set, is the cause api counts each failed request
 	// under, as the synthetic service does, with the failed calls to db.
 	FailCause string
-	Dropped  func(t float64) float64
-	P50, P99 func(t float64) float64 // seconds
-	APICPU   func(t float64) float64 // fraction of limit
-	DBCPU    func(t float64) float64
-	K6CPU    func(t float64) float64
+	Dropped   func(t float64) float64
+	P50, P99  func(t float64) float64 // seconds
+	APICPU    func(t float64) float64 // fraction of limit
+	DBCPU     func(t float64) float64
+	K6CPU     func(t float64) float64
 	// K6Throttled is the share of k6's CFS periods stalled at its quota;
 	// nil leaves the series out.
 	K6Throttled func(t float64) float64
@@ -80,6 +80,9 @@ type World struct {
 
 	// Events are written to events.jsonl at their time into the load.
 	Events []Event
+
+	// RunJSON adds fields to run.json, such as stopped_early.
+	RunJSON map[string]any
 }
 
 // Event is an events.jsonl line at At seconds into the load.
@@ -136,6 +139,9 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	for k, v := range w.RunJSON {
+		rec[k] = v
 	}
 	write("run.json", rec)
 	write("plan.json", p)

@@ -53,6 +53,9 @@ type Analysis struct {
 	// what the run can say about the system.
 	Analyzed int    `json:"analyzed_windows"`
 	Cutoff   string `json:"cutoff,omitempty"`
+	// StoppedEarly is set when the run stopped the load after a break
+	// instead of finishing the profile.
+	StoppedEarly *EarlyStop `json:"stopped_early,omitempty"`
 
 	Verdict     Verdict        `json:"verdict"`
 	Diagnoses   []*Diagnosis   `json:"diagnoses"`
@@ -210,20 +213,21 @@ type DataReuse struct {
 
 // runRecord is what analysis needs from run.json.
 type runRecord struct {
-	RunID       string             `json:"run_id"`
-	Status      string             `json:"status"`
-	Error       string             `json:"error"`
-	Scale       float64            `json:"scale"`
-	Seed        int64              `json:"seed"`
-	ReuseData   bool               `json:"reuse_data"`
-	LoadStarted *time.Time         `json:"load_started"`
-	LoadEnded   *time.Time         `json:"load_ended"`
-	Host        *driver.Host       `json:"host"`
-	Warnings    []string           `json:"warnings"`
-	Notes       []string           `json:"notes"`
-	Load        *driver.LoadResult `json:"load"`
-	Loadl       string             `json:"loadl_version"`
-	Series      *SeriesRef         `json:"series"`
+	RunID        string             `json:"run_id"`
+	Status       string             `json:"status"`
+	Error        string             `json:"error"`
+	Scale        float64            `json:"scale"`
+	Seed         int64              `json:"seed"`
+	ReuseData    bool               `json:"reuse_data"`
+	LoadStarted  *time.Time         `json:"load_started"`
+	LoadEnded    *time.Time         `json:"load_ended"`
+	Host         *driver.Host       `json:"host"`
+	Warnings     []string           `json:"warnings"`
+	Notes        []string           `json:"notes"`
+	Load         *driver.LoadResult `json:"load"`
+	Loadl        string             `json:"loadl_version"`
+	Series       *SeriesRef         `json:"series"`
+	StoppedEarly *EarlyStop         `json:"stopped_early"`
 }
 
 // Analyze reads a run folder and analyzes it.
@@ -251,7 +255,7 @@ func Analyze(dir string) (*Analysis, error) {
 		WindowSeconds: WindowSeconds, PeakOffered: p.Workload.PeakRate,
 		Notes: orEmpty(p.Notes), Warnings: orEmpty(slices.Clone(rec.Warnings)),
 		Design: d, Plan: &p, DesignYAML: string(raw),
-		Diagnoses: []*Diagnosis{}, Windows: []*Window{},
+		Diagnoses: []*Diagnosis{}, Windows: []*Window{}, StoppedEarly: rec.StoppedEarly,
 	}
 	a.Assumptions = Assumptions{Design: d.Assumptions, Loadlore: p.Assumptions}
 	if a.Assumptions.Design == nil {
@@ -415,6 +419,9 @@ func timeline(events []rundir.Event, t0 float64, project string) ([]Event, []Dat
 				detail += ": " + msg
 			}
 			out = append(out, Event{At: at, Kind: e.Kind, Detail: detail})
+		case "load_stop":
+			num := func(k string) float64 { f, _ := e.Fields[k].(float64); return f }
+			out = append(out, Event{At: at, Kind: "load_stop", Detail: fmt.Sprintf("the live check confirmed the break at %s; the rest of the profile didn't run", Clock(num("confirmed_at_s")))})
 		case "docker":
 			action := str("action")
 			if at < -1 || action == "start" && at < 1 {
@@ -851,4 +858,13 @@ func joinAnd(xs []string) string {
 		return xs[0]
 	}
 	return strings.Join(xs[:len(xs)-1], ", ") + " and " + xs[len(xs)-1]
+}
+
+// EarlyStop is when a run's live check stopped the load before the
+// profile ended, in seconds from the load's start: the break's first
+// window, when the check confirmed it, and when the load stopped.
+type EarlyStop struct {
+	BreakAt     float64 `json:"break_at_s"`
+	ConfirmedAt float64 `json:"confirmed_at_s"`
+	At          float64 `json:"at_s"`
 }
