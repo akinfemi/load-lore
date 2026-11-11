@@ -757,6 +757,17 @@ func TestKneeThroughPgBouncer(t *testing.T) {
 	if text := evidence(d); d.Title != "Queueing knee (db CPU)" || !strings.Contains(text, "api → pgb pool 50 of 50 connections in use at 0:40: a symptom") || !strings.Contains(text, "pgb's transactions to db took 8.0 ms each") {
 		t.Errorf("%s:\n%s", d.Title, text)
 	}
+	// db slower per transaction with its CPU at 20%: its slowdown, not
+	// its CPU.
+	a := pgbWindows(true, false)
+	for _, w := range a.Windows[4:] {
+		v := 0.2
+		w.Services["db"].CPU = &v
+	}
+	d = byRule(t, diagnose(a), "queueing-knee")
+	if text := evidence(d); d.Title != "Queueing knee (db, slower without running out of CPU)" || !strings.Contains(text, "db CPU at most 20% of its limit") || !strings.Contains(d.Next, "besides CPU") {
+		t.Errorf("%s: %s\n%s", d.Title, d.Next, text)
+	}
 	d = byRule(t, diagnose(pgbWindows(false, false)), "queueing-knee")
 	if d.Title != "Queueing knee (pgb pool to db)" || !strings.Contains(d.Next, "default_pool_size 20") {
 		t.Errorf("%s: %s", d.Title, d.Next)

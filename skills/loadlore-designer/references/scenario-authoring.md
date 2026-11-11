@@ -69,7 +69,7 @@ check:
     # bigger-db: { min_gain: 1.5, diagnoses: [queueing-knee] }
 ```
 
-Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Breaking points move with core speed, so state the claims as relative results (broke or held, which rule fired, the gain from a fix), never as request rates. Rule ids are `pool-exhausted` and `queueing-knee` in this version.
+Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Breaking points move with core speed, so state the claims as relative results (broke or held, which rule fired, the gain from a fix), never as request rates. Rule ids are `pool-exhausted`, `queueing-knee` and `connection-storm` in this version.
 
 ## Solutions
 

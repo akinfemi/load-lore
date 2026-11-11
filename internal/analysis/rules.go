@@ -19,6 +19,8 @@ type Diagnosis struct {
 	Summary  string     `json:"summary"`
 	Evidence []Evidence `json:"evidence"`
 	Next     string     `json:"next"`
+
+	pool string // "svc → target" for pool-exhausted, and for a knee named after a pool
 }
 
 // Evidence is one fact behind a diagnosis and the metric it came from.
@@ -58,13 +60,16 @@ const (
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
-const RuleVersion = "4"
+const RuleVersion = "5"
 
 func diagnose(a *Analysis) []*Diagnosis {
 	out := []*Diagnosis{}
-	out = append(out, poolExhausted(a)...)
+	exhausted := poolExhausted(a)
+	out = append(out, exhausted...)
 	out = append(out, connectionStorm(a)...)
-	if d := queueingKnee(a); d != nil {
+	// A knee named after a pool whose target kept up is pool-exhausted's
+	// case; when that rule fired for the pool, the knee would only repeat it.
+	if d := queueingKnee(a); d != nil && (d.pool == "" || !slices.ContainsFunc(exhausted, func(x *Diagnosis) bool { return x.pool == d.pool })) {
 		out = append(out, d)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].From < out[j].From })
@@ -143,7 +148,7 @@ func poolExhausted(a *Analysis) []*Diagnosis {
 		}
 		p, w := poolAt(ws[peak], k.svc, k.target), ws[peak]
 		d := &Diagnosis{
-			Rule: "pool-exhausted", Title: fmt.Sprintf("Connection pool exhausted (%s → %s)", k.svc, k.target),
+			Rule: "pool-exhausted", Title: fmt.Sprintf("Connection pool exhausted (%s → %s)", k.svc, k.target), pool: k.svc + " → " + k.target,
 			From: ws[from].Start, To: ws[to].Start + WindowSeconds,
 			Summary: fmt.Sprintf("From %s, every connection in %s's pool to %s was in use and requests waited for one, while %s still had CPU to spare. Requests were queueing for a connection, not for the database.",
 				Clock(ws[from].Start), k.svc, k.target, k.target),
@@ -265,12 +270,10 @@ func queueingKnee(a *Analysis) *Diagnosis {
 					continue
 				}
 				pool := *top
-				c := cpuOf(w, target)
-				if c == nil {
+				next, ok := slowTarget(a, ws[k:k+KneeWindows], target)
+				if !ok {
 					break
 				}
-				next := &Saturation{Component: target, What: "CPU", Value: *c,
-					Detail: fmt.Sprintf("%s CPU at %s of its limit", target, Pct(*c)), Source: SrcCPU}
 				symptom := Evidence{Text: fmt.Sprintf("%s at %s: a symptom, since connections stayed in use longer while %s was slow to answer", pool.Detail, Clock(w.Start), target), Source: pool.Source}
 				if r, more, ok := behindPgBouncer(a, ws[k:k+KneeWindows], target); ok {
 					next, why = &r, append(why, more...)
@@ -286,12 +289,13 @@ func queueingKnee(a *Analysis) *Diagnosis {
 		if top.What == "CPU" {
 			for j := k; j < k+KneeWindows; j++ {
 				target, why := downstreamBusy(a, ws[j], top.Component)
-				c := cpuOf(w, target)
-				if target == "" || c == nil {
+				if target == "" {
 					continue
 				}
-				next := &Saturation{Component: target, What: "CPU", Value: *c,
-					Detail: fmt.Sprintf("%s CPU at %s of its limit", target, Pct(*c)), Source: SrcCPU}
+				next, ok := slowTarget(a, ws[k:k+KneeWindows], target)
+				if !ok {
+					continue
+				}
 				symptom := Evidence{Text: fmt.Sprintf("%s at %s: not where requests queued, since most of their time went to calls to %s", top.Detail, Clock(w.Start), target), Source: top.Source}
 				if r, more, ok := behindPgBouncer(a, ws[k:k+KneeWindows], target); ok {
 					next, why = &r, append(why, more...)
@@ -305,6 +309,33 @@ func queueingKnee(a *Analysis) *Diagnosis {
 	}
 	return nil
 }
+
+// slowTarget names a target found busy over a knee's windows: its CPU,
+// as of the knee's first window, when it reached KneeUtilization or was
+// throttled in any of them; else its slowdown, since it answered more
+// slowly for some other reason. ok is false without CPU data.
+func slowTarget(a *Analysis, ws []*Window, target string) (*Saturation, bool) {
+	first := cpuOf(ws[0], target)
+	if first == nil {
+		return nil, false
+	}
+	peak, throttledAny := 0.0, false
+	for _, w := range ws {
+		if v := cpuOf(w, target); v != nil {
+			peak = math.Max(peak, *v)
+		}
+		_, t := throttled(a, w, target)
+		throttledAny = throttledAny || t
+	}
+	if peak >= KneeUtilization || throttledAny {
+		return &Saturation{Component: target, What: "CPU", Value: *first, Detail: fmt.Sprintf("%s CPU at %s of its limit", target, Pct(*first)), Source: SrcCPU}, true
+	}
+	return &Saturation{Component: target, What: slowerWhat, Value: peak, Detail: fmt.Sprintf("%s answering more slowly with its CPU at most %s of its limit", target, Pct(peak)), Source: SrcCPU}, true
+}
+
+// slowerWhat marks a knee named after a target that slowed down without
+// running out of CPU.
+const slowerWhat = "slower"
 
 // behindPgBouncer follows a slow PgBouncer to what made it slow over the
 // knee's windows: its Postgres, when that was busy; else its server pool,
@@ -323,21 +354,15 @@ func behindPgBouncer(a *Analysis, ws []*Window, target string) (Saturation, []Ev
 	}
 	for _, w := range ws {
 		why := targetBusy(a, w, target, db)
-		c := cpuOf(w, db)
-		if len(why) == 0 || c == nil {
+		r, ok := slowTarget(a, ws, db)
+		if len(why) == 0 || !ok {
 			continue
-		}
-		var peak float64
-		for _, x := range ws {
-			if v := cpuOf(x, db); v != nil {
-				peak = math.Max(peak, *v)
-			}
 		}
 		ev := []Evidence{}
 		if p, ok := full(w); ok {
 			ev = append(ev, Evidence{Text: fmt.Sprintf("%s's %s of %s server connections to %s were in use at %s, so its clients waited for %s", target, Count(*p.InUse), Count(*p.Max), db, Clock(w.Start), db), Source: SrcPgbPool})
 		}
-		return Saturation{Component: db, What: "CPU", Value: peak, Detail: fmt.Sprintf("%s CPU at %s of its limit", db, Pct(peak)), Source: SrcCPU}, append(ev, why...), true
+		return *r, append(ev, why...), true
 	}
 	for _, w := range ws {
 		if p, ok := full(w); ok {
@@ -476,6 +501,9 @@ func kneeDiagnosis(a *Analysis, k int, r Saturation, symptom *Evidence, why []Ev
 	}
 	w := ws[k]
 	name := r.Component + " " + r.What
+	if r.What == slowerWhat {
+		return slowerKnee(a, k, r, symptom, why)
+	}
 	d := &Diagnosis{
 		Rule: "queueing-knee", Title: "Queueing knee (" + name + ")",
 		From: w.Start, To: ws[k+KneeWindows-1].Start + WindowSeconds,
@@ -484,6 +512,7 @@ func kneeDiagnosis(a *Analysis, k int, r Saturation, symptom *Evidence, why []Ev
 		Next: "Add capacity or cut per-request work on " + r.Component + ", then re-run the ramp.",
 	}
 	if t, ok := strings.CutPrefix(r.What, "pool to "); ok {
+		d.pool = r.Component + " → " + t
 		if b := a.Plan.Service(r.Component); b != nil && b.PgBouncer != nil {
 			d.Next = fmt.Sprintf("Give %s more server connections (default_pool_size %d) if %s has room for them, or cut the time each transaction holds one, then re-run the ramp.", r.Component, b.PgBouncer.DefaultPoolSize, t)
 		}
@@ -600,4 +629,29 @@ func entryApp(a *Analysis) string {
 		return name
 	}
 	return ""
+}
+
+// slowerKnee is a knee whose target answered more slowly without running
+// out of CPU: callers held their connections longer and queued for them.
+func slowerKnee(a *Analysis, k int, r Saturation, symptom *Evidence, why []Evidence) *Diagnosis {
+	ws := a.Windows
+	base, w := *a.Verdict.BaselineP99, ws[k]
+	var ps []string
+	for j := k; j < k+KneeWindows; j++ {
+		ps = append(ps, Ms(*ws[j].P99))
+	}
+	d := &Diagnosis{
+		Rule: "queueing-knee", Title: "Queueing knee (" + r.Component + ", slower without running out of CPU)",
+		From: w.Start, To: ws[k+KneeWindows-1].Start + WindowSeconds,
+		Summary: fmt.Sprintf("From %s, p99 stayed above %s (%s at low load): %s answered more slowly while its CPU stayed at most %s of its limit, so callers held their connections longer and queued for them. The slowdown wasn't its CPU.",
+			Clock(w.Start), Ms(math.Max(KneeLatencyFactor*base, base+KneeLatencyMinMs)), Ms(base), r.Component, Pct(r.Value)),
+		Next: fmt.Sprintf("Find what %s waited on besides CPU, such as disk writes or locks, in its own logs and metrics, then re-run the ramp.", r.Component),
+	}
+	d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf("%s to %s: p99 %s", Clock(w.Start), Clock(ws[k+KneeWindows-1].Start+WindowSeconds), strings.Join(ps, ", ")), Source: SrcK6Latency})
+	if symptom != nil {
+		d.Evidence = append(d.Evidence, *symptom)
+	}
+	d.Evidence = append(d.Evidence, why...)
+	d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf("%s CPU at most %s of its limit from %s to %s", r.Component, Pct(r.Value), Clock(w.Start), Clock(ws[k+KneeWindows-1].Start+WindowSeconds)), Source: SrcCPU})
+	return d
 }

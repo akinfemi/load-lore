@@ -339,7 +339,7 @@
   },
   "faults": null,
   "infra": {
-    "load_cpu": 1,
+    "load_cpu": 1.5,
     "load_memory": 2147483648,
     "proxy_cpu": 1,
     "proxy_memory": 1073741824,
@@ -356,7 +356,7 @@
     "scale 0.5: CPU, memory, memory settings, dataset rows, the keyspace and request rates are multiplied by 0.5; replicas, pool sizes, connection limits and per-request work are not",
     "db: shared_buffers scaled from 256MB to 131072kB",
     "lb: memory kept at 189m instead of 128m: about 40k for each of up to 4000 client connections, which don't scale",
-    "Loadlore's own containers get fixed budgets: load generator 1 CPU (peak 2500 rps), Toxiproxy 1 CPU (about 10250 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each"
+    "Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 2500 rps), Toxiproxy 1 CPU (about 10250 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each"
   ],
   "assumptions": [
     {

@@ -9,7 +9,7 @@ _A: run `fixture-run` · B: run `fixture-run`_
 | Most served | 950 rps at 1:30 | 950 rps at 1:30 |
 | Worst 10-second p99 | 5.0 ms | 1.12 s |
 | Worst error rate | 0% | 0% |
-| Diagnoses | none fired | Connection pool exhausted (api → db) from 0:40; Queueing knee (api pool to db) from 0:40 |
+| Diagnoses | none fired | Connection pool exhausted (api → db) from 0:40 |
 | Predictions held | 4 of 4 | 3 of 4 |
 | Peak offered | 1,000 rps | 1,000 rps |
 | Scale, seed | 1, 1 | 1, 1 |
@@ -93,7 +93,6 @@ No diagnosis rule fired.
 ### B
 
 - **Connection pool exhausted (api → db), from 0:40.** From 0:40, every connection in api's pool to db was in use and requests waited for one, while db still had CPU to spare. Requests were queueing for a connection, not for the database.
-- **Queueing knee (api pool to db), from 0:40.** From 0:40, p99 stayed above 15 ms (5.0 ms at low load) with api pool to db at 100%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
 
 ## Predictions
 

@@ -70,6 +70,9 @@ func Annotated(d *design.Design, an *Annotations) *mermaid.Flowchart {
 					if pool.Min != nil && *pool.Min > 0 {
 						l += fmt.Sprintf(", min %d", *pool.Min)
 					}
+					if pool.Hold == "request" {
+						l += ", held per request"
+					}
 					lines = append(lines, l)
 				}
 				style := mermaid.Solid

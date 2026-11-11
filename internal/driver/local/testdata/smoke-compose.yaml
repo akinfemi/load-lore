@@ -203,7 +203,7 @@ services:
       K6_PROMETHEUS_RW_PUSH_INTERVAL: 1s
       K6_PROMETHEUS_RW_SERVER_URL: http://lore-prometheus:9090/api/v1/write
       K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM: "true"
-    cpus: 1
+    cpus: 1.5
     mem_limit: 1024m
     memswap_limit: 1024m
     labels:

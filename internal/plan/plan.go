@@ -254,7 +254,7 @@ const (
 	k6RatePerCPU   = 2500.0
 	proxyOpsPerCPU = 15000.0
 	proxyMemory    = 1 << 30
-	minLoadCPU     = 1.0
+	minLoadCPU     = 1.5 // at 1 CPU, k6 stalled in bursts at about a third of it (pool trap runs, 1,400 rps)
 	maxLoadCPU     = 4.0
 	minProxyCPU    = 0.5
 	maxProxyCPU    = 4.0

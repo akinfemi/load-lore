@@ -124,18 +124,7 @@ Evidence:
 
 **Try next:** Add PgBouncer, or resize the pools across replicas: 1 replica × 10 connections = 10.
 
-### 2. Queueing knee (api pool to db), from 0:40
-
-From 0:40, p99 stayed above 15 ms (5.0 ms at low load) with api pool to db at 100%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
-
-Evidence:
-
-- median end-to-end p99 by api pool to db: below 50%: 5.0 ms (1 window); 50–70%: 5.0 ms (1 window); 70–80%: 5.0 ms (1 window); 90% and up: 518 ms (7 windows) <sub>(k6_http_req_duration_seconds (k6 histogram, end to end); loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections)</sub>
-- 0:40 to 1:10: p99 120 ms, 319 ms, 518 ms with api pool to db 100%, 100%, 100% <sub>(k6_http_req_duration_seconds (k6 histogram, end to end); loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections)</sub>
-
-**Try next:** Add capacity or cut per-request work on api, then re-run the ramp.
-
-<sub>Rules version 4. Rules are deterministic and offline; their thresholds are listed below.</sub>
+<sub>Rules version 5. Rules are deterministic and offline; their thresholds are listed below.</sub>
 
 ## Predictions
 
@@ -175,7 +164,7 @@ The design lists no assumptions.
 
 ### How the run was planned
 
-- Loadlore's own containers get fixed budgets: load generator 1 CPU (peak 1000 rps), Toxiproxy 0.5 CPU (about 1000 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each
+- Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 1000 rps), Toxiproxy 0.5 CPU (about 1000 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each
 
 ## Thresholds
 
