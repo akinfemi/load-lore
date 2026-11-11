@@ -116,20 +116,22 @@ xychart-beta
 
 ## Diagnosis
 
-### 1. Queueing knee (api pool to db), from 1:50
+### 1. Queueing knee (db CPU), from 1:50
 
-From 1:50, p99 stayed above 14 ms (3.6 ms at low load) with api pool to db at 76%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
+From 1:50, p99 stayed above 14 ms (3.6 ms at low load) with db CPU at 70%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
 
 Evidence:
 
-- median end-to-end p99 by api pool to db: below 50%: 3.2 ms (11 windows); 50–70%: 108 ms (2 windows); 70–80%: 212 ms (3 windows); 80–90%: 159 ms (1 window); 90% and up: 4.28 s (25 windows) <sub>(k6_http_req_duration_seconds (k6 histogram, end to end); loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections)</sub>
-- 1:50 to 2:20: p99 212 ms, 137 ms, 84 ms with api pool to db 76%, 70%, 75% <sub>(k6_http_req_duration_seconds (k6 histogram, end to end); loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections)</sub>
+- median end-to-end p99 by db CPU: below 50%: 3.2 ms (10 windows); 50–70%: 212 ms (3 windows); 70–80%: 80 ms (3 windows); 80–90%: 159 ms (3 windows); 90% and up: 4.30 s (23 windows) <sub>(k6_http_req_duration_seconds (k6 histogram, end to end); container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit)</sub>
+- 1:50 to 2:20: p99 212 ms, 137 ms, 84 ms with db CPU 70%, 82%, 69% <sub>(k6_http_req_duration_seconds (k6 histogram, end to end); container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit)</sub>
+- api → db pool 73 of 96 connections in use at 1:50: a symptom, since connections stayed in use longer while db was slow to answer <sub>(loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections)</sub>
 - db was CPU-throttled for 10.5 s (summed over its threads) in the window from 1:50, while its average CPU was 70% of its limit: bursts of work hit the 0.5-CPU limit and waited for the next period <sub>(container_cpu_cfs_throttled_seconds_total (cAdvisor))</sub>
+- api's calls to db took 6.7 ms each once they had a connection at 1:50, against 0.4 ms at low load <sub>(loadlore_call_duration_seconds minus loadlore_pool_wait_seconds, per call (time with a connection))</sub>
 - Little's law on api at 1:50: 1,966 rps × 16 ms mean time in the service = 31 in flight; measured 35 <sub>(loadlore_requests_inflight (summed over replicas); rate and mean from loadlore_request_duration_seconds (the service's own histogram))</sub>
 
-**Try next:** Add capacity or cut per-request work on api, then re-run the ramp.
+**Try next:** Add capacity or cut per-request work on db, then re-run the ramp.
 
-<sub>Rules version 1. Rules are deterministic and offline; their thresholds are listed below.</sub>
+<sub>Rules version 2. Rules are deterministic and offline; their thresholds are listed below.</sub>
 
 ## Predictions
 
@@ -171,8 +173,8 @@ The design lists no assumptions.
 
 - **Broke:** 2 windows in a row with at least 1.0% of requests failing or successful responses below 90% of the offered rate, or 3 windows in a row with any of those or p99 at least 10x the low-load p99 (the median p99 of windows offered at most 25% of the peak, before errors or a shortfall in 2 windows in a row) and at least 100 ms. A shorter episode is shown as a stall in the timeline, not a break.
 - **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than 1.0% of a window's arrivals, or the load generator or Toxiproxy used 90% or more of its CPU budget, or was stalled at its CPU limit in 5.0% or more of its scheduling periods (from 1.0% it's noted as a caveat). The first 10 s of load are a warm-up and don't count: the load generator starts its VUs and connections open then. A cause is named only with evidence: on a Linux host, the hypervisor giving 2.0% or more of CPU time to other virtual machines (steal), or other programs using 10% or more of the host's CPUs (at least 0.5); inside a VM on this machine, only as a possibility.
-- **Connection pool exhausted:** for two windows in a row, a pool at 95% or more of its size with callers waiting, while the target's CPU stayed below 80% and the caller's below 90%.
-- **Queueing knee:** for 3 windows in a row, p99 at least 3x the low-load p99 and 10 ms above it, with a CPU or pool at 70% or more.
+- **Connection pool exhausted:** for two windows in a row, a pool at 95% or more of its size with callers waiting, while the target wasn't busy (busy: its CPU at 80% or more, CPU throttling of 1 s or more in a window, or its time per call with a connection at least 3x the low-load value and 1 ms above it) and the caller's CPU stayed below 90%.
+- **Queueing knee:** for 3 windows in a row, p99 at least 3x the low-load p99 and 10 ms above it, with a CPU or pool at 70% or more. When that is a pool whose target was busy in any of those windows, the knee is the target's.
 
 ## Environment
 

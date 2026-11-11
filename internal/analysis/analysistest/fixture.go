@@ -53,6 +53,9 @@ type World struct {
 	// K6Throttled is the share of k6's CFS periods stalled at its quota;
 	// nil leaves the series out.
 	K6Throttled func(t float64) float64
+	// DBThrottled is db's CFS throttled seconds per second of load; nil
+	// leaves the series out.
+	DBThrottled func(t float64) float64
 	InUse       func(t float64) float64
 	Pending     func(t float64) float64
 	WaitS       func(t float64) float64 // mean pool wait per acquire
@@ -163,6 +166,10 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 	k6CPU := newC(counters, "container_cpu_usage_seconds_total", map[string]string{"service": "lore-k6", "role": "load", "name": "k6"})
 	k6Periods := newC(counters, "container_cpu_cfs_periods_total", map[string]string{"service": "lore-k6", "role": "load", "name": "k6"})
 	k6Throttled := newC(counters, "container_cpu_cfs_throttled_periods_total", map[string]string{"service": "lore-k6", "role": "load", "name": "k6"})
+	var dbThrottled *counter
+	if w.DBThrottled != nil {
+		dbThrottled = newC(counters, "container_cpu_cfs_throttled_seconds_total", map[string]string{"service": "db", "role": "datastore", "name": "db"})
+	}
 	waitSum := newC(counters, "loadlore_pool_wait_seconds_sum", map[string]string{"service": "api", "target": "db"})
 	waitCnt := newC(counters, "loadlore_pool_wait_seconds_count", map[string]string{"service": "api", "target": "db"})
 	inUse := newC(gauges, "loadlore_pool_connections", map[string]string{"service": "api", "target": "db", "state": "in_use"})
@@ -218,6 +225,9 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 				add(k6Periods, 10) // one 100 ms period per tenth of a second
 				add(k6Throttled, 10*w.K6Throttled(el))
 			}
+			if w.DBThrottled != nil {
+				add(dbThrottled, w.DBThrottled(el))
+			}
 			add(waitSum, w.WaitS(el)*ok)
 			add(waitCnt, ok)
 			set(inUse, w.InUse(el))
@@ -237,6 +247,9 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 		} else if el <= 0 { // k6 series are born with the load; the stack's exist before
 			add(apiCPU, 0.01)
 			add(dbCPU, 0.01)
+			if dbThrottled != nil {
+				add(dbThrottled, 0)
+			}
 			set(inUse, 0)
 			set(pending, 0)
 		}

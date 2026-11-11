@@ -141,6 +141,10 @@ type PoolWindow struct {
 	Max     *float64 `json:"max"`     // pool size
 	Pending *float64 `json:"pending"` // peak callers waiting for a connection
 	WaitMs  *float64 `json:"wait_ms"` // mean wait per acquire
+	// HeldMs is the mean time per call after getting a connection: call
+	// time minus pool wait. It's the target's own latency, network
+	// included, without the queue for a connection in front of it.
+	HeldMs *float64 `json:"held_ms"`
 }
 
 // EdgeWindow is the traffic on one connection between components.
@@ -655,6 +659,11 @@ func (b *builder) appEdges(w *Window, s *plan.Service, wa, wb float64) {
 			cnt, ok2 = st.increase("loadlore_pool_waits_total", m, wa, wb)
 			pw.WaitMs = num(sum/cnt*1000, ok1 && ok2 && cnt > 0)
 		}
+		if ok1 && ok2 {
+			csum, ok3 := st.increase("loadlore_call_duration_seconds_sum", m, wa, wb)
+			ccnt, ok4 := st.increase("loadlore_call_duration_seconds_count", m, wa, wb)
+			pw.HeldMs = num(math.Max(0, csum-sum)/ccnt*1000, ok3 && ok4 && ccnt > 0)
+		}
 		if pw.Max != nil {
 			w.Pools = append(w.Pools, pw)
 		}
@@ -680,6 +689,7 @@ const (
 	SrcPoolInUse        = `loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections`
 	SrcPoolPending      = "loadlore_pool_pending (callers waiting for a connection)"
 	SrcPoolWait         = "loadlore_pool_wait_seconds (time to get a connection)"
+	SrcPoolHeld         = "loadlore_call_duration_seconds minus loadlore_pool_wait_seconds, per call (time with a connection)"
 	SrcPGConns          = "pg_stat_activity_count and pg_settings_max_connections (postgres_exporter)"
 	SrcHitRate          = "redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter)"
 	SrcLBRequests       = "haproxy_backend_http_requests_total (HAProxy)"

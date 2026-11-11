@@ -10,6 +10,7 @@ import (
 
 	"github.com/akinfemi/load-lore/internal/analysis/analysistest"
 	"github.com/akinfemi/load-lore/internal/driver"
+	"github.com/akinfemi/load-lore/internal/plan"
 )
 
 func analyze(t *testing.T, dir string) *Analysis {
@@ -457,5 +458,70 @@ func TestOneShortfallWindowIsAStall(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("timeline %+v", a.Timeline)
+	}
+}
+
+// Regression, from run single-postgres-breaking-point-one-query-per-page-
+// 20261110-084325: the api → db pool was the most saturated resource at
+// the knee, but db was the bottleneck (CPU 70–82%, CPU-throttled 10.5 s,
+// 6.7 ms per call with a connection against 0.4 ms at low load) while api
+// stayed below 73% CPU. The knee is db's; blaming api's pool would point
+// at the wrong fix.
+func TestKneeFollowsPoolToBusyTarget(t *testing.T) {
+	dir := filepath.Join("testdata", "one-query-per-page")
+	a := &Analysis{}
+	var p plan.Plan
+	if err := readJSON(filepath.Join(dir, "plan.json"), &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := readJSON(filepath.Join(dir, "windows.json"), &a.Windows); err != nil {
+		t.Fatal(err)
+	}
+	a.Plan, a.PeakOffered = &p, p.Workload.PeakRate
+	a.Verdict = verdict(a)
+	if b := a.Verdict.Break; b == nil || b.At != 170 {
+		t.Fatalf("break %+v", b)
+	}
+	ds := diagnose(a)
+	if len(ds) != 1 || ds[0].Rule != "queueing-knee" {
+		t.Fatalf("diagnoses %+v", ds)
+	}
+	d := ds[0]
+	if d.Title != "Queueing knee (db CPU)" || d.From != 110 || !strings.Contains(d.Next, "on db,") {
+		t.Errorf("%s from %v, next %q", d.Title, d.From, d.Next)
+	}
+	text := ""
+	for _, e := range d.Evidence {
+		text += e.Text + "\n"
+	}
+	for _, want := range []string{"api → db pool 73 of 96 connections in use at 1:50: a symptom", "db was CPU-throttled for 10.5 s", "6.7 ms each once they had a connection at 1:50, against 0.4 ms at low load"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("evidence lacks %q:\n%s", want, text)
+		}
+	}
+}
+
+// A full pool in front of a throttled database is the database's knee,
+// and not pool exhaustion, even with the database's average CPU low.
+func TestFullPoolBeforeThrottledTarget(t *testing.T) {
+	w := analysistest.Healthy()
+	w.DBCPU = func(float64) float64 { return 0.5 }
+	w.InUse = func(t float64) float64 { return math.Min(10, 2+t/5) } // full from 40 s
+	w.Pending = func(t float64) float64 { return math.Max(0, (t-40)*3) }
+	w.WaitS = func(t float64) float64 { return math.Max(0.0001, (t-40)/200) }
+	w.P99 = func(t float64) float64 { return math.Max(0.005, (t-40)/50) }
+	w.DBThrottled = func(t float64) float64 {
+		if t >= 40 {
+			return 0.5
+		}
+		return 0
+	}
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	var titles []string
+	for _, d := range a.Diagnoses {
+		titles = append(titles, d.Title)
+	}
+	if len(titles) != 1 || titles[0] != "Queueing knee (db CPU)" {
+		t.Errorf("diagnoses %q", titles)
 	}
 }

@@ -3,6 +3,7 @@ package analysis
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -39,10 +40,15 @@ const (
 	KneeLatencyMinMs  = 10.0 // ... and at least 10 ms above it
 	KneeWindows       = 3    // for 30 seconds in a row: a knee doesn't recover by itself
 	LittleMinInflight = 20   // below this, sampling noise swamps Little's law
+	// A pool's target is busy, so a full pool is its symptom, when its CPU
+	// is at PoolTargetCPUMax or more, it was CPU-throttled for ThrottledMin
+	// or more, or its time per call with a connection rose this much.
+	TargetSlowFactor = 3.0 // at least 3x its low-load value ...
+	TargetSlowMinMs  = 1.0 // ... and at least 1 ms above it
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
-const RuleVersion = "1"
+const RuleVersion = "2"
 
 func diagnose(a *Analysis) []*Diagnosis {
 	out := []*Diagnosis{}
@@ -108,8 +114,8 @@ func poolExhausted(a *Analysis) []*Diagnosis {
 				continue
 			}
 			waiting := (p.Pending != nil && *p.Pending >= 1) || (p.WaitMs != nil && *p.WaitMs >= 1)
-			tc, cc := cpuOf(w, k.target), cpuOf(w, k.svc)
-			flags[i] = waiting && (tc == nil || *tc < PoolTargetCPUMax) && (cc == nil || *cc < PoolCallerCPUMax)
+			cc := cpuOf(w, k.svc)
+			flags[i] = waiting && len(targetBusy(a, w, k.svc, k.target)) == 0 && (cc == nil || *cc < PoolCallerCPUMax)
 		}
 		from, to, ok := sustained(flags)
 		if !ok {
@@ -157,8 +163,8 @@ func poolExhausted(a *Analysis) []*Diagnosis {
 		if sw := w.Services[k.target]; sw != nil && sw.Connections != nil && sw.MaxConnections != nil {
 			ev(SrcPGConns, "%s had %s connections open, max_connections %s", k.target, Count(*sw.Connections), Count(*sw.MaxConnections))
 		}
-		if e, ok := throttled(a, ws[from], k.target); ok {
-			d.Evidence = append(d.Evidence, e)
+		if base, ok := heldBaseline(a, k.svc, k.target); ok && p.HeldMs != nil {
+			ev(SrcPoolHeld, "%s per call once a connection was free at %s, against %s at low load: %s answered at its usual speed", Ms(*p.HeldMs), Clock(w.Start), Ms(base), k.target)
 		}
 		d.Next = "Add PgBouncer, or resize the pools across replicas"
 		if s := a.Plan.Service(k.svc); s != nil && len(s.Synthetic) > 0 {
@@ -206,12 +212,71 @@ func queueingKnee(a *Analysis) *Diagnosis {
 		if top == nil {
 			continue // latency rose with nothing near saturation: not this rule
 		}
-		return kneeDiagnosis(a, k, *top)
+		// A full pool in front of a busy target is the target's queue:
+		// connections are held longer because the target is slow. Name
+		// the target. The pool alone is to blame only when the target is
+		// idle, which is pool-exhausted's case.
+		if target, ok := strings.CutPrefix(top.What, "pool to "); ok {
+			for j := k; j < k+KneeWindows; j++ {
+				why := targetBusy(a, ws[j], top.Component, target)
+				if len(why) == 0 {
+					continue
+				}
+				pool := *top
+				c := cpuOf(w, target)
+				if c == nil {
+					break
+				}
+				top = &Saturation{Component: target, What: "CPU", Value: *c,
+					Detail: fmt.Sprintf("%s CPU at %s of its limit", target, Pct(*c)), Source: SrcCPU}
+				return kneeDiagnosis(a, k, *top, &pool, why)
+			}
+		}
+		return kneeDiagnosis(a, k, *top, nil, nil)
 	}
 	return nil
 }
 
-func kneeDiagnosis(a *Analysis, k int, r Saturation) *Diagnosis {
+// targetBusy is the evidence that a pool's target was the slow part in a
+// window: its CPU near its limit, CPU throttling, or calls that took
+// longer once they had a connection. Nil means the target was idle.
+func targetBusy(a *Analysis, w *Window, svc, target string) []Evidence {
+	var out []Evidence
+	if c := cpuOf(w, target); c != nil && *c >= PoolTargetCPUMax {
+		out = append(out, Evidence{Text: fmt.Sprintf("%s CPU at %s of its limit at %s", target, Pct(*c), Clock(w.Start)), Source: SrcCPU})
+	}
+	if e, ok := throttled(a, w, target); ok {
+		out = append(out, e)
+	}
+	p := poolAt(w, svc, target)
+	if base, ok := heldBaseline(a, svc, target); ok && p != nil && p.HeldMs != nil && *p.HeldMs >= TargetSlowFactor*base && *p.HeldMs >= base+TargetSlowMinMs {
+		out = append(out, Evidence{Text: fmt.Sprintf("%s's calls to %s took %s each once they had a connection at %s, against %s at low load", svc, target, Ms(*p.HeldMs), Clock(w.Start), Ms(base)), Source: SrcPoolHeld})
+	}
+	return out
+}
+
+// heldBaseline is the median time per call with a connection over the
+// windows the low-load p99 comes from.
+func heldBaseline(a *Analysis, svc, target string) (float64, bool) {
+	var xs []float64
+	for _, w := range a.Windows {
+		if a.Verdict.Break != nil && w.Index >= a.Verdict.Break.Window {
+			break
+		}
+		if p := poolAt(w, svc, target); p != nil && p.HeldMs != nil && w.Offered <= BaselineShare*a.PeakOffered {
+			xs = append(xs, *p.HeldMs)
+		}
+	}
+	if len(xs) == 0 {
+		return 0, false
+	}
+	sort.Float64s(xs)
+	return median(xs), true
+}
+
+// kneeDiagnosis names r. pool, when set, is the full pool in front of r
+// and why says r was busy.
+func kneeDiagnosis(a *Analysis, k int, r Saturation, pool *Saturation, why []Evidence) *Diagnosis {
 	ws := a.Windows
 	base := *a.Verdict.BaselineP99
 	util := func(w *Window) (float64, bool) {
@@ -273,6 +338,13 @@ func kneeDiagnosis(a *Analysis, k int, r Saturation) *Diagnosis {
 		Text:   fmt.Sprintf("%s to %s: p99 %s with %s %s", Clock(w.Start), Clock(ws[k+KneeWindows-1].Start+WindowSeconds), strings.Join(ps, ", "), name, strings.Join(us, ", ")),
 		Source: SrcK6Latency + "; " + r.Source,
 	})
+	if pool != nil {
+		d.Evidence = append(d.Evidence, Evidence{
+			Text:   fmt.Sprintf("%s at %s: a symptom, since connections stayed in use longer while %s was slow to answer", pool.Detail, Clock(w.Start), r.Component),
+			Source: pool.Source,
+		})
+		d.Evidence = append(d.Evidence, why...)
+	}
 
 	// Throttling explains a knee that comes at a modest average: bursts hit
 	// the CPU limit.
@@ -281,7 +353,7 @@ func kneeDiagnosis(a *Analysis, k int, r Saturation) *Diagnosis {
 		comps = append(comps, target)
 	}
 	for _, c := range comps {
-		if e, ok := throttled(a, w, c); ok {
+		if e, ok := throttled(a, w, c); ok && !slices.Contains(d.Evidence, e) {
 			d.Evidence = append(d.Evidence, e)
 		}
 	}

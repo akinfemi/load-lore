@@ -9,7 +9,7 @@ _A: run `single-postgres-breaking-point-20261110-004633` · B: run `single-postg
 | Most served | 2,791 rps at 2:40 | 3,422 rps at 3:20 |
 | Worst 10-second p99 | 6.45 s | 4.76 s |
 | Worst error rate | 0% | 0% |
-| Diagnoses | Queueing knee (db CPU) from 2:40 | Queueing knee (api pool to db) from 1:50 |
+| Diagnoses | Queueing knee (db CPU) from 2:40 | Queueing knee (db CPU) from 1:50 |
 | Predictions held | 1 of 2 | 1 of 2 |
 | Peak offered | 5,000 rps | 5,000 rps |
 | Scale, seed | 1, 1 | 1, 1 |
@@ -124,7 +124,7 @@ xychart-beta
 
 ### B
 
-- **Queueing knee (api pool to db), from 1:50.** From 1:50, p99 stayed above 14 ms (3.6 ms at low load) with api pool to db at 76%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
+- **Queueing knee (db CPU), from 1:50.** From 1:50, p99 stayed above 14 ms (3.6 ms at low load) with db CPU at 70%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
 
 ## Predictions
 

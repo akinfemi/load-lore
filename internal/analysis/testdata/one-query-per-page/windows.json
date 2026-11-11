@@ -1,0 +1,3572 @@
+[
+  {
+    "index": 0,
+    "start_s": 0,
+    "offered_rps": 181.66666666666669,
+    "rps": 168.6180404292354,
+    "completed_rps": 168.6180404292354,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.5994966639357153,
+    "p95_ms": 3.713465027812189,
+    "p99_ms": 5.468488508204066,
+    "mean_ms": 1.8728258194161578,
+    "services": {
+      "api": {
+        "cpu": 0.07108870288104009,
+        "cpu_throttled_s": 0,
+        "memory": 0.01627349853515625,
+        "replicas_reporting": 4,
+        "rps": 168.5009017944336,
+        "error_rate": 0,
+        "p99_ms": 4.458259267961886,
+        "mean_ms": 1.1327649944919669,
+        "inflight": 0,
+        "inflight_mean": 0
+      },
+      "db": {
+        "cpu": 0.21050334109512114,
+        "cpu_throttled_s": 0.019088,
+        "memory": 0.050106048583984375,
+        "replicas_reporting": 1,
+        "connections": 8,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.11888563301846415,
+        "cpu_throttled_s": 0,
+        "memory": 0.1071929931640625,
+        "replicas_reporting": 1,
+        "rps": 168.54029867649078,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 0,
+        "max": 96,
+        "pending": 0,
+        "wait_ms": 0.006044418405291564,
+        "held_ms": 0.5510500680623155
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 168.6180404292354,
+        "error_rate": 0,
+        "p99_ms": 5.468488508204066,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 186.33300199508668,
+        "error_rate": 0,
+        "p99_ms": 2.969998159482146,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 168.54029867649078,
+        "error_rate": 0,
+        "p99_ms": 4.458259267961886,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.10549598041054303,
+    "proxy_cpu": 0.11512327990011843,
+    "load_generator_throttled_periods": 0.039975725217923884,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 1,
+    "start_s": 10,
+    "offered_rps": 345,
+    "rps": 336.4940315911435,
+    "completed_rps": 336.4940315911435,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.1579547986509193,
+    "p95_ms": 2.104024788658872,
+    "p99_ms": 4.091419628841517,
+    "mean_ms": 1.4271800125746648,
+    "services": {
+      "api": {
+        "cpu": 0.09674912291333947,
+        "cpu_throttled_s": 0,
+        "memory": 0.02033233642578125,
+        "replicas_reporting": 4,
+        "rps": 336.65280117988584,
+        "error_rate": 0,
+        "p99_ms": 3.8542647886973023,
+        "mean_ms": 1.0768087448646129,
+        "inflight": 1,
+        "inflight_mean": 0.3
+      },
+      "db": {
+        "cpu": 0.19102784395273406,
+        "cpu_throttled_s": 0.245317,
+        "memory": 0.07355117797851562,
+        "replicas_reporting": 1,
+        "connections": 10,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.10945010689800425,
+        "cpu_throttled_s": 0,
+        "memory": 0.1070098876953125,
+        "replicas_reporting": 1,
+        "rps": 336.67769916057586,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 1,
+        "max": 96,
+        "pending": 0,
+        "wait_ms": 0.011585845617540474,
+        "held_ms": 0.5028104587215142
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 336.4940315911435,
+        "error_rate": 0,
+        "p99_ms": 4.091419628841517,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 368.87450125217435,
+        "error_rate": 0,
+        "p99_ms": 2.7293321536010415,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 336.67769916057586,
+        "error_rate": 0,
+        "p99_ms": 3.8542647886973023,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.07726963736053251,
+    "proxy_cpu": 0.09801185342087153,
+    "load_generator_throttled_periods": 0,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 2,
+    "start_s": 20,
+    "offered_rps": 508.3333333333333,
+    "rps": 499.96633751467436,
+    "completed_rps": 499.96633751467436,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.138836284429178,
+    "p95_ms": 2.1615941187491994,
+    "p99_ms": 3.7050125935961464,
+    "mean_ms": 1.327567001643049,
+    "services": {
+      "api": {
+        "cpu": 0.13748883546759397,
+        "cpu_throttled_s": 0,
+        "memory": 0.0188446044921875,
+        "replicas_reporting": 4,
+        "rps": 499.8727844636357,
+        "error_rate": 0,
+        "p99_ms": 2.8851757399668623,
+        "mean_ms": 0.958687014005637,
+        "inflight": 1,
+        "inflight_mean": 0.3
+      },
+      "db": {
+        "cpu": 0.22800050308130065,
+        "cpu_throttled_s": 0,
+        "memory": 0.10094833374023438,
+        "replicas_reporting": 1,
+        "connections": 14,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.1576259749568806,
+        "cpu_throttled_s": 0,
+        "memory": 0.10797119140625,
+        "replicas_reporting": 1,
+        "rps": 499.97769916057587,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 1,
+        "max": 96,
+        "pending": 0,
+        "wait_ms": 0.007856386009150604,
+        "held_ms": 0.39562203541292407
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 499.96633751467436,
+        "error_rate": 0,
+        "p99_ms": 3.7050125935961464,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 550.2054070607785,
+        "error_rate": 0,
+        "p99_ms": 2.020491482662189,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 499.97769916057587,
+        "error_rate": 0,
+        "p99_ms": 2.8851757399668623,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.11014307172113207,
+    "proxy_cpu": 0.14342826549017312,
+    "load_generator_throttled_periods": 0.00993077531079899,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 3,
+    "start_s": 30,
+    "offered_rps": 671.6666666666667,
+    "rps": 663.4094768575858,
+    "completed_rps": 663.4094768575858,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.1150170345353647,
+    "p95_ms": 1.9528883555063998,
+    "p99_ms": 3.2153049830345,
+    "mean_ms": 1.2687904546576272,
+    "services": {
+      "api": {
+        "cpu": 0.1734742407214872,
+        "cpu_throttled_s": 0,
+        "memory": 0.018218994140625,
+        "replicas_reporting": 4,
+        "rps": 663.485317881831,
+        "error_rate": 0,
+        "p99_ms": 2.6324952472757963,
+        "mean_ms": 0.9260663302585289,
+        "inflight": 3,
+        "inflight_mean": 1.1
+      },
+      "db": {
+        "cpu": 0.25103976245726295,
+        "cpu_throttled_s": 0.01558799999999999,
+        "memory": 0.13434982299804688,
+        "replicas_reporting": 1,
+        "connections": 16,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.17455331050688225,
+        "cpu_throttled_s": 0,
+        "memory": 0.1064605712890625,
+        "replicas_reporting": 1,
+        "rps": 663.3155991554261,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 2,
+        "max": 96,
+        "pending": 0,
+        "wait_ms": 0.005481281864855717,
+        "held_ms": 0.3676863587963419
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 663.4094768575858,
+        "error_rate": 0,
+        "p99_ms": 3.2153049830345,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 732.4976955040332,
+        "error_rate": 0,
+        "p99_ms": 1.797017193267364,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 663.3155991554261,
+        "error_rate": 0,
+        "p99_ms": 2.6324952472757963,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.12323459778897732,
+    "proxy_cpu": 0.17785729827401667,
+    "load_generator_throttled_periods": 0,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 4,
+    "start_s": 40,
+    "offered_rps": 835,
+    "rps": 826.5841634134265,
+    "completed_rps": 826.5841634134265,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.100159395815494,
+    "p95_ms": 1.8785292000406875,
+    "p99_ms": 2.801440579112881,
+    "mean_ms": 1.2342645195269313,
+    "services": {
+      "api": {
+        "cpu": 0.21118303413132625,
+        "cpu_throttled_s": 0,
+        "memory": 0.019500732421875,
+        "replicas_reporting": 4,
+        "rps": 826.6268011808395,
+        "error_rate": 0,
+        "p99_ms": 2.126603125833146,
+        "mean_ms": 0.897165029538371,
+        "inflight": 1,
+        "inflight_mean": 0.5
+      },
+      "db": {
+        "cpu": 0.2765921521563371,
+        "cpu_throttled_s": 0,
+        "memory": 0.1653594970703125,
+        "replicas_reporting": 1,
+        "connections": 16,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.19589495942734186,
+        "cpu_throttled_s": 0,
+        "memory": 0.107452392578125,
+        "replicas_reporting": 1,
+        "rps": 826.6776991605759,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 1,
+        "max": 96,
+        "pending": 0,
+        "wait_ms": 0.0020999339744603046,
+        "held_ms": 0.34886228099081656
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 826.5841634134265,
+        "error_rate": 0,
+        "p99_ms": 2.801440579112881,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 905.0082012176514,
+        "error_rate": 0,
+        "p99_ms": 1.5806172086875652,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 826.6776991605759,
+        "error_rate": 0,
+        "p99_ms": 2.126603125833146,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.13676597277640834,
+    "proxy_cpu": 0.2138642673844089,
+    "load_generator_throttled_periods": 0,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 5,
+    "start_s": 50,
+    "offered_rps": 998.3333333333334,
+    "rps": 990.0895665347325,
+    "completed_rps": 990.0895665347325,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.1083160988399947,
+    "p95_ms": 1.9236142180865965,
+    "p99_ms": 2.9942737573488167,
+    "mean_ms": 1.2517964881025745,
+    "services": {
+      "api": {
+        "cpu": 0.25277304641554843,
+        "cpu_throttled_s": 0,
+        "memory": 0.0187530517578125,
+        "replicas_reporting": 4,
+        "rps": 989.8268011808395,
+        "error_rate": 0,
+        "p99_ms": 2.3994025807673456,
+        "mean_ms": 0.9120250533156636,
+        "inflight": 2,
+        "inflight_mean": 0.9
+      },
+      "db": {
+        "cpu": 0.33010050884008085,
+        "cpu_throttled_s": 0.06454700000000002,
+        "memory": 0.20073318481445312,
+        "replicas_reporting": 1,
+        "connections": 16,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.27703396903003535,
+        "cpu_throttled_s": 0,
+        "memory": 0.1082611083984375,
+        "replicas_reporting": 1,
+        "rps": 989.9776991605759,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 2,
+        "max": 96,
+        "pending": 0,
+        "wait_ms": 0.0037710772257539375,
+        "held_ms": 0.35676734659329135
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 990.0895665347325,
+        "error_rate": 0,
+        "p99_ms": 2.9942737573488167,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 1088.0902015447616,
+        "error_rate": 0,
+        "p99_ms": 1.6534420543428459,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 989.9776991605759,
+        "error_rate": 0,
+        "p99_ms": 2.3994025807673456,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.17150591596428957,
+    "proxy_cpu": 0.2618681338206854,
+    "load_generator_throttled_periods": 0,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 6,
+    "start_s": 60,
+    "offered_rps": 1161.6666666666667,
+    "rps": 1153.4024029877696,
+    "completed_rps": 1153.4024029877696,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.1109889749593744,
+    "p95_ms": 2.0241580955707876,
+    "p99_ms": 3.640544533697018,
+    "mean_ms": 1.2707123523056516,
+    "services": {
+      "api": {
+        "cpu": 0.2911427355849612,
+        "cpu_throttled_s": 0,
+        "memory": 0.01833343505859375,
+        "replicas_reporting": 4,
+        "rps": 1153.4315011739732,
+        "error_rate": 0,
+        "p99_ms": 2.3388826316250744,
+        "mean_ms": 0.8938716341820396,
+        "inflight": 2,
+        "inflight_mean": 0.9
+      },
+      "db": {
+        "cpu": 0.3482798709303074,
+        "cpu_throttled_s": 0,
+        "memory": 0.23671722412109375,
+        "replicas_reporting": 1,
+        "connections": 16,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.2929907430645553,
+        "cpu_throttled_s": 0,
+        "memory": 0.1084136962890625,
+        "replicas_reporting": 1,
+        "rps": 1153.2534991502762,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 2,
+        "max": 96,
+        "pending": 0,
+        "wait_ms": 0.00277405943828755,
+        "held_ms": 0.33845068345056994
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 1153.4024029877696,
+        "error_rate": 0,
+        "p99_ms": 3.640544533697018,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 1267.8192011117935,
+        "error_rate": 0,
+        "p99_ms": 1.559804759731131,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 1153.2534991502762,
+        "error_rate": 0,
+        "p99_ms": 2.3388826316250744,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.16552260915490666,
+    "proxy_cpu": 0.2870978623563271,
+    "load_generator_throttled_periods": 0.010058807247943285,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 7,
+    "start_s": 70,
+    "offered_rps": 1325,
+    "rps": 1316.4084254231952,
+    "completed_rps": 1316.4084254231952,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.1016396795543988,
+    "p95_ms": 1.8999216549452362,
+    "p99_ms": 3.2381504521694033,
+    "mean_ms": 1.2597831323086297,
+    "services": {
+      "api": {
+        "cpu": 0.3282528479609773,
+        "cpu_throttled_s": 0,
+        "memory": 0.0190277099609375,
+        "replicas_reporting": 4,
+        "rps": 1316.7268011808396,
+        "error_rate": 0,
+        "p99_ms": 2.5603566311161208,
+        "mean_ms": 0.9151568850884714,
+        "inflight": 3,
+        "inflight_mean": 1.5
+      },
+      "db": {
+        "cpu": 0.391366078083783,
+        "cpu_throttled_s": 0.141322,
+        "memory": 0.2794685363769531,
+        "replicas_reporting": 1,
+        "connections": 21,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.29425171581786247,
+        "cpu_throttled_s": 0,
+        "memory": 0.110504150390625,
+        "replicas_reporting": 1,
+        "rps": 1316.715599155426,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 3,
+        "max": 96,
+        "pending": 0,
+        "wait_ms": 0.009133266840338496,
+        "held_ms": 0.3542376720024069
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 1316.4084254231952,
+        "error_rate": 0,
+        "p99_ms": 3.2381504521694033,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 1443.8137012958528,
+        "error_rate": 0,
+        "p99_ms": 1.739583934572261,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 1316.715599155426,
+        "error_rate": 0,
+        "p99_ms": 2.5603566311161208,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.17946755741405837,
+    "proxy_cpu": 0.3172568002976986,
+    "load_generator_throttled_periods": 0.016325388239255324,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 8,
+    "start_s": 80,
+    "offered_rps": 1488.3333333333335,
+    "rps": 1480.1237909574825,
+    "completed_rps": 1480.1237909574825,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.1080597092218618,
+    "p95_ms": 1.9059068042912461,
+    "p99_ms": 3.214843781919201,
+    "mean_ms": 1.245155908139672,
+    "services": {
+      "api": {
+        "cpu": 0.36777674451297526,
+        "cpu_throttled_s": 0,
+        "memory": 0.0187835693359375,
+        "replicas_reporting": 4,
+        "rps": 1479.8568011760713,
+        "error_rate": 0,
+        "p99_ms": 2.354820094995667,
+        "mean_ms": 0.88793572440348,
+        "inflight": 2,
+        "inflight_mean": 1
+      },
+      "db": {
+        "cpu": 0.4124972760751877,
+        "cpu_throttled_s": 0.01254694990709243,
+        "memory": 0.31861114501953125,
+        "replicas_reporting": 1,
+        "connections": 22,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.3192167750268471,
+        "cpu_throttled_s": 0,
+        "memory": 0.1085357666015625,
+        "replicas_reporting": 1,
+        "rps": 1480.0018991708755,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 1,
+        "max": 96,
+        "pending": 0,
+        "wait_ms": 0.003690018868374494,
+        "held_ms": 0.3319494568976641
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 1480.1237909574825,
+        "error_rate": 0,
+        "p99_ms": 3.214843781919201,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 1631.2256012916564,
+        "error_rate": 0,
+        "p99_ms": 1.4450656178217638,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 1480.0018991708755,
+        "error_rate": 0,
+        "p99_ms": 2.354820094995667,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.19083051961707584,
+    "proxy_cpu": 0.35064079151177624,
+    "load_generator_throttled_periods": 0.013621713136628232,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 9,
+    "start_s": 90,
+    "offered_rps": 1651.6666666666667,
+    "rps": 1643.3069650541343,
+    "completed_rps": 1643.3069650541343,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.2381200768471325,
+    "p95_ms": 330.1445295026331,
+    "p99_ms": 558.1276988114282,
+    "mean_ms": 58.78556826290115,
+    "services": {
+      "api": {
+        "cpu": 0.4097815998162256,
+        "cpu_throttled_s": 0,
+        "memory": 0.0343780517578125,
+        "replicas_reporting": 4,
+        "rps": 1643.452801179886,
+        "error_rate": 0,
+        "p99_ms": 548.5043036107772,
+        "mean_ms": 56.511160910287,
+        "inflight": 549,
+        "inflight_mean": 100
+      },
+      "db": {
+        "cpu": 0.5871456802028507,
+        "cpu_throttled_s": 14.895119160672076,
+        "memory": 0.4526481628417969,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.35029076535503234,
+        "cpu_throttled_s": 0,
+        "memory": 0.128173828125,
+        "replicas_reporting": 1,
+        "rps": 1643.2776991605758,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 94,
+        "max": 96,
+        "pending": 455,
+        "wait_ms": 40.12636685058274,
+        "held_ms": 10.837623042553137
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 1643.3069650541343,
+        "error_rate": 0,
+        "p99_ms": 558.1276988114282,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 1805.2878014087678,
+        "error_rate": 0,
+        "p99_ms": 395.44445921998954,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 1643.2776991605758,
+        "error_rate": 0,
+        "p99_ms": 548.5043036107772,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.2224516233286903,
+    "proxy_cpu": 0.3900888936889341,
+    "load_generator_throttled_periods": 0.01003904090826816,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 10,
+    "start_s": 100,
+    "offered_rps": 1815,
+    "rps": 1806.4976567403678,
+    "completed_rps": 1806.4976567403678,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.1353542186348993,
+    "p95_ms": 1.8817220619833328,
+    "p99_ms": 2.6587054137309525,
+    "mean_ms": 1.2459681439922259,
+    "services": {
+      "api": {
+        "cpu": 0.44141446380359384,
+        "cpu_throttled_s": 0,
+        "memory": 0.0388641357421875,
+        "replicas_reporting": 4,
+        "rps": 1806.5660011529922,
+        "error_rate": 0,
+        "p99_ms": 1.9960248469178483,
+        "mean_ms": 0.8797315459693493,
+        "inflight": 3,
+        "inflight_mean": 1.5
+      },
+      "db": {
+        "cpu": 0.48374562887093403,
+        "cpu_throttled_s": 0.07294916359087544,
+        "memory": 0.45410919189453125,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.33814419194361456,
+        "cpu_throttled_s": 0,
+        "memory": 0.1291961669921875,
+        "replicas_reporting": 1,
+        "rps": 1806.615599155426,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 2,
+        "max": 96,
+        "pending": 0,
+        "wait_ms": 0.0019123630366012193,
+        "held_ms": 0.3305950305642644
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 1806.4976567403678,
+        "error_rate": 0,
+        "p99_ms": 2.6587054137309525,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 1988.616801404953,
+        "error_rate": 0,
+        "p99_ms": 1.3135563695071104,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 1806.615599155426,
+        "error_rate": 0,
+        "p99_ms": 1.9960248469178483,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.2320134881933337,
+    "proxy_cpu": 0.4272520452500846,
+    "load_generator_throttled_periods": 0,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 11,
+    "start_s": 110,
+    "offered_rps": 1978.3333333333333,
+    "rps": 1969.9868974057558,
+    "completed_rps": 1969.9868974057558,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.3345003294759725,
+    "p95_ms": 115.56245194409361,
+    "p99_ms": 211.84371126189706,
+    "mean_ms": 15.806811395120285,
+    "services": {
+      "api": {
+        "cpu": 0.4984602020860755,
+        "cpu_throttled_s": 0,
+        "memory": 0.03753662109375,
+        "replicas_reporting": 4,
+        "rps": 1965.887301683426,
+        "error_rate": 0,
+        "p99_ms": 206.31775330626238,
+        "mean_ms": 15.906846823815972,
+        "inflight": 184,
+        "inflight_mean": 35
+      },
+      "db": {
+        "cpu": 0.6980611723078717,
+        "cpu_throttled_s": 10.46866742031977,
+        "memory": 0.4641990661621094,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.42932805305382793,
+        "cpu_throttled_s": 0,
+        "memory": 0.123565673828125,
+        "replicas_reporting": 1,
+        "rps": 1968.4009990215302,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 73,
+        "max": 96,
+        "pending": 112,
+        "wait_ms": 7.312810350527066,
+        "held_ms": 6.683175487318835
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 1969.9868974057558,
+        "error_rate": 0,
+        "p99_ms": 211.84371126189706,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 2158.3099014520644,
+        "error_rate": 0,
+        "p99_ms": 187.34423773123822,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 1968.4009990215302,
+        "error_rate": 0,
+        "p99_ms": 206.31775330626238,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.3060994216303257,
+    "proxy_cpu": 0.4805093513586652,
+    "load_generator_throttled_periods": 0.01993520684122275,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 12,
+    "start_s": 120,
+    "offered_rps": 2141.666666666667,
+    "rps": 2130.197947765223,
+    "completed_rps": 2130.197947765223,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.5678292104843823,
+    "p95_ms": 73.54491385796051,
+    "p99_ms": 136.86588849922506,
+    "mean_ms": 13.458851267523432,
+    "services": {
+      "api": {
+        "cpu": 0.5451278816773,
+        "cpu_throttled_s": 0,
+        "memory": 0.033477783203125,
+        "replicas_reporting": 4,
+        "rps": 2131.56352164586,
+        "error_rate": 0,
+        "p99_ms": 129.74278820432707,
+        "mean_ms": 11.148626020179389,
+        "inflight": 135,
+        "inflight_mean": 36.7
+      },
+      "db": {
+        "cpu": 0.8175110175348408,
+        "cpu_throttled_s": 14.844622391570347,
+        "memory": 0.4747352600097656,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.48898489545486007,
+        "cpu_throttled_s": 0,
+        "memory": 0.1235504150390625,
+        "replicas_reporting": 1,
+        "rps": 2134.9543992996214,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 67,
+        "max": 96,
+        "pending": 67,
+        "wait_ms": 2.7170908803323934,
+        "held_ms": 6.907935573178466
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2130.197947765223,
+        "error_rate": 0,
+        "p99_ms": 136.86588849922506,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 2346.8252983479942,
+        "error_rate": 0,
+        "p99_ms": 110.71526633912737,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2134.9543992996214,
+        "error_rate": 0,
+        "p99_ms": 129.74278820432707,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.34031558711591403,
+    "proxy_cpu": 0.523326914068383,
+    "load_generator_throttled_periods": 0.03007338706452111,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 13,
+    "start_s": 130,
+    "offered_rps": 2305,
+    "rps": 2299.8976623944086,
+    "completed_rps": 2299.8976623944086,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.3303420202870146,
+    "p95_ms": 34.85792907496566,
+    "p99_ms": 83.8470913971663,
+    "mean_ms": 5.51613761694689,
+    "services": {
+      "api": {
+        "cpu": 0.5648046490270822,
+        "cpu_throttled_s": 0,
+        "memory": 0.033843994140625,
+        "replicas_reporting": 4,
+        "rps": 2302.338780190154,
+        "error_rate": 0,
+        "p99_ms": 69.80700116154453,
+        "mean_ms": 3.8248820573735927,
+        "inflight": 91,
+        "inflight_mean": 17.7
+      },
+      "db": {
+        "cpu": 0.693906798279395,
+        "cpu_throttled_s": 4.713438244060548,
+        "memory": 0.4776191711425781,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.4665452871940438,
+        "cpu_throttled_s": 0,
+        "memory": 0.1239013671875,
+        "replicas_reporting": 1,
+        "rps": 2296.515599155426,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 72,
+        "max": 96,
+        "pending": 36,
+        "wait_ms": 0.6483746460007312,
+        "held_ms": 2.342471057871018
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2299.8976623944086,
+        "error_rate": 0,
+        "p99_ms": 83.8470913971663,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 2537.1811040014777,
+        "error_rate": 0,
+        "p99_ms": 67.64347411473315,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2296.515599155426,
+        "error_rate": 0,
+        "p99_ms": 69.80700116154453,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.3056724435450178,
+    "proxy_cpu": 0.5276818688075288,
+    "load_generator_throttled_periods": 0.019971220832529658,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 14,
+    "start_s": 140,
+    "offered_rps": 2468.333333333333,
+    "rps": 2459.7220895396135,
+    "completed_rps": 2459.7220895396135,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.304249697729488,
+    "p95_ms": 102.313501804472,
+    "p99_ms": 211.99632429285793,
+    "mean_ms": 13.47526863179008,
+    "services": {
+      "api": {
+        "cpu": 0.5912553944695589,
+        "cpu_throttled_s": 0,
+        "memory": 0.03399658203125,
+        "replicas_reporting": 4,
+        "rps": 2458.94080119133,
+        "error_rate": 0,
+        "p99_ms": 177.67507690125765,
+        "mean_ms": 10.954791980419953,
+        "inflight": 222,
+        "inflight_mean": 30.1
+      },
+      "db": {
+        "cpu": 0.7133228281538038,
+        "cpu_throttled_s": 8.275927859086508,
+        "memory": 0.48184967041015625,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.49045777351821374,
+        "cpu_throttled_s": 0.729837,
+        "memory": 0.127716064453125,
+        "replicas_reporting": 1,
+        "rps": 2460.0534991502764,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 74,
+        "max": 96,
+        "pending": 148,
+        "wait_ms": 5.308335518540613,
+        "held_ms": 4.133260582154759
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2459.7220895396135,
+        "error_rate": 0,
+        "p99_ms": 211.99632429285793,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 2710.9851010560988,
+        "error_rate": 0,
+        "p99_ms": 153.76523703075495,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2460.0534991502764,
+        "error_rate": 0,
+        "p99_ms": 177.67507690125765,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.3273303258424846,
+    "proxy_cpu": 0.5317655830771656,
+    "load_generator_throttled_periods": 0.009987592989021883,
+    "proxy_throttled_periods": 0.00999884567489339
+  },
+  {
+    "index": 15,
+    "start_s": 150,
+    "offered_rps": 2631.6666666666665,
+    "rps": 2623.4758176981513,
+    "completed_rps": 2623.4758176981513,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.3176830937047297,
+    "p95_ms": 13.92883611609523,
+    "p99_ms": 39.7814580406349,
+    "mean_ms": 3.1696245420417712,
+    "services": {
+      "api": {
+        "cpu": 0.6249272624799488,
+        "cpu_throttled_s": 0,
+        "memory": 0.0388336181640625,
+        "replicas_reporting": 4,
+        "rps": 2622.573001384735,
+        "error_rate": 0,
+        "p99_ms": 42.05403426352117,
+        "mean_ms": 2.4901341321767063,
+        "inflight": 15,
+        "inflight_mean": 8.1
+      },
+      "db": {
+        "cpu": 0.7505721990619975,
+        "cpu_throttled_s": 4.390052010260597,
+        "memory": 0.48069000244140625,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.4990574356776804,
+        "cpu_throttled_s": 0,
+        "memory": 0.128448486328125,
+        "replicas_reporting": 1,
+        "rps": 2623.3018991708755,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 14,
+        "max": 96,
+        "pending": 9,
+        "wait_ms": 0.2969636350212837,
+        "held_ms": 1.476608506743584
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2623.4758176981513,
+        "error_rate": 0,
+        "p99_ms": 39.7814580406349,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 2877.3710016965865,
+        "error_rate": 0,
+        "p99_ms": 39.26291218973936,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2623.3018991708755,
+        "error_rate": 0,
+        "p99_ms": 42.05403426352117,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.33680834018412137,
+    "proxy_cpu": 0.5408967008158797,
+    "load_generator_throttled_periods": 0.04257793271835785,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 16,
+    "start_s": 160,
+    "offered_rps": 2795,
+    "rps": 2786.5494370892648,
+    "completed_rps": 2786.5494370892648,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.4471415957607736,
+    "p95_ms": 34.068407608304106,
+    "p99_ms": 79.77829401985173,
+    "mean_ms": 5.93820237722855,
+    "services": {
+      "api": {
+        "cpu": 0.6533053784765578,
+        "cpu_throttled_s": 0,
+        "memory": 0.031829833984375,
+        "replicas_reporting": 4,
+        "rps": 2786.763801240921,
+        "error_rate": 0,
+        "p99_ms": 74.67335870181995,
+        "mean_ms": 4.897252505124509,
+        "inflight": 105,
+        "inflight_mean": 21.4
+      },
+      "db": {
+        "cpu": 0.7970380105877822,
+        "cpu_throttled_s": 6.871638449837548,
+        "memory": 0.4817543029785156,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5378922254513399,
+        "cpu_throttled_s": 0,
+        "memory": 0.125732421875,
+        "replicas_reporting": 1,
+        "rps": 2786.6776991605757,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 48,
+        "max": 96,
+        "pending": 57,
+        "wait_ms": 1.1004564666242218,
+        "held_ms": 2.854915480992779
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2786.5494370892648,
+        "error_rate": 0,
+        "p99_ms": 79.77829401985173,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3061.946201324463,
+        "error_rate": 0,
+        "p99_ms": 72.61150189008772,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2786.6776991605757,
+        "error_rate": 0,
+        "p99_ms": 74.67335870181995,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.3517626795587508,
+    "proxy_cpu": 0.5451074403176144,
+    "load_generator_throttled_periods": 0.03728940705262191,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 17,
+    "start_s": 170,
+    "offered_rps": 2958.333333333333,
+    "rps": 2949.368218276534,
+    "completed_rps": 2949.368218276534,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.7401453781988372,
+    "p95_ms": 155.67542666811076,
+    "p99_ms": 233.4910216374508,
+    "mean_ms": 28.831222304849067,
+    "services": {
+      "api": {
+        "cpu": 0.6776288715154466,
+        "cpu_throttled_s": 0,
+        "memory": 0.0396728515625,
+        "replicas_reporting": 4,
+        "rps": 2951.8904009342195,
+        "error_rate": 0,
+        "p99_ms": 231.16703965739595,
+        "mean_ms": 26.703772589646327,
+        "inflight": 415,
+        "inflight_mean": 87.3
+      },
+      "db": {
+        "cpu": 0.8739429845212783,
+        "cpu_throttled_s": 17.11438748419266,
+        "memory": 0.4841270446777344,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5587473798473355,
+        "cpu_throttled_s": 0.015040000000000053,
+        "memory": 0.1333160400390625,
+        "replicas_reporting": 1,
+        "rps": 2949.8292991399767,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 319,
+        "wait_ms": 15.850948510576384,
+        "held_ms": 7.8293927843394435
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2949.368218276534,
+        "error_rate": 0,
+        "p99_ms": 233.4910216374508,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3259.424200820923,
+        "error_rate": 0,
+        "p99_ms": 189.61179306917884,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2949.8292991399767,
+        "error_rate": 0,
+        "p99_ms": 231.16703965739595,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.36513814087582075,
+    "proxy_cpu": 0.5349209082649494,
+    "load_generator_throttled_periods": 0.02832923711061318,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 18,
+    "start_s": 180,
+    "offered_rps": 3121.666666666667,
+    "rps": 3113.7501044366954,
+    "completed_rps": 3113.7501044366954,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 1.9137698159133567,
+    "p95_ms": 94.71272221815443,
+    "p99_ms": 158.86991075681217,
+    "mean_ms": 18.626591349672204,
+    "services": {
+      "api": {
+        "cpu": 0.7030287608450039,
+        "cpu_throttled_s": 0,
+        "memory": 0.0404205322265625,
+        "replicas_reporting": 4,
+        "rps": 3104.391202187538,
+        "error_rate": 0,
+        "p99_ms": 159.8658002489534,
+        "mean_ms": 19.893097222554946,
+        "inflight": 233,
+        "inflight_mean": 68.2
+      },
+      "db": {
+        "cpu": 0.8963818382549406,
+        "cpu_throttled_s": 18.810509296942612,
+        "memory": 0.4860572814941406,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5583521384901623,
+        "cpu_throttled_s": 0,
+        "memory": 0.1293792724609375,
+        "replicas_reporting": 1,
+        "rps": 3101.861798238754,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 78,
+        "max": 96,
+        "pending": 155,
+        "wait_ms": 8.81270342949646,
+        "held_ms": 8.791075689288938
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 3113.7501044366954,
+        "error_rate": 0,
+        "p99_ms": 158.86991075681217,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3408.398502635956,
+        "error_rate": 0,
+        "p99_ms": 136.32174257321233,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 3101.861798238754,
+        "error_rate": 0,
+        "p99_ms": 159.8658002489534,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.358441193614415,
+    "proxy_cpu": 0.5184071206069831,
+    "load_generator_throttled_periods": 0.031074728747495606,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 19,
+    "start_s": 190,
+    "offered_rps": 3285,
+    "rps": 3232.310703787671,
+    "completed_rps": 3232.310703787671,
+    "dropped": 128,
+    "error_rate": 0,
+    "p50_ms": 79.25366994629134,
+    "p95_ms": 530.7688021407471,
+    "p99_ms": 651.0991002242916,
+    "mean_ms": 177.17623955969816,
+    "services": {
+      "api": {
+        "cpu": 0.7028508575988814,
+        "cpu_throttled_s": 0.13046473829558455,
+        "memory": 0.069366455078125,
+        "replicas_reporting": 4,
+        "rps": 3257.1276047229767,
+        "error_rate": 0,
+        "p99_ms": 717.8950883770939,
+        "mean_ms": 179.65725158254625,
+        "inflight": 615,
+        "inflight_mean": 377.5
+      },
+      "db": {
+        "cpu": 0.9770621588123489,
+        "cpu_throttled_s": 38.63544363554439,
+        "memory": 0.488311767578125,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5719671288537057,
+        "cpu_throttled_s": 0,
+        "memory": 0.156280517578125,
+        "replicas_reporting": 1,
+        "rps": 3245.0243977546693,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 89,
+        "max": 96,
+        "pending": 528,
+        "wait_ms": 92.2697617545178,
+        "held_ms": 18.85190264787837
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 3232.310703787671,
+        "error_rate": 0,
+        "p99_ms": 651.0991002242916,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3583.670604944229,
+        "error_rate": 0,
+        "p99_ms": 351.52964810206396,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 3245.0243977546693,
+        "error_rate": 0,
+        "p99_ms": 717.8950883770939,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.3650649954590326,
+    "proxy_cpu": 0.4957831577189268,
+    "load_generator_throttled_periods": 0.03937410404453953,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 20,
+    "start_s": 200,
+    "offered_rps": 3448.3333333333335,
+    "rps": 3421.5399706934963,
+    "completed_rps": 3421.5399706934963,
+    "dropped": 0,
+    "error_rate": 0,
+    "p50_ms": 43.08858975319543,
+    "p95_ms": 340.8702497762661,
+    "p99_ms": 452.3463735592555,
+    "mean_ms": 81.67768914070383,
+    "services": {
+      "api": {
+        "cpu": 0.7334800833464697,
+        "cpu_throttled_s": 0.12154786257988334,
+        "memory": 0.070098876953125,
+        "replicas_reporting": 4,
+        "rps": 3389.538395023346,
+        "error_rate": 0,
+        "p99_ms": 641.2419972355375,
+        "mean_ms": 80.9603362538765,
+        "inflight": 505,
+        "inflight_mean": 248.1
+      },
+      "db": {
+        "cpu": 0.9841979410075823,
+        "cpu_throttled_s": 40.821745694403575,
+        "memory": 0.4866294860839844,
+        "replicas_reporting": 1,
+        "connections": 98,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5743275183903307,
+        "cpu_throttled_s": 0,
+        "memory": 0.1545562744140625,
+        "replicas_reporting": 1,
+        "rps": 3408.27380194664,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 408,
+        "wait_ms": 43.50802419031241,
+        "held_ms": 17.638274613246285
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 3421.5399706934963,
+        "error_rate": 0,
+        "p99_ms": 452.3463735592555,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3733.4129951238633,
+        "error_rate": 0,
+        "p99_ms": 291.92826268756863,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 3408.27380194664,
+        "error_rate": 0,
+        "p99_ms": 641.2419972355375,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.36723786225116345,
+    "proxy_cpu": 0.4843578900544941,
+    "load_generator_throttled_periods": 0.029844544062970758,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 21,
+    "start_s": 210,
+    "offered_rps": 3611.6666666666665,
+    "rps": 3387.7804695178493,
+    "completed_rps": 3387.7804695178493,
+    "dropped": 1463.4986582886454,
+    "error_rate": 0,
+    "p50_ms": 74.226020614309,
+    "p95_ms": 1499.3104769231998,
+    "p99_ms": 1664.9581177689097,
+    "mean_ms": 292.53837977115217,
+    "services": {
+      "api": {
+        "cpu": 0.7215281904466572,
+        "cpu_throttled_s": 0.9830786786101151,
+        "memory": 0.121826171875,
+        "replicas_reporting": 4,
+        "rps": 3393.6851765716324,
+        "error_rate": 0,
+        "p99_ms": 1900.151663439774,
+        "mean_ms": 303.1134627760091,
+        "inflight": 585,
+        "inflight_mean": 383.5
+      },
+      "db": {
+        "cpu": 0.9983619285386538,
+        "cpu_throttled_s": 45.84206312426949,
+        "memory": 0.4870109558105469,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5829457571520692,
+        "cpu_throttled_s": 0,
+        "memory": 0.17022705078125,
+        "replicas_reporting": 1,
+        "rps": 3391.6972995519636,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 488,
+        "wait_ms": 71.18981588616386,
+        "held_ms": 22.193562579477643
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 3387.7804695178493,
+        "error_rate": 0,
+        "p99_ms": 1664.9581177689097,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3729.7439245201945,
+        "error_rate": 0,
+        "p99_ms": 373.0217485458999,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 3391.6972995519636,
+        "error_rate": 0,
+        "p99_ms": 1900.151663439774,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.38675929312027885,
+    "proxy_cpu": 0.497689046544204,
+    "load_generator_throttled_periods": 0.06407729926196327,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 22,
+    "start_s": 220,
+    "offered_rps": 3775,
+    "rps": 3003.3189171752297,
+    "completed_rps": 3003.3189171752297,
+    "dropped": 6170.9516110796285,
+    "error_rate": 0,
+    "p50_ms": 142.93661283131183,
+    "p95_ms": 2519.1919540607255,
+    "p99_ms": 2748.1563450206972,
+    "mean_ms": 581.0943519493106,
+    "services": {
+      "api": {
+        "cpu": 0.6647889832843124,
+        "cpu_throttled_s": 0.1251887205144171,
+        "memory": 0.16297149658203125,
+        "replicas_reporting": 4,
+        "rps": 3005.8220721232,
+        "error_rate": 0,
+        "p99_ms": 2931.417889712358,
+        "mean_ms": 619.1195703672097,
+        "inflight": 682,
+        "inflight_mean": 487.5
+      },
+      "db": {
+        "cpu": 1.001778708111459,
+        "cpu_throttled_s": 49.17451275516996,
+        "memory": 0.4850502014160156,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.6362061633618353,
+        "cpu_throttled_s": 0.07481799999999994,
+        "memory": 0.2082672119140625,
+        "replicas_reporting": 1,
+        "rps": 3002.740501570702,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 583,
+        "wait_ms": 118.67069383227661,
+        "held_ms": 26.62624501674387
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 3003.3189171752297,
+        "error_rate": 0,
+        "p99_ms": 2748.1563450206972,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3299.99721085923,
+        "error_rate": 0,
+        "p99_ms": 389.166062377856,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 3002.740501570702,
+        "error_rate": 0,
+        "p99_ms": 2931.417889712358,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.4684723038773133,
+    "proxy_cpu": 0.5531253027787656,
+    "load_generator_throttled_periods": 0.11748071216129197,
+    "proxy_throttled_periods": 0.009957175452788895
+  },
+  {
+    "index": 23,
+    "start_s": 230,
+    "offered_rps": 3938.3333333333335,
+    "rps": 2982.494827913585,
+    "completed_rps": 2982.494827913585,
+    "dropped": 8212.44863573028,
+    "error_rate": 0,
+    "p50_ms": 157.3377595044343,
+    "p95_ms": 3459.6429789714343,
+    "p99_ms": 3672.1243338908275,
+    "mean_ms": 1034.6386649422352,
+    "services": {
+      "api": {
+        "cpu": 0.6549340039234215,
+        "cpu_throttled_s": 0.06204787222951203,
+        "memory": 0.201904296875,
+        "replicas_reporting": 4,
+        "rps": 2981.2958667194616,
+        "error_rate": 0,
+        "p99_ms": 4855.891836907953,
+        "mean_ms": 1071.425509654036,
+        "inflight": 519,
+        "inflight_mean": 491.4
+      },
+      "db": {
+        "cpu": 0.9981563576409769,
+        "cpu_throttled_s": 46.99386550945093,
+        "memory": 0.4847984313964844,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.6256556777133,
+        "cpu_throttled_s": 0,
+        "memory": 0.2616119384765625,
+        "replicas_reporting": 1,
+        "rps": 2979.3552005767824,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 437,
+        "wait_ms": 120.90587159754675,
+        "held_ms": 26.70255848077562
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2982.494827913585,
+        "error_rate": 0,
+        "p99_ms": 3672.1243338908275,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3276.100196961603,
+        "error_rate": 0,
+        "p99_ms": 388.8972235075437,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2979.3552005767824,
+        "error_rate": 0,
+        "p99_ms": 4855.891836907953,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.47552426149532323,
+    "proxy_cpu": 0.5489403371703545,
+    "load_generator_throttled_periods": 0.1401117081292476,
+    "proxy_throttled_periods": 0.010034641175980496
+  },
+  {
+    "index": 24,
+    "start_s": 240,
+    "offered_rps": 4101.666666666666,
+    "rps": 3026.4994164789955,
+    "completed_rps": 3026.4994164789955,
+    "dropped": 10692.269725624357,
+    "error_rate": 0,
+    "p50_ms": 1229.5692798708294,
+    "p95_ms": 3811.702706614786,
+    "p99_ms": 3981.508902475187,
+    "mean_ms": 1295.065629324482,
+    "services": {
+      "api": {
+        "cpu": 0.6491882157234499,
+        "cpu_throttled_s": 0.04261089119795011,
+        "memory": 0.2459869384765625,
+        "replicas_reporting": 4,
+        "rps": 3017.539647732035,
+        "error_rate": 0,
+        "p99_ms": 4919.367071319964,
+        "mean_ms": 1286.4978020681817,
+        "inflight": 483,
+        "inflight_mean": 468.3
+      },
+      "db": {
+        "cpu": 0.9974375097328589,
+        "cpu_throttled_s": 47.59653570603626,
+        "memory": 0.4863471984863281,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.54968746171227,
+        "cpu_throttled_s": 0.022060999999999997,
+        "memory": 0.2613372802734375,
+        "replicas_reporting": 1,
+        "rps": 3037.3812008857726,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 391,
+        "wait_ms": 114.59103695806824,
+        "held_ms": 25.22412770507631
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 3026.4994164789955,
+        "error_rate": 0,
+        "p99_ms": 3981.508902475187,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3321.79618261041,
+        "error_rate": 0,
+        "p99_ms": 384.1848779882437,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 3037.3812008857726,
+        "error_rate": 0,
+        "p99_ms": 4919.367071319964,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.40116952481205126,
+    "proxy_cpu": 0.45178790649284367,
+    "load_generator_throttled_periods": 0.07977311973333716,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 25,
+    "start_s": 250,
+    "offered_rps": 4265,
+    "rps": 3023.901424758003,
+    "completed_rps": 3023.901424758003,
+    "dropped": 12297.078342307403,
+    "error_rate": 0,
+    "p50_ms": 1193.5124125886525,
+    "p95_ms": 3596.2417236064657,
+    "p99_ms": 3681.0004291706646,
+    "mean_ms": 1271.6211379411798,
+    "services": {
+      "api": {
+        "cpu": 0.6459690226342566,
+        "cpu_throttled_s": 0.027258236572537887,
+        "memory": 0.2592620849609375,
+        "replicas_reporting": 4,
+        "rps": 3025.356131974291,
+        "error_rate": 0,
+        "p99_ms": 4919.662317749565,
+        "mean_ms": 1269.755248727108,
+        "inflight": 527,
+        "inflight_mean": 472.2
+      },
+      "db": {
+        "cpu": 1.0011422131118137,
+        "cpu_throttled_s": 48.863428313476334,
+        "memory": 0.48554229736328125,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5469352498744527,
+        "cpu_throttled_s": 0.026309000000000027,
+        "memory": 0.2605133056640625,
+        "replicas_reporting": 1,
+        "rps": 3006.7263020753862,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 93,
+        "max": 96,
+        "pending": 434,
+        "wait_ms": 115.20002065122867,
+        "held_ms": 25.282469671110032
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 3023.901424758003,
+        "error_rate": 0,
+        "p99_ms": 3681.0004291706646,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3328.361479518204,
+        "error_rate": 0,
+        "p99_ms": 387.60835719158194,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 3006.7263020753862,
+        "error_rate": 0,
+        "p99_ms": 4919.662317749565,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.45277222583455434,
+    "proxy_cpu": 0.4517779951716392,
+    "load_generator_throttled_periods": 0.14326537197118902,
+    "proxy_throttled_periods": 0.010025937159137348
+  },
+  {
+    "index": 26,
+    "start_s": 260,
+    "offered_rps": 4428.333333333334,
+    "rps": 2906.988682492692,
+    "completed_rps": 2906.988682492692,
+    "dropped": 15151.58165664797,
+    "error_rate": 0,
+    "p50_ms": 1297.4445753093707,
+    "p95_ms": 3944.8723029348184,
+    "p99_ms": 4148.7468406430835,
+    "mean_ms": 1382.029596480328,
+    "services": {
+      "api": {
+        "cpu": 0.6322953672191285,
+        "cpu_throttled_s": 0.10421299999999988,
+        "memory": 0.2723236083984375,
+        "replicas_reporting": 4,
+        "rps": 2915.6834780116524,
+        "error_rate": 0,
+        "p99_ms": 4920.619338022824,
+        "mean_ms": 1365.957697334428,
+        "inflight": 605,
+        "inflight_mean": 482.7
+      },
+      "db": {
+        "cpu": 0.9987975159197873,
+        "cpu_throttled_s": 49.73379615529956,
+        "memory": 0.4853553771972656,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5469703687814202,
+        "cpu_throttled_s": 0.005715000000000026,
+        "memory": 0.26202392578125,
+        "replicas_reporting": 1,
+        "rps": 2927.6308965444564,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 509,
+        "wait_ms": 122.21957646090753,
+        "held_ms": 26.66483433836183
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2906.988682492692,
+        "error_rate": 0,
+        "p99_ms": 4148.7468406430835,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3201.4480886173274,
+        "error_rate": 0,
+        "p99_ms": 437.8649538306655,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2927.6308965444564,
+        "error_rate": 0,
+        "p99_ms": 4920.619338022824,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.4382401587258651,
+    "proxy_cpu": 0.45370299852031765,
+    "load_generator_throttled_periods": 0.10710429451761695,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 27,
+    "start_s": 270,
+    "offered_rps": 4591.666666666667,
+    "rps": 2924.66427998183,
+    "completed_rps": 2924.66427998183,
+    "dropped": 16582.751562894882,
+    "error_rate": 0,
+    "p50_ms": 284.9643559584973,
+    "p95_ms": 3829.1234285354503,
+    "p99_ms": 3978.7681027787426,
+    "mean_ms": 1309.3090283183838,
+    "services": {
+      "api": {
+        "cpu": 0.6326611427262193,
+        "cpu_throttled_s": 0.5194850000000002,
+        "memory": 0.272857666015625,
+        "replicas_reporting": 4,
+        "rps": 2939.754520116285,
+        "error_rate": 0,
+        "p99_ms": 4918.597488729397,
+        "mean_ms": 1300.2592662681684,
+        "inflight": 520,
+        "inflight_mean": 474.8
+      },
+      "db": {
+        "cpu": 1.0013041061014463,
+        "cpu_throttled_s": 47.94604840433266,
+        "memory": 0.4863319396972656,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.53300531185226,
+        "cpu_throttled_s": 0,
+        "memory": 0.263763427734375,
+        "replicas_reporting": 1,
+        "rps": 2937.1491371093202,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 427,
+        "wait_ms": 118.66303951183143,
+        "held_ms": 26.164027248162064
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2924.66427998183,
+        "error_rate": 0,
+        "p99_ms": 3978.7681027787426,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3240.1548092174503,
+        "error_rate": 0,
+        "p99_ms": 394.9872795786232,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2937.1491371093202,
+        "error_rate": 0,
+        "p99_ms": 4918.597488729397,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.41211329488481757,
+    "proxy_cpu": 0.4540411817663056,
+    "load_generator_throttled_periods": 0.0896603854260973,
+    "proxy_throttled_periods": 0.009990663365149022
+  },
+  {
+    "index": 28,
+    "start_s": 280,
+    "offered_rps": 4755,
+    "rps": 3041.1968662408826,
+    "completed_rps": 3041.1968662408826,
+    "dropped": 17195.600345653496,
+    "error_rate": 0,
+    "p50_ms": 204.4847121563773,
+    "p95_ms": 3912.360810325056,
+    "p99_ms": 3999.4045822821563,
+    "mean_ms": 1328.7590696694979,
+    "services": {
+      "api": {
+        "cpu": 0.636704869494082,
+        "cpu_throttled_s": 0.028562999999999894,
+        "memory": 0.2767486572265625,
+        "replicas_reporting": 4,
+        "rps": 3019.7533053398133,
+        "error_rate": 0,
+        "p99_ms": 4920.211240394054,
+        "mean_ms": 1323.3983591242538,
+        "inflight": 498,
+        "inflight_mean": 470.5
+      },
+      "db": {
+        "cpu": 1.0001697350110306,
+        "cpu_throttled_s": 47.95632619326841,
+        "memory": 0.48894500732421875,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5332085317166246,
+        "cpu_throttled_s": 0,
+        "memory": 0.2633819580078125,
+        "replicas_reporting": 1,
+        "rps": 3004.2750629009797,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 402,
+        "wait_ms": 115.55792544042819,
+        "held_ms": 25.596272251579705
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 3041.1968662408826,
+        "error_rate": 0,
+        "p99_ms": 3999.4045822821563,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3323.3960062026977,
+        "error_rate": 0,
+        "p99_ms": 386.2497782508936,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 3004.2750629009797,
+        "error_rate": 0,
+        "p99_ms": 4920.211240394054,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.40436294070381296,
+    "proxy_cpu": 0.43379730740997074,
+    "load_generator_throttled_periods": 0.08036378386176574,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 29,
+    "start_s": 290,
+    "offered_rps": 4918.333333333334,
+    "rps": 2896.8514712567567,
+    "completed_rps": 2896.8514712567567,
+    "dropped": 19983.504663744985,
+    "error_rate": 0,
+    "p50_ms": 1095.9910316840055,
+    "p95_ms": 4006.6585296658827,
+    "p99_ms": 4337.750722911364,
+    "mean_ms": 1325.942433684492,
+    "services": {
+      "api": {
+        "cpu": 0.6227839034248128,
+        "cpu_throttled_s": 0.05675400000000019,
+        "memory": 0.277679443359375,
+        "replicas_reporting": 4,
+        "rps": 2904.8846277960524,
+        "error_rate": 0,
+        "p99_ms": 4918.766700734028,
+        "mean_ms": 1322.8739928245545,
+        "inflight": 491,
+        "inflight_mean": 470.3
+      },
+      "db": {
+        "cpu": 0.9956481402386828,
+        "cpu_throttled_s": 49.19124208197843,
+        "memory": 0.4894142150878906,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5265525287624186,
+        "cpu_throttled_s": 0,
+        "memory": 0.2631683349609375,
+        "replicas_reporting": 1,
+        "rps": 2914.9423018693924,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 403,
+        "wait_ms": 119.7873663076655,
+        "held_ms": 26.627831884994105
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2896.8514712567567,
+        "error_rate": 0,
+        "p99_ms": 4337.750722911364,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3195.707201778645,
+        "error_rate": 0,
+        "p99_ms": 391.85816627084984,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2914.9423018693924,
+        "error_rate": 0,
+        "p99_ms": 4918.766700734028,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.41668028928286466,
+    "proxy_cpu": 0.45214468796641966,
+    "load_generator_throttled_periods": 0.09949010014726142,
+    "proxy_throttled_periods": 0.02007303150318604
+  },
+  {
+    "index": 30,
+    "start_s": 300,
+    "offered_rps": 5000,
+    "rps": 2932.3951878937937,
+    "completed_rps": 2932.3951878937937,
+    "dropped": 20692.79886411583,
+    "error_rate": 0,
+    "p50_ms": 286.3351807131843,
+    "p95_ms": 4163.355067154841,
+    "p99_ms": 4333.056885103692,
+    "mean_ms": 1355.5805775694184,
+    "services": {
+      "api": {
+        "cpu": 0.63027877362854,
+        "cpu_throttled_s": 0.09652999999999971,
+        "memory": 0.27889251708984375,
+        "replicas_reporting": 4,
+        "rps": 2936.4755692712083,
+        "error_rate": 0,
+        "p99_ms": 4920.032687344648,
+        "mean_ms": 1343.0095699580093,
+        "inflight": 484,
+        "inflight_mean": 467.2
+      },
+      "db": {
+        "cpu": 1.003309968584827,
+        "cpu_throttled_s": 48.74492801764097,
+        "memory": 0.48683929443359375,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.534097205740619,
+        "cpu_throttled_s": 0,
+        "memory": 0.2636871337890625,
+        "replicas_reporting": 1,
+        "rps": 2942.3086008548735,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 94,
+        "max": 96,
+        "pending": 393,
+        "wait_ms": 118.90912544935152,
+        "held_ms": 26.20490633361999
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2932.3951878937937,
+        "error_rate": 0,
+        "p99_ms": 4333.056885103692,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3223.5103947045855,
+        "error_rate": 0,
+        "p99_ms": 387.4533861359445,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2942.3086008548735,
+        "error_rate": 0,
+        "p99_ms": 4920.032687344648,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.4224194944976338,
+    "proxy_cpu": 0.4366235534591823,
+    "load_generator_throttled_periods": 0.08996761549789804,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 31,
+    "start_s": 310,
+    "offered_rps": 5000,
+    "rps": 2948.2057390633913,
+    "completed_rps": 2948.2057390633913,
+    "dropped": 20493.503491582946,
+    "error_rate": 0,
+    "p50_ms": 215.93217590975036,
+    "p95_ms": 4012.5637418659317,
+    "p99_ms": 4299.94408978958,
+    "mean_ms": 1346.6419916721309,
+    "services": {
+      "api": {
+        "cpu": 0.6225729874399891,
+        "cpu_throttled_s": 0.033833999999999996,
+        "memory": 0.2802886962890625,
+        "replicas_reporting": 4,
+        "rps": 2949.524202132225,
+        "error_rate": 0,
+        "p99_ms": 4920.1665080755165,
+        "mean_ms": 1339.1624925537142,
+        "inflight": 493,
+        "inflight_mean": 472.8
+      },
+      "db": {
+        "cpu": 0.9987727233978007,
+        "cpu_throttled_s": 49.27030398229658,
+        "memory": 0.48958587646484375,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5433168119565039,
+        "cpu_throttled_s": 0,
+        "memory": 0.2615814208984375,
+        "replicas_reporting": 1,
+        "rps": 2950.5220979452133,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 406,
+        "wait_ms": 118.1123048375029,
+        "held_ms": 26.101546843452063
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2948.2057390633913,
+        "error_rate": 0,
+        "p99_ms": 4299.94408978958,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3239.1238022327425,
+        "error_rate": 0,
+        "p99_ms": 390.6682130775496,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2950.5220979452133,
+        "error_rate": 0,
+        "p99_ms": 4920.1665080755165,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.41094042651458645,
+    "proxy_cpu": 0.450010049736251,
+    "load_generator_throttled_periods": 0.06999549959777303,
+    "proxy_throttled_periods": 0.00997282449866707
+  },
+  {
+    "index": 32,
+    "start_s": 320,
+    "offered_rps": 5000,
+    "rps": 2778.6752960775907,
+    "completed_rps": 2778.6752960775907,
+    "dropped": 22288.648159530334,
+    "error_rate": 0,
+    "p50_ms": 1054.3046395991546,
+    "p95_ms": 4435.080138652355,
+    "p99_ms": 4725.244657662895,
+    "mean_ms": 1385.5264457909645,
+    "services": {
+      "api": {
+        "cpu": 0.6050384568210916,
+        "cpu_throttled_s": 0.27218500000000007,
+        "memory": 0.28855133056640625,
+        "replicas_reporting": 4,
+        "rps": 2776.6197866379716,
+        "error_rate": 0,
+        "p99_ms": 4919.889764954812,
+        "mean_ms": 1392.8742593906006,
+        "inflight": 482,
+        "inflight_mean": 464.1
+      },
+      "db": {
+        "cpu": 0.9964724569057211,
+        "cpu_throttled_s": 49.42305823731522,
+        "memory": 0.48941802978515625,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.523412983465542,
+        "cpu_throttled_s": 0,
+        "memory": 0.2620849609375,
+        "replicas_reporting": 1,
+        "rps": 2768.1100993871687,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 94,
+        "max": 96,
+        "pending": 389,
+        "wait_ms": 125.9390576462629,
+        "held_ms": 28.20814463872315
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2778.6752960775907,
+        "error_rate": 0,
+        "p99_ms": 4725.244657662895,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3050.3106600482215,
+        "error_rate": 0,
+        "p99_ms": 410.2770410943985,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2768.1100993871687,
+        "error_rate": 0,
+        "p99_ms": 4919.889764954812,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.4186413477783674,
+    "proxy_cpu": 0.4419504098391229,
+    "load_generator_throttled_periods": 0.09020960355129623,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 33,
+    "start_s": 330,
+    "offered_rps": 5000,
+    "rps": 3041.3252114078946,
+    "completed_rps": 3041.3252114078946,
+    "dropped": 19527.028193719743,
+    "error_rate": 0,
+    "p50_ms": 429.9616611207268,
+    "p95_ms": 4328.091832057802,
+    "p99_ms": 4677.719077301068,
+    "mean_ms": 1357.4119044396475,
+    "services": {
+      "api": {
+        "cpu": 0.6398923043335731,
+        "cpu_throttled_s": 0.2183059999999999,
+        "memory": 0.28862762451171875,
+        "replicas_reporting": 4,
+        "rps": 3020.2853160918257,
+        "error_rate": 0,
+        "p99_ms": 4920.78814936413,
+        "mean_ms": 1330.4646034886543,
+        "inflight": 662,
+        "inflight_mean": 491.1
+      },
+      "db": {
+        "cpu": 0.9998327526546802,
+        "cpu_throttled_s": 46.223201866025875,
+        "memory": 0.4902000427246094,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5438704811768303,
+        "cpu_throttled_s": 0.001334999999999975,
+        "memory": 0.2644805908203125,
+        "replicas_reporting": 1,
+        "rps": 3022.544700551033,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 565,
+        "wait_ms": 120.76773334931703,
+        "held_ms": 25.69327591649286
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 3041.3252114078946,
+        "error_rate": 0,
+        "p99_ms": 4677.719077301068,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3319.9092428725007,
+        "error_rate": 0,
+        "p99_ms": 386.30176148834016,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 3022.544700551033,
+        "error_rate": 0,
+        "p99_ms": 4920.78814936413,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.4167235201466459,
+    "proxy_cpu": 0.4633161585750429,
+    "load_generator_throttled_periods": 0.07974882968006616,
+    "proxy_throttled_periods": 0.019925452211776003
+  },
+  {
+    "index": 34,
+    "start_s": 340,
+    "offered_rps": 5000,
+    "rps": 3072.828558445879,
+    "completed_rps": 3072.828558445879,
+    "dropped": 19245.10550590427,
+    "error_rate": 0,
+    "p50_ms": 845.4045325887885,
+    "p95_ms": 3990.015740333514,
+    "p99_ms": 4282.012677995417,
+    "mean_ms": 1259.0285241772258,
+    "services": {
+      "api": {
+        "cpu": 0.6503409295585572,
+        "cpu_throttled_s": 0.021905999999999953,
+        "memory": 0.29320526123046875,
+        "replicas_reporting": 4,
+        "rps": 3091.1977981805803,
+        "error_rate": 0,
+        "p99_ms": 4918.452253577831,
+        "mean_ms": 1251.688598639348,
+        "inflight": 486,
+        "inflight_mean": 470
+      },
+      "db": {
+        "cpu": 1.0018280813781217,
+        "cpu_throttled_s": 48.79887454105949,
+        "memory": 0.4905052185058594,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5384547950860394,
+        "cpu_throttled_s": 0,
+        "memory": 0.2633514404296875,
+        "replicas_reporting": 1,
+        "rps": 3086.60040063858,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 397,
+        "wait_ms": 113.04258191472934,
+        "held_ms": 24.6877222425565
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 3072.828558445879,
+        "error_rate": 0,
+        "p99_ms": 4282.012677995417,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3400.2396980285644,
+        "error_rate": 0,
+        "p99_ms": 377.1056917352805,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 3086.60040063858,
+        "error_rate": 0,
+        "p99_ms": 4918.452253577831,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.4019808481245586,
+    "proxy_cpu": 0.43697245100116505,
+    "load_generator_throttled_periods": 0.07030719129513063,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 35,
+    "start_s": 350,
+    "offered_rps": 5000,
+    "rps": 2898.27714242824,
+    "completed_rps": 2898.27714242824,
+    "dropped": 21000.470821920782,
+    "error_rate": 0,
+    "p50_ms": 250,
+    "p95_ms": 4371.222988521579,
+    "p99_ms": 4682.093504626677,
+    "mean_ms": 1357.1532378001996,
+    "services": {
+      "api": {
+        "cpu": 0.6176879482669992,
+        "cpu_throttled_s": 0.07685300000000037,
+        "memory": 0.2948760986328125,
+        "replicas_reporting": 4,
+        "rps": 2895.278700399399,
+        "error_rate": 0,
+        "p99_ms": 4920.630217769216,
+        "mean_ms": 1357.9809745934394,
+        "inflight": 488,
+        "inflight_mean": 473.8
+      },
+      "db": {
+        "cpu": 0.9966890302368256,
+        "cpu_throttled_s": 48.76756782974087,
+        "memory": 0.4888420104980469,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5305937335154823,
+        "cpu_throttled_s": 0,
+        "memory": 0.262298583984375,
+        "replicas_reporting": 1,
+        "rps": 2894.2191997528075,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 399,
+        "wait_ms": 120.76280751878326,
+        "held_ms": 26.958347132099775
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2898.27714242824,
+        "error_rate": 0,
+        "p99_ms": 4682.093504626677,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3182.350900006294,
+        "error_rate": 0,
+        "p99_ms": 399.12562855220335,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2894.2191997528075,
+        "error_rate": 0,
+        "p99_ms": 4920.630217769216,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.41365887906671145,
+    "proxy_cpu": 0.44703736343259665,
+    "load_generator_throttled_periods": 0.099568522727987,
+    "proxy_throttled_periods": 0.01000001970867007
+  },
+  {
+    "index": 36,
+    "start_s": 360,
+    "offered_rps": 5000,
+    "rps": 3023.455422454419,
+    "completed_rps": 3023.455422454419,
+    "dropped": 19760.995727020694,
+    "error_rate": 0,
+    "p50_ms": 259.2564726589468,
+    "p95_ms": 4268.116478517149,
+    "p99_ms": 4360.702692841836,
+    "mean_ms": 1332.4450318640852,
+    "services": {
+      "api": {
+        "cpu": 0.6412448827375757,
+        "cpu_throttled_s": 0.05784099999999981,
+        "memory": 0.2992706298828125,
+        "replicas_reporting": 4,
+        "rps": 3022.421983542409,
+        "error_rate": 0,
+        "p99_ms": 4920.597198551739,
+        "mean_ms": 1314.4365598388465,
+        "inflight": 509,
+        "inflight_mean": 471.5
+      },
+      "db": {
+        "cpu": 1.0019374243023662,
+        "cpu_throttled_s": 49.80513206773537,
+        "memory": 0.4879951477050781,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5400374619961781,
+        "cpu_throttled_s": 0,
+        "memory": 0.2621917724609375,
+        "replicas_reporting": 1,
+        "rps": 3019.2287007570267,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 413,
+        "wait_ms": 115.75925332195007,
+        "held_ms": 25.287427943981335
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 3023.455422454419,
+        "error_rate": 0,
+        "p99_ms": 4360.702692841836,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3325.271730814659,
+        "error_rate": 0,
+        "p99_ms": 379.90821333264154,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 3019.2287007570267,
+        "error_rate": 0,
+        "p99_ms": 4920.597198551739,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.46066027407565574,
+    "proxy_cpu": 0.4429997297977678,
+    "load_generator_throttled_periods": 0.14080683355502532,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 37,
+    "start_s": 370,
+    "offered_rps": 5000,
+    "rps": 2964.47004360313,
+    "completed_rps": 2964.47004360313,
+    "dropped": 20468.49846956163,
+    "error_rate": 0,
+    "p50_ms": 862.2599599417023,
+    "p95_ms": 4199.2847297004055,
+    "p99_ms": 4343.282472471603,
+    "mean_ms": 1309.118352040648,
+    "services": {
+      "api": {
+        "cpu": 0.6335997591727186,
+        "cpu_throttled_s": 0.053980999999999835,
+        "memory": 0.301666259765625,
+        "replicas_reporting": 4,
+        "rps": 2969.3485623389115,
+        "error_rate": 0,
+        "p99_ms": 4919.411940632377,
+        "mean_ms": 1302.3566417926168,
+        "inflight": 488,
+        "inflight_mean": 462.6
+      },
+      "db": {
+        "cpu": 0.9992589794134744,
+        "cpu_throttled_s": 49.0288435101138,
+        "memory": 0.48818206787109375,
+        "replicas_reporting": 1,
+        "connections": 98,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5361729964034992,
+        "cpu_throttled_s": 0.01718133903726826,
+        "memory": 0.271728515625,
+        "replicas_reporting": 1,
+        "rps": 2981.246199083328,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 392,
+        "wait_ms": 117.56525460410322,
+        "held_ms": 25.889249826264887
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2964.47004360313,
+        "error_rate": 0,
+        "p99_ms": 4343.282472471603,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3261.763725924522,
+        "error_rate": 0,
+        "p99_ms": 389.4751517543202,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2981.246199083328,
+        "error_rate": 0,
+        "p99_ms": 4919.411940632377,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.4277761010074528,
+    "proxy_cpu": 0.45073476107843363,
+    "load_generator_throttled_periods": 0.11969463139943157,
+    "proxy_throttled_periods": 0.01999996903573966
+  },
+  {
+    "index": 38,
+    "start_s": 380,
+    "offered_rps": 5000,
+    "rps": 2835.510290905656,
+    "completed_rps": 2835.510290905656,
+    "dropped": 21552.70687101467,
+    "error_rate": 0,
+    "p50_ms": 843.1450497159018,
+    "p95_ms": 4535.34219677482,
+    "p99_ms": 4726.577371050833,
+    "mean_ms": 1360.1803410715406,
+    "services": {
+      "api": {
+        "cpu": 0.6113476805408994,
+        "cpu_throttled_s": 0.013576550449933222,
+        "memory": 0.30504608154296875,
+        "replicas_reporting": 4,
+        "rps": 2835.8767510480384,
+        "error_rate": 0,
+        "p99_ms": 4918.697390557099,
+        "mean_ms": 1362.801064559886,
+        "inflight": 485,
+        "inflight_mean": 470.3
+      },
+      "db": {
+        "cpu": 1.0011266016560967,
+        "cpu_throttled_s": 49.509502536739205,
+        "memory": 0.48772430419921875,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5345281661557664,
+        "cpu_throttled_s": 0.0055076609627318085,
+        "memory": 0.262664794921875,
+        "replicas_reporting": 1,
+        "rps": 2825.4469014883043,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 95,
+        "max": 96,
+        "pending": 411,
+        "wait_ms": 123.04768612796707,
+        "held_ms": 27.353196730340105
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2835.510290905656,
+        "error_rate": 0,
+        "p99_ms": 4726.577371050833,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3125.716540588624,
+        "error_rate": 0,
+        "p99_ms": 401.33737002264803,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2825.4469014883043,
+        "error_rate": 0,
+        "p99_ms": 4918.697390557099,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.40724455246382263,
+    "proxy_cpu": 0.434254127256105,
+    "load_generator_throttled_periods": 0.06962060599832566,
+    "proxy_throttled_periods": 0
+  },
+  {
+    "index": 39,
+    "start_s": 390,
+    "offered_rps": 5000,
+    "rps": 2921.3888268863884,
+    "completed_rps": 2921.3888268863884,
+    "dropped": 20741.616126679408,
+    "error_rate": 0,
+    "p50_ms": 232.7091756676398,
+    "p95_ms": 4665.3276430270225,
+    "p99_ms": 4755.5754912082175,
+    "mean_ms": 1369.6663880441488,
+    "services": {
+      "api": {
+        "cpu": 0.6255512478187456,
+        "cpu_throttled_s": 0.10439444955006699,
+        "memory": 0.3024749755859375,
+        "replicas_reporting": 4,
+        "rps": 2924.925402069092,
+        "error_rate": 0,
+        "p99_ms": 4919.31423911184,
+        "mean_ms": 1352.9637385582873,
+        "inflight": 479,
+        "inflight_mean": 463.3
+      },
+      "db": {
+        "cpu": 0.9995861713494889,
+        "cpu_throttled_s": 47.34931987400546,
+        "memory": 0.4877738952636719,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5325037025924303,
+        "cpu_throttled_s": 0,
+        "memory": 0.2648773193359375,
+        "replicas_reporting": 1,
+        "rps": 2929.133399248123,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 94,
+        "max": 96,
+        "pending": 392,
+        "wait_ms": 119.18590649393356,
+        "held_ms": 26.264203991813357
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2921.3888268863884,
+        "error_rate": 0,
+        "p99_ms": 4755.5754912082175,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3223.854301977158,
+        "error_rate": 0,
+        "p99_ms": 390.02082792489654,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2929.133399248123,
+        "error_rate": 0,
+        "p99_ms": 4919.31423911184,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.4062926411888914,
+    "proxy_cpu": 0.43722127152260554,
+    "load_generator_throttled_periods": 0.0800282375869062,
+    "proxy_throttled_periods": 0.0023496338251993622
+  },
+  {
+    "index": 40,
+    "start_s": 400,
+    "offered_rps": 5000,
+    "rps": 2943.6732318655095,
+    "completed_rps": 2943.6732318655095,
+    "dropped": 20592.24352365348,
+    "error_rate": 0,
+    "p50_ms": 266.9701998747358,
+    "p95_ms": 4470.279672529766,
+    "p99_ms": 4699.518702514661,
+    "mean_ms": 1327.2450006695992,
+    "services": {
+      "api": {
+        "cpu": 0.624629120393938,
+        "cpu_throttled_s": 0.03407099999999996,
+        "memory": 0.30577850341796875,
+        "replicas_reporting": 4,
+        "rps": 2941.395562317617,
+        "error_rate": 0,
+        "p99_ms": 4919.68921629745,
+        "mean_ms": 1315.3058683918225,
+        "inflight": 478,
+        "inflight_mean": 469.4
+      },
+      "db": {
+        "cpu": 1.0003566842023077,
+        "cpu_throttled_s": 48.00694942372047,
+        "memory": 0.4882659912109375,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5245076020583411,
+        "cpu_throttled_s": 0,
+        "memory": 0.26318359375,
+        "replicas_reporting": 1,
+        "rps": 2951.378802204132,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 95,
+        "max": 96,
+        "pending": 403,
+        "wait_ms": 118.60423718308604,
+        "held_ms": 26.275188979047147
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2943.6732318655095,
+        "error_rate": 0,
+        "p99_ms": 4699.518702514661,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3226.040095605237,
+        "error_rate": 0,
+        "p99_ms": 392.4272196842575,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2951.378802204132,
+        "error_rate": 0,
+        "p99_ms": 4919.68921629745,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.3960362402587274,
+    "proxy_cpu": 0.4465718353199037,
+    "load_generator_throttled_periods": 0.07560215360351519,
+    "proxy_throttled_periods": 0.007657426719406915
+  },
+  {
+    "index": 41,
+    "start_s": 410,
+    "offered_rps": 5000,
+    "rps": 2853.880748839547,
+    "completed_rps": 2853.880748839547,
+    "dropped": 21448.876000901335,
+    "error_rate": 0,
+    "p50_ms": 657.8776002617885,
+    "p95_ms": 4648.358790032213,
+    "p99_ms": 4751.440986612436,
+    "mean_ms": 1398.8975732711137,
+    "services": {
+      "api": {
+        "cpu": 0.6189276405942632,
+        "cpu_throttled_s": 0.51438920703492,
+        "memory": 0.31482696533203125,
+        "replicas_reporting": 4,
+        "rps": 2861.9803350422308,
+        "error_rate": 0,
+        "p99_ms": 4921.035392697367,
+        "mean_ms": 1389.0631382643148,
+        "inflight": 504,
+        "inflight_mean": 479.9
+      },
+      "db": {
+        "cpu": 0.9941492115663493,
+        "cpu_throttled_s": 47.82299640680867,
+        "memory": 0.49053192138671875,
+        "replicas_reporting": 1,
+        "connections": 97,
+        "max_connections": 100
+      },
+      "lb": {
+        "cpu": 0.5334854718949827,
+        "cpu_throttled_s": 0,
+        "memory": 0.26800537109375,
+        "replicas_reporting": 1,
+        "rps": 2866.568099284172,
+        "error_rate": 0,
+        "healthy_replicas": 4
+      }
+    },
+    "pools": [
+      {
+        "service": "api",
+        "target": "db",
+        "in_use": 96,
+        "max": 96,
+        "pending": 410,
+        "wait_ms": 122.5324020154476,
+        "held_ms": 27.235838267591504
+      }
+    ],
+    "edges": [
+      {
+        "from": "load",
+        "to": "lb",
+        "rps": 2853.880748839547,
+        "error_rate": 0,
+        "p99_ms": 4751.440986612436,
+        "p99_source": "k6_http_req_duration_seconds (k6 histogram, end to end)"
+      },
+      {
+        "from": "api",
+        "to": "db",
+        "rps": 3155.755501542704,
+        "error_rate": 0,
+        "p99_ms": 388.4340560735044,
+        "p99_source": "loadlore_call_duration_seconds (the caller's histogram, pool wait included)"
+      },
+      {
+        "from": "lb",
+        "to": "api",
+        "rps": 2866.568099284172,
+        "error_rate": 0,
+        "p99_ms": 4921.035392697367,
+        "p99_source": "loadlore_request_duration_seconds (the service's own histogram)"
+      }
+    ],
+    "load_generator_cpu": 0.4291215941126647,
+    "proxy_cpu": 0.4434492067977601,
+    "load_generator_throttled_periods": 0.1002287638241969,
+    "proxy_throttled_periods": 0
+  }
+]
