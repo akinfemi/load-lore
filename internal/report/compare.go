@@ -214,7 +214,33 @@ func caveats(a, b *analysis.Analysis) []string {
 			out = append(out, fmt.Sprintf("Run %s is inconclusive: %s.", x.RunID, x.Verdict.Inconclusive[0]))
 		}
 	}
+	if c := earlyStopCaveat(a, b); c != "" {
+		out = append(out, c)
+	}
 	return out
+}
+
+// earlyStopCaveat warns when one run stopped its load after a break and
+// the other went further: a design that broke on latency alone can serve
+// more after its break, so the stopped run's most served may be lower than
+// a full run would show, and the difference look bigger.
+func earlyStopCaveat(a, b *analysis.Analysis) string {
+	var stopped []string
+	for _, x := range []struct {
+		name string
+		a    *analysis.Analysis
+	}{{"A", a}, {"B", b}} {
+		if es := x.a.StoppedEarly; es != nil {
+			stopped = append(stopped, fmt.Sprintf("%s stopped its load at %s", x.name, analysis.Clock(es.At)))
+		}
+	}
+	switch {
+	case len(stopped) == 0:
+		return ""
+	case len(stopped) == 2 && a.StoppedEarly.At == b.StoppedEarly.At:
+		return "Both runs stopped their load early, at " + analysis.Clock(a.StoppedEarly.At) + ", after their breaks."
+	}
+	return strings.Join(stopped, " and ") + " after its break, so the runs cover different parts of the profile. A design can serve more after a latency break, so a stopped run's most served may be lower than a full run would show and the difference may look bigger than it is. Run them with `loadl run --full` to compare peaks."
 }
 
 func compareCharts(d *doc, a, b *analysis.Analysis) {

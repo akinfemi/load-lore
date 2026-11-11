@@ -149,6 +149,27 @@ func TestCompare(t *testing.T) {
 
 // Two runs that broke at the same time lead with how they differed, and
 // hosts that differ only by a VM's memory drift aren't called different.
+// A run that stopped its load early is flagged next to one that ran on:
+// its most served may be cut short.
+func TestCompareFlagsEarlyStop(t *testing.T) {
+	a, err := analysis.Analyze(analysistest.WriteRun(t, poolWorld(), 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := analysis.Analyze(analysistest.WriteRun(t, analysistest.Healthy(), 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md := Compare(a, b); strings.Contains(md, "stopped its load") {
+		t.Error("flagged two full runs")
+	}
+	a.StoppedEarly = &analysis.EarlyStop{BreakAt: 40, ConfirmedAt: 50, At: 110}
+	want := "A stopped its load at 1:50 after its break, so the runs cover different parts of the profile."
+	if md := Compare(a, b); !strings.Contains(md, want) || !strings.Contains(md, "loadl run --full") {
+		t.Errorf("comparison lacks %q", want)
+	}
+}
+
 func TestCompareTieAndHosts(t *testing.T) {
 	a, err := analysis.Analyze(analysistest.WriteRun(t, poolWorld(), 1))
 	if err != nil {
