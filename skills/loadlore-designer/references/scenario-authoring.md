@@ -89,7 +89,7 @@ predict:
     expect: 'note: "{answer} gives out first"'
 ```
 
-Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Breaking points move with core speed, so state the claims as relative results (broke or held, which rule fired, the gain from a fix), never as request rates. Rule ids are `pool-exhausted`, `queueing-knee` and `connection-storm` in this version. Break signals are `latency`, `errors` and `throughput`; a claim with `signals` needs `verdict: broke`.
+Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Breaking points move with core speed, so state the claims as relative results (broke or held, which rule fired, the gain from a fix), never as request rates. Rule ids are `pool-exhausted`, `queueing-knee`, `connection-storm`, `retry-storm`, `cold-cache`, `working-set` and `hot-rows` in this version. Break signals are `latency`, `errors` and `throughput`; a claim with `signals` needs `verdict: broke`.
 
 ## Solutions
 

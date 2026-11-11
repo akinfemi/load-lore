@@ -87,6 +87,26 @@ type World struct {
 
 	// Expect, when set, replaces Design's expect lines.
 	Expect []string
+
+	// RetryMax, when set, gives api retries on its calls to db, and the
+	// run its request, call and retry counters: CallsPerRequest attempts
+	// per request served (nil: 1), RetryShare of them retries and
+	// CallErrors of them failed (nil: none).
+	RetryMax                                int
+	CallsPerRequest, RetryShare, CallErrors func(t float64) float64
+
+	// CacheHit, when set, puts a redis named cache in front of db (api
+	// reads db on a miss) with this hit rate, and writes its hits and
+	// misses and api's calls to both.
+	CacheHit func(t float64) float64
+
+	// BufferHit, when set, is db's share of block reads from
+	// shared_buffers, with BlockReads blocks a second read from outside.
+	BufferHit, BlockReads func(t float64) float64
+
+	// ReadMs and WriteMs, when set (and HeldS isn't), are api's time per
+	// read and per write call to db; a tenth of requests write.
+	ReadMs, WriteMs func(t float64) float64
 }
 
 // Event is an events.jsonl line at At seconds into the load.
@@ -128,6 +148,15 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 		for _, l := range w.Expect {
 			src += "  - " + l + "\n"
 		}
+	}
+	if w.CacheHit != nil {
+		src = strings.Replace(src, "behavior: { calls: [ { target: db, op: read } ] }",
+			"behavior: { calls: [ { target: cache, op: get, on_miss: [ { target: db, op: read } ] } ] }", 1)
+		src = strings.Replace(src, "workload:\n", "  cache:\n    kind: redis\n    resources: { cpu: 0.5 }\nworkload:\n", 1)
+	}
+	if w.RetryMax > 0 {
+		src = strings.Replace(src, "behavior: { calls: [ { target: db, op: read } ] }",
+			fmt.Sprintf("behavior: { calls: [ { target: db, op: read } ], resilience: { retries: { max: %d } } }", w.RetryMax), 1)
 	}
 	d, diags := design.Load([]byte(src))
 	if diags.HasErrors() {
@@ -200,6 +229,33 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 		callSum = newC(counters, "loadlore_call_duration_seconds_sum", map[string]string{"service": "api", "target": "db", "op": "read"})
 		callCnt = newC(counters, "loadlore_call_duration_seconds_count", map[string]string{"service": "api", "target": "db", "op": "read"})
 	}
+	var reqOK, reqBad, callsOK, callsBad, retries *counter
+	if w.RetryMax > 0 {
+		reqOK = newC(counters, "loadlore_requests_total", map[string]string{"service": "api", "type": "read", "code": "200"})
+		reqBad = newC(counters, "loadlore_requests_total", map[string]string{"service": "api", "type": "read", "code": "503"})
+		callsOK = newC(counters, "loadlore_calls_total", map[string]string{"service": "api", "target": "db", "op": "read", "outcome": "ok"})
+		callsBad = newC(counters, "loadlore_calls_total", map[string]string{"service": "api", "target": "db", "op": "read", "outcome": "error"})
+		retries = newC(counters, "loadlore_call_retries_total", map[string]string{"service": "api", "target": "db", "op": "read"})
+	}
+	var rSum, rCnt, wSum, wCnt *counter
+	if w.ReadMs != nil && w.HeldS == nil {
+		rSum = newC(counters, "loadlore_call_duration_seconds_sum", map[string]string{"service": "api", "target": "db", "op": "read"})
+		rCnt = newC(counters, "loadlore_call_duration_seconds_count", map[string]string{"service": "api", "target": "db", "op": "read"})
+		wSum = newC(counters, "loadlore_call_duration_seconds_sum", map[string]string{"service": "api", "target": "db", "op": "write"})
+		wCnt = newC(counters, "loadlore_call_duration_seconds_count", map[string]string{"service": "api", "target": "db", "op": "write"})
+	}
+	var blksHit, blksRead *counter
+	if w.BufferHit != nil {
+		blksHit = newC(counters, "pg_stat_database_blks_hit", map[string]string{"service": "db", "datname": plan.DBName})
+		blksRead = newC(counters, "pg_stat_database_blks_read", map[string]string{"service": "db", "datname": plan.DBName})
+	}
+	var hits, misses, cacheCalls, dbCalls *counter
+	if w.CacheHit != nil {
+		hits = newC(counters, "redis_keyspace_hits_total", map[string]string{"service": "cache"})
+		misses = newC(counters, "redis_keyspace_misses_total", map[string]string{"service": "cache"})
+		cacheCalls = newC(counters, "loadlore_calls_total", map[string]string{"service": "api", "target": "cache", "op": "get", "outcome": "ok"})
+		dbCalls = newC(counters, "loadlore_calls_total", map[string]string{"service": "api", "target": "db", "op": "read", "outcome": "ok"})
+	}
 	var reqErrs, callErrs *counter
 	if w.FailCause != "" {
 		reqErrs = newC(counters, "loadlore_request_errors_total", map[string]string{"service": "api", "cause": w.FailCause})
@@ -241,6 +297,40 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			if reqErrs != nil {
 				add(reqErrs, bad)
 				add(callErrs, bad)
+			}
+			if rSum != nil {
+				add(rSum, ok*w.ReadMs(el)/1000)
+				add(rCnt, ok)
+				add(wSum, 0.1*ok*w.WriteMs(el)/1000)
+				add(wCnt, 0.1*ok)
+			}
+			if blksHit != nil {
+				r := w.BlockReads(el)
+				h := w.BufferHit(el)
+				add(blksRead, r)
+				add(blksHit, r*h/(1-h))
+			}
+			if hits != nil {
+				h := w.CacheHit(el)
+				add(hits, ok*h)
+				add(misses, ok*(1-h))
+				add(cacheCalls, ok)
+				add(dbCalls, ok*(1-h))
+			}
+			if reqOK != nil {
+				f := func(g func(float64) float64, def float64) float64 {
+					if g == nil {
+						return def
+					}
+					return g(el)
+				}
+				attempts := ok * f(w.CallsPerRequest, 1)
+				failed := attempts * f(w.CallErrors, 0)
+				add(reqOK, ok-bad)
+				add(reqBad, bad)
+				add(callsOK, attempts-failed)
+				add(callsBad, failed)
+				add(retries, attempts*f(w.RetryShare, 0))
 			}
 			add(drops, w.Dropped(el)*offered)
 			add(apiCPU, w.APICPU(el)*p.Service("api").CPU)
@@ -300,6 +390,11 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			if reqErrs != nil {
 				add(reqErrs, 0)
 				add(callErrs, 0)
+			}
+			for _, c := range []*counter{reqOK, reqBad, callsOK, callsBad, retries, hits, misses, cacheCalls, dbCalls, blksHit, blksRead, rSum, rCnt, wSum, wCnt} {
+				if c != nil {
+					add(c, 0)
+				}
 			}
 			set(inUse, 0)
 			set(pending, 0)

@@ -373,6 +373,154 @@ func TestRunMetricPredictions(t *testing.T) {
 	}
 }
 
+// From 1:00 half of api's calls to db fail and it retries them: 2.5
+// attempts per request instead of 1, 60% of them retries.
+func retryWorld() analysistest.World {
+	w := analysistest.Healthy()
+	w.RetryMax = 3
+	after := func(v, before float64) func(float64) float64 {
+		return func(t float64) float64 {
+			if t > 60 {
+				return v
+			}
+			return before
+		}
+	}
+	w.CallsPerRequest, w.RetryShare, w.CallErrors = after(2.5, 1), after(0.6, 0), after(0.5, 0)
+	return w
+}
+
+func TestRetryStorm(t *testing.T) {
+	a := analyze(t, analysistest.WriteRun(t, retryWorld(), 1))
+	i := slices.IndexFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "retry-storm" })
+	if i < 0 {
+		t.Fatalf("no retry storm: %+v", a.Diagnoses)
+	}
+	d := a.Diagnoses[i]
+	if d.Title != "Retry storm (api → db)" || d.From != 60 || !strings.Contains(d.Summary, "api sent 2.5 calls to db for each request it handled, against 1.0 at low load: 60% of them were retries") {
+		t.Errorf("diagnosis %+v", d)
+	}
+	if !strings.Contains(d.Next, "Today api retries a failed call up to 3 times, with no wait between tries.") {
+		t.Errorf("next %q", d.Next)
+	}
+
+	// Retries that don't multiply the calls, or a target that's fine: no storm.
+	for name, w := range map[string]analysistest.World{
+		"few retries": func() analysistest.World {
+			w := retryWorld()
+			w.CallsPerRequest = func(float64) float64 { return 1.1 }
+			w.RetryShare = func(float64) float64 { return 0.1 }
+			return w
+		}(),
+		"target fine": func() analysistest.World {
+			w := retryWorld()
+			w.CallErrors = nil
+			return w
+		}(),
+	} {
+		a := analyze(t, analysistest.WriteRun(t, w, 1))
+		if slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "retry-storm" }) {
+			t.Errorf("%s: a retry storm fired", name)
+		}
+	}
+}
+
+// A cache at 90% hits restarts at 1:00: hits fall to 20% and db reads go
+// from 10% of requests to 80%, then the cache warms back up.
+func TestColdCache(t *testing.T) {
+	w := analysistest.Healthy()
+	w.CacheHit = func(t float64) float64 {
+		switch {
+		case t > 60 && t <= 70:
+			return 0.2
+		case t > 70 && t <= 80:
+			return 0.6
+		}
+		return 0.9
+	}
+	w.Events = []analysistest.Event{{At: 60, Kind: "fault_start", Fields: map[string]any{"inject": "restart", "target": "cache", "detail": "restart cache"}}}
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	i := slices.IndexFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "cold-cache" })
+	if i < 0 {
+		t.Fatalf("no cold cache: %+v", a.Diagnoses)
+	}
+	d := a.Diagnoses[i]
+	if d.Title != "Cold cache (cache, api → db)" || d.From != 60 || !strings.Contains(d.Summary, "cache's hit rate fell to 20% from 90%") {
+		t.Errorf("diagnosis %+v", d)
+	}
+	if !slices.ContainsFunc(d.Evidence, func(e Evidence) bool { return strings.Contains(e.Text, "restart cache at 1:00") }) {
+		t.Errorf("evidence %+v", d.Evidence)
+	}
+
+	// A steady cache: nothing to say.
+	w.CacheHit = func(float64) float64 { return 0.9 }
+	w.Events = nil
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "cold-cache" }) {
+		t.Error("a steady cache went cold")
+	}
+}
+
+// From 1:00 db answers only 70% of block reads from shared_buffers, and
+// p99 climbs: the working set has outgrown its memory.
+func TestWorkingSet(t *testing.T) {
+	w := analysistest.Healthy()
+	w.BufferHit = func(t float64) float64 {
+		if t > 60 {
+			return 0.7
+		}
+		return 0.99
+	}
+	w.BlockReads = func(t float64) float64 { return 50 + 10*t }
+	w.P99 = func(t float64) float64 {
+		if t > 60 {
+			return 0.08
+		}
+		return 0.005
+	}
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	i := slices.IndexFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "working-set" })
+	if i < 0 {
+		t.Fatalf("no working-set diagnosis: %+v", a.Diagnoses)
+	}
+	if d := a.Diagnoses[i]; d.From != 60 || !strings.Contains(d.Summary, "db answered only 70% of its block reads from shared_buffers") {
+		t.Errorf("diagnosis %+v", d)
+	}
+	// A high hit rate: no diagnosis, however slow.
+	w.BufferHit = func(float64) float64 { return 0.99 }
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "working-set" }) {
+		t.Error("fired at a 99% hit rate")
+	}
+}
+
+// From 1:00 writes take 20 ms while reads stay at 1 ms and db has CPU to
+// spare: writes queue on row locks.
+func TestHotRows(t *testing.T) {
+	w := analysistest.Healthy()
+	w.ReadMs = func(float64) float64 { return 1 }
+	w.WriteMs = func(t float64) float64 {
+		if t > 60 {
+			return 20
+		}
+		return 2
+	}
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	i := slices.IndexFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "hot-rows" })
+	if i < 0 {
+		t.Fatalf("no hot rows: %+v", a.Diagnoses)
+	}
+	if d := a.Diagnoses[i]; d.From != 60 || !strings.Contains(d.Summary, "api's writes to db took 20 ms each, 10.0x their 2.0 ms at low load, while its reads stayed at 1.0 ms") {
+		t.Errorf("diagnosis %+v", d)
+	}
+	// Reads slow too: that's the database, not row locks.
+	w.ReadMs = w.WriteMs
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "hot-rows" }) {
+		t.Error("fired when reads slowed as much as writes")
+	}
+}
+
 func TestExpectRangesAndScaling(t *testing.T) {
 	w := analysistest.Healthy()
 	w.P99 = func(t float64) float64 { return 0.005 + 0.1*boolF(t > 60) } // 105 ms after 60 s

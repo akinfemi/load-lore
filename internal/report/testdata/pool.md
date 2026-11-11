@@ -124,7 +124,7 @@ Evidence:
 
 **Try next:** Add PgBouncer, or resize the pools across replicas: 1 replica × 10 connections = 10.
 
-<sub>Rules version 5. Rules are deterministic and offline; their thresholds are listed below.</sub>
+<sub>Rules version 6. Rules are deterministic and offline; their thresholds are listed below.</sub>
 
 ## Predictions
 
@@ -174,6 +174,10 @@ The design lists no assumptions.
 - **Connection pool exhausted:** for two windows in a row, a pool at 95% or more of its size with callers waiting, while the target wasn't busy (busy: its CPU at 80% or more, or its time per call with a connection at least 3x the low-load value and 1 ms above it; CPU throttling alone doesn't count) and the caller's CPU stayed below 90%.
 - **Queueing knee:** for 3 windows in a row, p99 at least 3x the low-load p99 and 10 ms above it, with a CPU or pool at 70% or more. When that is a pool whose target was busy in any of those windows, or a service's CPU whose requests spent 50% or more of their time in calls to a busy target, the knee is the target's.
 - **Connection storm:** up to the break, a service's pools to a Postgres opening at least 50% of their combined size, and 10 or more connections, in one window, while p99 in that window or the next was at least 10x the low-load p99 and 10 ms above it. New connections are counted by loadlore_pool_connect_seconds (new connections the pools opened, and how long each took), or for runs from before it, from the rise in open connections.
+- **Retry storm:** for two windows in a row, a caller that retries sending 1.5x or more of its low-load calls per request to a target, with retries 20% or more of them, while the target failed 1.0% or more of its calls or its p99 was 3x its low-load value.
+- **Cold cache:** a cache's hit rate falling to 50% of its level before or lower while its callers' reads of the database behind it reach 2x their rate before.
+- **Working set doesn't fit:** for two windows in a row, a Postgres answering less than 90% of block reads from shared_buffers and reading 100 blocks a second or more from outside them, while p99 was 3x the low-load p99 or more.
+- **Hot rows:** for two windows in a row, a caller's writes to a Postgres taking 3x their low-load time or more (and 2 ms more) while its reads stayed within 1.5x of theirs and the database's CPU was below 80%.
 
 ## Environment
 

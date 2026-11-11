@@ -31,7 +31,7 @@ type Evidence struct {
 
 // RuleIDs are the diagnosis rules this version runs, by the id a
 // Diagnosis carries in Rule.
-var RuleIDs = []string{"pool-exhausted", "queueing-knee", "connection-storm"}
+var RuleIDs = []string{"pool-exhausted", "queueing-knee", "connection-storm", "retry-storm", "cold-cache", "working-set", "hot-rows"}
 
 // Rule thresholds. Rules are deterministic and versioned with the code.
 const (
@@ -60,13 +60,17 @@ const (
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
-const RuleVersion = "5"
+const RuleVersion = "6"
 
 func diagnose(a *Analysis) []*Diagnosis {
 	out := []*Diagnosis{}
 	exhausted := poolExhausted(a)
 	out = append(out, exhausted...)
 	out = append(out, connectionStorm(a)...)
+	out = append(out, retryStorm(a)...)
+	out = append(out, coldCache(a)...)
+	out = append(out, workingSet(a)...)
+	out = append(out, hotRows(a)...)
 	// A knee named after a pool whose target kept up is pool-exhausted's
 	// case; when that rule fired for the pool, the knee would only repeat it.
 	if d := queueingKnee(a); d != nil && (d.pool == "" || !slices.ContainsFunc(exhausted, func(x *Diagnosis) bool { return x.pool == d.pool })) {

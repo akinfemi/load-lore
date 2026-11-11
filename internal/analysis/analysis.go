@@ -134,6 +134,11 @@ type ServiceWindow struct {
 	Connections    *float64 `json:"connections,omitempty"`
 	MaxConnections *float64 `json:"max_connections,omitempty"`
 
+	// Postgres: the share of block reads shared_buffers answered, and the
+	// blocks per second it read from outside them (the OS cache or disk).
+	BufferHitRate *float64 `json:"buffer_hit_rate,omitempty"`
+	BlockReads    *float64 `json:"block_reads,omitempty"`
+
 	// Redis.
 	HitRate   *float64 `json:"hit_rate,omitempty"`
 	Evictions *float64 `json:"evictions,omitempty"`
@@ -181,6 +186,11 @@ type EdgeWindow struct {
 	P99Source string   `json:"p99_source,omitempty"`
 	// ErrorCauses counts failed call attempts by cause, retries included.
 	ErrorCauses map[string]float64 `json:"error_causes,omitempty"`
+	// Retries is retried call attempts per second (included in RPS).
+	Retries *float64 `json:"retries,omitempty"`
+	// OpMeanMs is the mean time per call by op (read, write, get, ...),
+	// pool wait included.
+	OpMeanMs map[string]float64 `json:"op_mean_ms,omitempty"`
 }
 
 // Assumptions are the design's own and the ones Loadlore made for the run.
@@ -636,6 +646,13 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 		if mx, _, ok := st.gaugeSum("pg_settings_max_connections", svc, wa, wb); ok {
 			sw.MaxConnections = num(mx, true)
 		}
+		lab := and(svc, eq("datname", plan.DBName))
+		read, ok1 := st.increase("pg_stat_database_blks_read", lab, wa, wb)
+		hit, ok2 := st.increase("pg_stat_database_blks_hit", lab, wa, wb)
+		if ok1 && ok2 {
+			sw.BlockReads = num(read/(wb-wa), true)
+			sw.BufferHitRate = num(hit/(hit+read), hit+read > 0)
+		}
 	case "pgbouncer":
 		db := and(svc, eq("database", plan.DBName))
 		active, _, ok1 := st.gaugeSum("pgbouncer_pools_client_active_connections", db, wa, wb)
@@ -691,6 +708,19 @@ func (b *builder) appEdges(w *Window, s *plan.Service, wa, wb float64) {
 		e.P99 = ms(quantile(st.classicBuckets("loadlore_call_duration_seconds", m, wa, wb), 0.99))
 		if c := st.increaseBy("loadlore_call_errors_total", m, "cause", wa, wb); len(c) > 0 {
 			e.ErrorCauses = c
+		}
+		if n, ok := st.increase("loadlore_call_retries_total", m, wa, wb); ok {
+			e.Retries = num(n/(wb-wa), true)
+		}
+		sums := st.increaseBy("loadlore_call_duration_seconds_sum", m, "op", wa, wb)
+		cnts := st.increaseBy("loadlore_call_duration_seconds_count", m, "op", wa, wb)
+		for op, c := range cnts {
+			if c > 0 {
+				if e.OpMeanMs == nil {
+					e.OpMeanMs = map[string]float64{}
+				}
+				e.OpMeanMs[op] = sums[op] / c * 1000
+			}
 		}
 		w.Edges = append(w.Edges, e)
 
