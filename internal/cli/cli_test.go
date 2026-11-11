@@ -3,12 +3,14 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/akinfemi/load-lore/internal/analysis/analysistest"
+	"github.com/akinfemi/load-lore/internal/scenario"
 )
 
 // runCLI runs loadl with args and returns stdout, stderr and the exit code.
@@ -279,13 +281,57 @@ func TestScenarioCheckStatic(t *testing.T) {
 	// A library name works too, from the built-in copy.
 	out, _, code = runCLI(t, "scenario", "check", "single-postgres-breaking-point", "--static", "--json")
 	var res struct {
-		OK bool `json:"ok"`
+		OK     bool   `json:"ok"`
+		Status string `json:"status"`
 	}
-	if code != exitOK || json.Unmarshal([]byte(out), &res) != nil || !res.OK {
+	if code != exitOK || json.Unmarshal([]byte(out), &res) != nil || !res.OK || res.Status != scenario.StatusOK {
 		t.Errorf("by name: code %d\n%s", code, out)
 	}
 	_, stderr, code := runCLI(t, "scenario", "check", "no-such-scenario", "--static")
 	if code != exitUsage || !strings.Contains(stderr, `no scenario "no-such-scenario"`) {
 		t.Errorf("unknown: %d %s", code, stderr)
+	}
+}
+
+// A check whose solution is still too far from the starting design in host
+// speed after a re-run ends INCONCLUSIVE and exits like a failed one.
+func TestPrintCheckInconclusive(t *testing.T) {
+	r := &scenario.CheckResult{
+		Scenario: "demo", Lint: []scenario.Problem{}, Status: scenario.StatusInconclusive,
+		Problem: &scenario.RunCheck{Name: "problem", RunDir: "/runs/demo-2", Status: scenario.StatusOK, OK: true,
+			Claims:   []scenario.ClaimResult{{Claim: "verdict broke", OK: true, Detail: "broke at 1:10"}},
+			Replaced: []scenario.Rerun{{RunDir: "/runs/demo-1", SpeedIndex: 874, Against: "bigger", AgainstSpeed: 1012, NewSpeed: 990}}},
+		Solutions: []*scenario.RunCheck{{Name: "bigger", RunDir: "/runs/bigger-1", Status: scenario.StatusInconclusive,
+			Claims:       []scenario.ClaimResult{{Claim: "helps", OK: true, Detail: "held through the profile"}},
+			Inconclusive: "the host's speed index was 1200, against 990 in the starting design's run"}},
+	}
+	var b bytes.Buffer
+	printCheck(&b, r, false)
+	out := b.String()
+	for _, want := range []string{
+		"  starting design (run demo-2)\n    re-ran the starting design: speed index 874 against 1012 for solution bigger; now 990 (replaces run demo-1)\n",
+		"    inconclusive: the host's speed index was 1200, against 990",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	if !strings.HasSuffix(out, "\nINCONCLUSIVE\n") {
+		t.Errorf("last line:\n%s", out)
+	}
+	var ee *exitError
+	if err := checkExit(r); !errors.As(err, &ee) || ee.code != exitFailure {
+		t.Errorf("exit: %v", err)
+	}
+
+	r.Status = scenario.StatusFailed
+	b.Reset()
+	printCheck(&b, r, false)
+	if !strings.HasSuffix(b.String(), "\nFAILED\n") {
+		t.Errorf("failed:\n%s", b.String())
+	}
+	r.Status, r.OK = scenario.StatusOK, true
+	if err := checkExit(r); err != nil {
+		t.Errorf("ok exit: %v", err)
 	}
 }

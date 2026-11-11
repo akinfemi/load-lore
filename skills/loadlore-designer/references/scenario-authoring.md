@@ -78,7 +78,7 @@ At least one. Each is a folder with a full `design.yaml` (named `<scenario>-<sol
 ## Checks before handing over
 
 1. `loadl scenario check <folder> --static` passes: every file is there, every design validates, the README's diagram matches, and the claims name real solutions and rules.
-2. `loadl scenario check <folder>` passes on a quiet host at `--scale 1`: the starting design shows the problem and each solution helps. Small scales may not reproduce it: a fraction of a CPU stalls under throttling and fails in its own way.
+2. `loadl scenario check <folder>` passes on a quiet host at `--scale 1`: the starting design shows the problem and each solution helps. Small scales may not reproduce it: a fraction of a CPU stalls under throttling and fails in its own way. When a solution's run and the starting design's measure host speed indexes more than 10% apart, the slower one runs again once the host has cooled; still apart, the check ends `INCONCLUSIVE` rather than passing or failing, since the host's speed could explain the difference. Let the machine cool, check it's on mains power, and run the check again.
 3. The README contains no answer; reread it as a learner.
 4. Every assumption in the designs is listed and plausible.
 

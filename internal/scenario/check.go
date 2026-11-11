@@ -12,14 +12,26 @@ import (
 )
 
 // RunFunc runs one design and returns its run folder. A run that started
-// but failed returns its folder along with the error.
-type RunFunc func(ctx context.Context, designPath string) (runDir string, err error)
+// but failed returns its folder along with the error. coolTo is a host
+// speed index to wait for first, as runner.Options.CoolTo; 0 starts at once.
+type RunFunc func(ctx context.Context, designPath string, coolTo int) (runDir string, err error)
+
+// Check statuses. A check is inconclusive when no claim failed but a
+// solution's run and the starting design's were still more than
+// bench.Tolerance apart in host speed index after a re-run: the host's
+// speed, not the design, could explain the difference.
+const (
+	StatusOK           = "ok"
+	StatusFailed       = "failed"
+	StatusInconclusive = "inconclusive"
+)
 
 // CheckResult is the outcome of `loadl scenario check`.
 type CheckResult struct {
 	Scenario  string      `json:"scenario"`
 	Path      string      `json:"path"`
-	OK        bool        `json:"ok"`
+	OK        bool        `json:"ok"`     // Status is ok
+	Status    string      `json:"status"` // ok, failed or inconclusive
 	Lint      []Problem   `json:"lint"`
 	Problem   *RunCheck   `json:"problem,omitempty"`
 	Solutions []*RunCheck `json:"solutions"`
@@ -27,21 +39,36 @@ type CheckResult struct {
 
 // RunCheck is one design's run and its claims.
 type RunCheck struct {
-	Name      string        `json:"name"` // "problem" or the solution's name
-	Design    string        `json:"design"`
-	RunDir    string        `json:"run_dir,omitempty"`
-	Error     string        `json:"error,omitempty"`
-	Verdict   string        `json:"verdict,omitempty"`
-	Summary   string        `json:"summary,omitempty"`
-	BreakAt   *float64      `json:"break_at_s,omitempty"`
-	BreakLoad *float64      `json:"break_offered_rps,omitempty"`
-	PeakRPS   *float64      `json:"peak_rps,omitempty"` // most successful responses/s in any window
-	Diagnoses []string      `json:"diagnoses"`
-	Claims    []ClaimResult `json:"claims"`
-	OK        bool          `json:"ok"`
+	Name         string        `json:"name"` // "problem" or the solution's name
+	Design       string        `json:"design"`
+	RunDir       string        `json:"run_dir,omitempty"`
+	Error        string        `json:"error,omitempty"`
+	Verdict      string        `json:"verdict,omitempty"`
+	Summary      string        `json:"summary,omitempty"`
+	BreakAt      *float64      `json:"break_at_s,omitempty"`
+	BreakLoad    *float64      `json:"break_offered_rps,omitempty"`
+	PeakRPS      *float64      `json:"peak_rps,omitempty"` // most successful responses/s in any window
+	Diagnoses    []string      `json:"diagnoses"`
+	Claims       []ClaimResult `json:"claims"`
+	OK           bool          `json:"ok"`                     // Status is ok
+	Status       string        `json:"status"`                 // ok, failed or inconclusive
+	Inconclusive string        `json:"inconclusive,omitempty"` // why, when Status is inconclusive
 
-	SpeedIndex int      `json:"speed_index,omitempty"` // the host speed index this run measured
-	Warnings   []string `json:"warnings"`              // reasons to read the claims with care
+	SpeedIndex int     `json:"speed_index,omitempty"` // the host speed index this run measured
+	Replaced   []Rerun `json:"replaced"`              // earlier runs of this design that a re-run replaced
+
+	rerun bool // this solution's one re-run, its own or the starting design's, is spent
+}
+
+// Rerun is a run replaced by a re-run of the same design: its host speed
+// index was more than bench.Tolerance from the run it was judged with, and
+// it was the slower of the two.
+type Rerun struct {
+	RunDir       string `json:"run_dir"`             // the replaced run
+	SpeedIndex   int    `json:"speed_index"`         // its host speed index
+	Against      string `json:"against"`             // the run it was judged with: "problem" or a solution's name
+	AgainstSpeed int    `json:"against_speed_index"` // that run's speed index, which the re-run waited for
+	NewSpeed     int    `json:"new_speed_index"`     // the re-run's speed index, 0 when it measured none
 }
 
 // ClaimResult is one claim and whether the run showed it.
@@ -59,35 +86,94 @@ func Check(ctx context.Context, s *Scenario, dir string, run RunFunc) *CheckResu
 		res.Lint = []Problem{}
 	}
 	res.OK = !HasErrors(res.Lint)
+	res.Status = StatusFailed
+	if res.OK {
+		res.Status = StatusOK
+	}
 	if run == nil || !res.OK {
 		return res
 	}
-	res.Problem = runOne(ctx, run, "problem", filepath.Join(dir, DesignFile))
-	problemClaims(res.Problem, s.Meta.Check.Problem)
+	res.Problem = runOne(ctx, run, "problem", filepath.Join(dir, DesignFile), 0)
 	for _, name := range s.Solutions {
 		if ctx.Err() != nil {
 			break
 		}
-		rc := runOne(ctx, run, name, filepath.Join(dir, filepath.FromSlash(SolutionDesign(name))))
-		solutionClaims(rc, s.Meta.Check.Solutions[name], res.Problem)
+		// Each solution waits for the host to cool back to the starting
+		// design's speed, so it isn't judged on a hotter machine.
+		rc := runOne(ctx, run, name, filepath.Join(dir, filepath.FromSlash(SolutionDesign(name))), res.Problem.SpeedIndex)
 		res.Solutions = append(res.Solutions, rc)
+		rerunSlower(ctx, run, res)
 	}
-	res.OK = res.Problem.OK && len(res.Solutions) == len(s.Solutions)
+
+	// The claims are judged once the runs are in, so every solution is
+	// judged against the starting design's last run.
+	problemClaims(res.Problem, s.Meta.Check.Problem)
+	failed := !res.Problem.OK || len(res.Solutions) != len(s.Solutions)
+	inconclusive := false
 	for _, rc := range res.Solutions {
-		res.OK = res.OK && rc.OK
+		solutionClaims(rc, s.Meta.Check.Solutions[rc.Name], res.Problem)
+		failed = failed || rc.Status == StatusFailed
+		inconclusive = inconclusive || rc.Status == StatusInconclusive
 	}
+	switch {
+	case failed:
+		res.Status = StatusFailed
+	case inconclusive:
+		res.Status = StatusInconclusive
+	}
+	res.OK = res.Status == StatusOK
 	return res
 }
 
-func runOne(ctx context.Context, run RunFunc, name, designPath string) *RunCheck {
-	rc := &RunCheck{Name: name, Design: designPath, Diagnoses: []string{}, Claims: []ClaimResult{}, Warnings: []string{}}
-	dir, err := run(ctx, designPath)
+// rerunSlower re-runs the slower of the starting design's run and a
+// solution's when their host speed indexes are more than bench.Tolerance
+// apart, after waiting for the host to get back to the faster one's speed.
+// Each solution gets one re-run, its own or the starting design's. A new
+// run of the starting design replaces the old one for every solution, so
+// the solutions before it are compared with it again.
+func rerunSlower(ctx context.Context, run RunFunc, res *CheckResult) {
+	for ctx.Err() == nil {
+		i := slices.IndexFunc(res.Solutions, func(rc *RunCheck) bool { return !rc.rerun && apart(res.Problem, rc) })
+		if i < 0 {
+			return
+		}
+		sol := res.Solutions[i]
+		sol.rerun = true
+		if sol.SpeedIndex < res.Problem.SpeedIndex {
+			res.Solutions[i] = rerun(ctx, run, sol, res.Problem)
+		} else {
+			res.Problem = rerun(ctx, run, res.Problem, sol)
+		}
+	}
+}
+
+// rerun runs rc's design again once the host is back to other's speed and
+// returns the new run, which records the one it replaces.
+func rerun(ctx context.Context, run RunFunc, rc, other *RunCheck) *RunCheck {
+	n := runOne(ctx, run, rc.Name, rc.Design, other.SpeedIndex)
+	n.rerun = rc.rerun
+	n.Replaced = slices.Concat(rc.Replaced, []Rerun{{RunDir: rc.RunDir, SpeedIndex: rc.SpeedIndex, Against: other.Name, AgainstSpeed: other.SpeedIndex, NewSpeed: n.SpeedIndex}})
+	return n
+}
+
+// apart reports whether two runs' host speed indexes are more than
+// bench.Tolerance apart. A run that measured none can't be compared.
+func apart(a, b *RunCheck) bool {
+	return a != nil && a.SpeedIndex > 0 && b.SpeedIndex > 0 && bench.Gap(a.SpeedIndex, b.SpeedIndex) > bench.Tolerance
+}
+
+// analyze reads a run folder; tests stand in for it.
+var analyze = analysis.Analyze
+
+func runOne(ctx context.Context, run RunFunc, name, designPath string, coolTo int) *RunCheck {
+	rc := &RunCheck{Name: name, Design: designPath, Diagnoses: []string{}, Claims: []ClaimResult{}, Replaced: []Rerun{}}
+	dir, err := run(ctx, designPath, coolTo)
 	rc.RunDir = dir
 	if err != nil {
 		rc.Error = err.Error()
 		return rc
 	}
-	a, err := analysis.Analyze(dir)
+	a, err := analyze(dir)
 	if err != nil {
 		rc.Error = err.Error()
 		return rc
@@ -138,6 +224,16 @@ func problemClaims(rc *RunCheck, c Claim) {
 
 func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck) {
 	defer rc.settle()
+	// Still apart after a re-run, the two runs can't be compared: whatever
+	// the claims say, the host's speed could be the difference.
+	if apart(problem, rc) {
+		after := ""
+		if rc.rerun {
+			after = " even after a re-run"
+		}
+		rc.Inconclusive = fmt.Sprintf("the host's speed index was %d, against %d in the starting design's run, %s apart, more than %s%s: the host's speed, not the design, could explain the difference",
+			rc.SpeedIndex, problem.SpeedIndex, analysis.Pct(bench.Gap(problem.SpeedIndex, rc.SpeedIndex)), analysis.Pct(bench.Tolerance), after)
+	}
 	if !rc.usable() {
 		return
 	}
@@ -145,11 +241,6 @@ func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck) {
 		rc.claim("verdict "+c.Verdict, rc.Verdict == c.Verdict, rc.Summary)
 	}
 	rc.diagnosisClaims(c)
-
-	if problem != nil && problem.SpeedIndex > 0 && rc.SpeedIndex > 0 && bench.Gap(problem.SpeedIndex, rc.SpeedIndex) > bench.Tolerance {
-		rc.Warnings = append(rc.Warnings, fmt.Sprintf("the host's speed index was %d, against %d in the starting design's run, %s apart, more than %s: part of any difference may be the host's speed, not the design",
-			rc.SpeedIndex, problem.SpeedIndex, analysis.Pct(bench.Gap(problem.SpeedIndex, rc.SpeedIndex)), analysis.Pct(bench.Tolerance)))
-	}
 
 	gain := DefaultMinGain
 	if c.MinGain != nil {
@@ -183,6 +274,16 @@ func (rc *RunCheck) diagnosisClaims(c Claim) {
 	}
 }
 
+// settle sets the run's status: inconclusive when its claims can't be
+// judged, else ok when every claim held.
 func (rc *RunCheck) settle() {
-	rc.OK = len(rc.Claims) > 0 && !slices.ContainsFunc(rc.Claims, func(c ClaimResult) bool { return !c.OK })
+	switch {
+	case rc.Inconclusive != "":
+		rc.Status = StatusInconclusive
+	case len(rc.Claims) > 0 && !slices.ContainsFunc(rc.Claims, func(c ClaimResult) bool { return !c.OK }):
+		rc.Status = StatusOK
+	default:
+		rc.Status = StatusFailed
+	}
+	rc.OK = rc.Status == StatusOK
 }

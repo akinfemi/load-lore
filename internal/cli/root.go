@@ -16,7 +16,7 @@ import (
 // Exit codes. Scripts and the AI skill rely on these.
 const (
 	exitOK      = 0
-	exitFailure = 1 // the command ran and the answer is "no" (invalid design, failed check)
+	exitFailure = 1 // the command ran and the answer is "no" (invalid design, failed or inconclusive check)
 	exitUsage   = 2 // bad flags or arguments, or an unexpected error
 )
 

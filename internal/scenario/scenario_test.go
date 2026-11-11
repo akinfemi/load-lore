@@ -179,7 +179,7 @@ func TestCheck(t *testing.T) {
 	brokeW.P99 = func(t float64) float64 { return 0.005 + 2*boolF(t > 70) }
 	broke := analysistest.WriteRun(t, brokeW, 1)
 	runs := map[string]string{}
-	run := func(_ context.Context, p string) (string, error) {
+	run := func(_ context.Context, p string, _ int) (string, error) {
 		if d, ok := runs[filepath.Base(filepath.Dir(p))]; ok {
 			if d == "" {
 				return "", errors.New("docker isn't reachable")
@@ -193,7 +193,7 @@ func TestCheck(t *testing.T) {
 	// problem's diagnosis claim fails; the solution held, so it helps.
 	runs["demo"], runs["bigger"] = broke, healthy
 	res := Check(context.Background(), s, dir, run)
-	if res.OK || res.Problem.Verdict != "broke" || res.Problem.OK {
+	if res.OK || res.Status != StatusFailed || res.Problem.Verdict != "broke" || res.Problem.OK || res.Problem.Status != StatusFailed {
 		t.Errorf("problem: %+v", res.Problem)
 	}
 	if c := res.Problem.Claims; len(c) != 2 || !c[0].OK || c[1].OK || c[1].Detail != "fired: none" {

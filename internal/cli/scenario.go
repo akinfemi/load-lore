@@ -274,10 +274,16 @@ solution run in turn and must show what meta.yaml's check block claims.
 A solution helps when it holds, or its peak throughput (the most successful
 responses per second in any window) is at least min_gain times the starting
 design's (default 1.2). --static skips the runs. Runs are
-stored like any other, so each has its report. Runs after the first wait
-for the host speed index to get back near the first run's, since a machine
-slows as it heats up, and a solution whose run was more than 10% faster or
-slower than the starting design's gets a warning.`,
+stored like any other, so each has its report.
+
+A machine slows as it heats up, so each solution's run waits for the host
+speed index to get back near the starting design's run's. When the two
+are still more than 10% apart, the slower design runs once more, after
+waiting for the faster one's speed; a new run of the starting design
+replaces the old one for every solution. A solution still more than 10%
+apart after that is inconclusive, since the host's speed, not the design,
+could explain the difference: the check ends INCONCLUSIVE, not FAILED, if
+no claim failed, and exits 1 either way.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := scenario.Find(args[0])
@@ -301,19 +307,15 @@ slower than the starting design's gets a warning.`,
 			}
 			var run scenario.RunFunc
 			if !static {
-				// Later runs wait for the host to cool back to the first
-				// run's speed, so a solution isn't judged on a hotter machine.
-				coolTo := 0
-				run = func(ctx context.Context, designPath string) (string, error) {
+				// The check says which speed index to cool back to: the
+				// starting design's, or the faster run's for a re-run.
+				run = func(ctx context.Context, designPath string, coolTo int) (string, error) {
 					rel, _ := filepath.Rel(dir, designPath)
 					fmt.Fprintf(progress, "\n== %s: %s\n", s.Name, rel)
 					res, err := runner.Run(ctx, runner.Options{DesignPath: designPath, Scale: scale, Seed: seed, SyntheticImage: image, Progress: progress, CoolTo: coolTo},
 						func(ctx context.Context) (driver.Driver, error) { return local.New(ctx) })
 					if res == nil {
 						return "", err
-					}
-					if coolTo == 0 && res.Host != nil && res.Host.Speed != nil {
-						coolTo = res.Host.Speed.Index
 					}
 					return res.Dir, err
 				}
@@ -326,10 +328,7 @@ slower than the starting design's gets a warning.`,
 			} else {
 				printCheck(cmd.OutOrStdout(), res, static)
 			}
-			if !res.OK {
-				return &exitError{code: exitFailure}
-			}
-			return nil
+			return checkExit(res)
 		},
 	}
 	cmd.Flags().Float64Var(&scale, "scale", 0, "run every design at this scale, such as 0.25 (default: each design's modes.local.scale, else 1)")
@@ -360,6 +359,20 @@ func printCheck(w io.Writer, r *scenario.CheckResult, static bool) {
 			fmt.Fprintf(w, " (run %s)", filepath.Base(rc.RunDir))
 		}
 		fmt.Fprintln(w)
+		for _, x := range rc.Replaced {
+			what, against := "the starting design", "the starting design"
+			if rc.Name != "problem" {
+				what = "this solution"
+			}
+			if x.Against != "problem" {
+				against = "solution " + x.Against
+			}
+			now := fmt.Sprintf("now %d", x.NewSpeed)
+			if x.NewSpeed == 0 {
+				now = "the re-run measured none"
+			}
+			fmt.Fprintf(w, "    re-ran %s: speed index %d against %d for %s; %s (replaces run %s)\n", what, x.SpeedIndex, x.AgainstSpeed, against, now, filepath.Base(x.RunDir))
+		}
 		for _, c := range rc.Claims {
 			mark := "ok  "
 			if !c.OK {
@@ -367,11 +380,13 @@ func printCheck(w io.Writer, r *scenario.CheckResult, static bool) {
 			}
 			fmt.Fprintf(w, "    %s %s: %s\n", mark, c.Claim, c.Detail)
 		}
-		for _, x := range rc.Warnings {
-			fmt.Fprintf(w, "    warning: %s\n", x)
+		if rc.Inconclusive != "" {
+			fmt.Fprintf(w, "    inconclusive: %s\n", rc.Inconclusive)
 		}
 	}
 	switch {
+	case r.Status == scenario.StatusInconclusive:
+		fmt.Fprintln(w, "INCONCLUSIVE")
 	case !r.OK:
 		fmt.Fprintln(w, "FAILED")
 	case static:
@@ -379,4 +394,13 @@ func printCheck(w io.Writer, r *scenario.CheckResult, static bool) {
 	default:
 		fmt.Fprintln(w, "ok")
 	}
+}
+
+// checkExit is the check's exit status. An inconclusive check exits like a
+// failed one: it didn't confirm the claims.
+func checkExit(r *scenario.CheckResult) error {
+	if !r.OK {
+		return &exitError{code: exitFailure}
+	}
+	return nil
 }
