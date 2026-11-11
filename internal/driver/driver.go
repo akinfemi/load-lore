@@ -115,11 +115,29 @@ type LoadResult struct {
 	FailedShare       float64 `json:"failed_share"`
 }
 
-// Sample is a progress snapshot. Nil fields mean no data yet.
+// Sample is a progress snapshot of the last 10 seconds. Nil fields mean
+// no data yet.
 type Sample struct {
 	Offered float64            `json:"offered"`
 	Served  *float64           `json:"served"`
+	P50Ms   *float64           `json:"p50_ms,omitempty"`
+	P95Ms   *float64           `json:"p95_ms,omitempty"`
 	P99Ms   *float64           `json:"p99_ms"`
 	Errors  *float64           `json:"errors"`
-	CPU     map[string]float64 `json:"cpu"` // service -> utilization of its limit (0–1)
+	CPU     map[string]float64 `json:"cpu"`              // service -> utilization of its limit (0–1)
+	Memory  map[string]float64 `json:"memory,omitempty"` // service -> worst replica's working set / its limit (0–1)
+	// Pools are callers' connection pools, keyed "service>target".
+	Pools map[string]PoolSample `json:"pools,omitempty"`
+	// Connections are Postgres connections open, and MaxConnections its
+	// max_connections, by service.
+	Connections    map[string]float64 `json:"connections,omitempty"`
+	MaxConnections map[string]float64 `json:"max_connections,omitempty"`
+	HitRate        map[string]float64 `json:"hit_rate,omitempty"` // Redis, by service
+}
+
+// PoolSample is one caller's pool to one target, summed over replicas.
+type PoolSample struct {
+	InUse   float64 `json:"in_use"`
+	Max     float64 `json:"max"`
+	Pending float64 `json:"pending"` // callers waiting for a connection
 }

@@ -48,9 +48,17 @@ Use this when the user points at their own repo and asks to "test my app" or "se
 
 Follow `references/scenario-authoring.md`. In short: a folder with `README.md` (the story, the question and the diagram), `design.yaml` (the starting point, named after the folder), `hints.md` (one `## ` section per hint, never the answer in hint 1), `meta.yaml` (including the `check` claims), at least one folder in `solutions/`, and a folder in `variants/` for a fix the hints lead to whose failure is part of the lesson. Run `loadl scenario check <folder> --static` while writing, and the full `loadl scenario check <folder>` before handing it over.
 
-### F. A learner working through a library scenario
+### F. A learner working through a library scenario, in chat
 
-`loadl scenarios --json` lists them. The learner runs the scenario's `design.yaml`; `loadl hint` reveals the next hint for it. Ground rule 4 applies with extra force: don't reveal hints or the `solutions/` and `variants/` folders ahead of `loadl hint`, unless the learner asks you to.
+The learner can do a whole scenario with you, without opening a file. Ground rule 4 applies with extra force: don't reveal hints, `solutions/` or `variants/` ahead of `loadl hint`, unless the learner asks you to.
+
+1. **Pick it.** `loadl scenarios --json` lists them. Tell the story from the scenario's README (the story and the question), in a few sentences. Not the hints.
+2. **Check the machine once.** `loadl doctor --json`. Relay each failed check with its fix; sum up warnings in one line. Stop at a failure: runs won't start.
+3. **Predictions.** `loadl predict <design> --json` lists the questions. Ask the learner each one in plain words and take their answers as they give them; never suggest an answer, and don't hint at what's likely. Loads are requests per second or "never"; a component is one of the `choices`. Then write them: `loadl predict <design> --answer 1=<a> --answer 2=<b> ... --json`. Every question needs an answer.
+4. **Run it.** `loadl run <design> --detach --json` returns the `run_id` at once. Tell the learner roughly how long it takes (the profile, plus about 2 minutes to start and finish; it stops 60 s after a break), and that `loadl watch <run_id>` in their own terminal shows the live dashboard.
+5. **Follow it.** Poll `loadl status <run_id> --json` about every 30 seconds. Don't narrate each poll: say when the load starts, and when `break_confirmed_at_s` appears ("the run saw a break at 1:40; the load stops at 3:00"). If `alive` is false, the run lost its process: say so, and suggest `loadl down`.
+6. **Explain it.** Once `phase` is `finished`, follow workflow E with `loadl report <run_id> --json`. Score their predictions first, then what happened and why, from the report's diagnosis and evidence. Don't name the fix: ask what they'd change, and offer `loadl hint` if they're stuck.
+7. **Try again.** When the learner proposes a change, make it (workflow C), ask for a new prediction with `loadl predict`, run, then `loadl compare <first-run> <new-run>` and explain the difference. If compare says one run stopped early, peaks may not compare: offer a rerun with `--full`.
 
 ### E. After a run
 
@@ -93,6 +101,7 @@ Then offer the command to run it: `loadl run design.yaml` (local mode).
 | `loadl doctor --json` | Before a first run, or when runs fail to start or drift: Docker, capacity per scenario, image, host speed and power, each with its fix |
 | `loadl run <file> [--mode local]` | Running, when the user asks. `--scale` shrinks it for small hosts; `--seed` makes the workload repeatable; `--reuse-data` skips the fresh dataset copy (the report then says the data drifted); `--repeat N` runs it N times and reports the spread, so a small difference between designs can be told from noise; the load stops 60 s after a confirmed break, and `--full` runs the whole profile |
 | `loadl run <file> --detach --json` then `loadl status <run-id> --json` | Running from an agent: `--detach` returns the run id at once; poll `status` (about every 30 s) for the phase, the last 10 s of numbers and a confirmed break, until `phase` is `finished` |
+| `loadl watch <run-id>` | Not for the agent: tell the learner to run it in their own terminal to see the live dashboard while a detached run goes on |
 | `loadl report <run-id> --json` | Explaining a run: verdict, diagnoses with evidence, scored predictions, per-window numbers. `latest` names the newest run |
 | `loadl compare <run-a> <run-b>` | Before and after a design change, side by side |
 | `loadl profile <service>` | Measuring a real service to replace guessed numbers |

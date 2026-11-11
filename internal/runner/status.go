@@ -51,6 +51,13 @@ type Status struct {
 	Updated time.Time `json:"updated"`
 }
 
+// ProgressLine is one line of progress.jsonl: a sample and when in the
+// load it was taken.
+type ProgressLine struct {
+	ElapsedS float64        `json:"elapsed_s"`
+	Sample   *driver.Sample `json:"sample"`
+}
+
 // statusFile keeps status.json up to date. A nil one does nothing.
 type statusFile struct {
 	mu  sync.Mutex

@@ -17,6 +17,7 @@ loadl diagram examples/single-postgres.yaml    # Mermaid; --ascii for the termin
 loadl schema --json                            # JSON Schema of the design file
 loadl run examples/smoke.yaml                  # run on local Docker; results in .loadlore/runs/<run-id>/
 loadl status                                   # where the latest run is, or its verdict; pairs with run --detach
+loadl watch                                    # the live dashboard for a run in progress
 loadl report latest                            # rewrite a run's report.md; --print shows it as text with small charts, --json gives the analysis
 loadl compare <run-a> <run-b>                  # two runs side by side, with the design diff
 loadl scenarios                                # the scenario library
@@ -34,6 +35,8 @@ Every command accepts `--json`.
 A run folder holds the exact `design.yaml`, the generated `compose.yaml` and `load.js`, `plan.json` (resources after scaling, and why), `events.jsonl` (load, faults, container deaths), `metrics/` (every series, exported from Prometheus before teardown), `logs/`, `containers.json`, `k6-summary.json`, `run.json`, and the `report.md` and `analysis.json` that `loadl run` writes at the end. Reports are made from the folder alone, so `loadl report` can regenerate them at any time.
 
 Scenarios are guided experiments in [`scenarios/`](scenarios/): a starting design, a story, a question to predict, hints and worked solutions. Start with [When do you need to scale your database?](scenarios/when-to-scale-your-database/), then [The connection pool trap](scenarios/connection-pool-trap/).
+
+In a terminal, `loadl run` shows a live dashboard: the topology colored by saturation, load, latency and errors over the profile with faults and the break marked, and each component's numbers. Ctrl-C on it stops the run, with teardown; `--watch=false` gives plain progress lines.
 
 A run stops its load 60 s after it sees the design break, by the same rule as the report's verdict, so a broken design costs minutes less; `--full` runs the whole profile.
 

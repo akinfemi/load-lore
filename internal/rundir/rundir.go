@@ -5,6 +5,7 @@ package rundir
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -93,6 +94,26 @@ func (d *Dir) WriteJSON(name string, v any) error {
 		return err
 	}
 	return d.Write(name, append(b, '\n'))
+}
+
+// ProgressFile holds a run's progress samples, one JSON line each, for
+// the live dashboard.
+const ProgressFile = "progress.jsonl"
+
+// AppendJSON appends v as one JSON line to a file in the run folder.
+func (d *Dir) AppendJSON(name string, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	f, err := os.OpenFile(d.File(name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(b, '\n'))
+	return errors.Join(err, f.Close())
 }
 
 // Event is one line of events.jsonl.

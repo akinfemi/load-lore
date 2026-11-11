@@ -456,7 +456,44 @@ func (d *Driver) Sample(ctx context.Context, elapsed time.Duration) (*driver.Sam
 	if err == nil {
 		s.CPU = cpu
 	}
+	d.sampleMore(ctx, s)
 	return s, nil
+}
+
+// sampleMore adds what the live dashboard shows besides the progress
+// line: p50 and p95, memory, pools, Postgres connections and Redis hit
+// rates. A query that fails leaves its field empty.
+func (d *Driver) sampleMore(ctx context.Context, s *driver.Sample) {
+	for q, dst := range map[float64]**float64{0.5: &s.P50Ms, 0.95: &s.P95Ms} {
+		query := fmt.Sprintf(`histogram_quantile(%g, sum(rate(k6_http_req_duration_seconds[10s]))) * 1000`, q)
+		if v, ok, err := d.prom.scalar(ctx, query); err == nil && ok && !math.IsNaN(v) {
+			*dst = &v
+		}
+	}
+	vec := func(query, label string) map[string]float64 {
+		v, err := d.prom.vector(ctx, query, label)
+		if err != nil || len(v) == 0 {
+			return nil
+		}
+		return v
+	}
+	const roles = `role=~"app|datastore|pgbouncer|lb"`
+	s.Memory = vec(`max by (service) (container_memory_working_set_bytes{`+roles+`} / (container_spec_memory_limit_bytes{`+roles+`} > 0))`, "service")
+	edge := func(m string) string {
+		return `label_join(sum by (service, target) (` + m + `), "edge", ">", "service", "target")`
+	}
+	inUse := vec(edge(`loadlore_pool_connections{state="in_use"}`), "edge")
+	maxes := vec(edge(`loadlore_pool_max_connections`), "edge")
+	pending := vec(edge(`loadlore_pool_pending`), "edge")
+	for k, m := range maxes {
+		if s.Pools == nil {
+			s.Pools = map[string]driver.PoolSample{}
+		}
+		s.Pools[k] = driver.PoolSample{InUse: inUse[k], Max: m, Pending: pending[k]}
+	}
+	s.Connections = vec(`sum by (service) (pg_stat_activity_count)`, "service")
+	s.MaxConnections = vec(`max by (service) (pg_settings_max_connections)`, "service")
+	s.HitRate = vec(`sum by (service) (rate(redis_keyspace_hits_total[10s])) / (sum by (service) (rate(redis_keyspace_hits_total[10s])) + sum by (service) (rate(redis_keyspace_misses_total[10s])) > 0)`, "service")
 }
 
 // --- Collect ---

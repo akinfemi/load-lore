@@ -78,6 +78,7 @@ func newRootCmd() *cobra.Command {
 		newDoctorCmd(g),
 		newPredictCmd(g),
 		newStatusCmd(g),
+		newWatchCmd(g),
 		newVersionCmd(g),
 	)
 	return root

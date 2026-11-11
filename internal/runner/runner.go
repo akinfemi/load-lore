@@ -54,6 +54,9 @@ type Options struct {
 	// Full runs the whole profile. Otherwise the load stops
 	// EarlyStopAfter after the live check confirms a break.
 	Full bool
+	// OnDir, when set, is called with the run folder once it exists and
+	// has its status, as for a dashboard that follows the run.
+	OnDir func(dir string)
 }
 
 // A machine slows as it heats up, so runs in a series wait for the host to
@@ -189,6 +192,9 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 		return nil, err
 	}
 	st := newStatusFile(dir, Status{RunID: id, Design: d.Name, PID: os.Getpid(), Log: detachedLog(), Phase: PhasePreflight, Started: started.UTC(), ProfileS: p.Duration.Seconds()})
+	if opt.OnDir != nil {
+		opt.OnDir(dir.Path)
+	}
 	defer func() {
 		// A run that ends before its report (pre-flight failed, say) is
 		// finished too, with what went wrong.
@@ -505,6 +511,7 @@ func progressLines(ctx context.Context, t0 time.Time, drv driver.Driver, out io.
 		}
 		fmt.Fprintf(out, "[%s] %s\n", clock(elapsed), strings.Join(parts, " · "))
 		st.update(func(x *Status) { x.ElapsedS, x.Sample = elapsed.Seconds(), s })
+		_ = dir.AppendJSON(rundir.ProgressFile, ProgressLine{ElapsedS: elapsed.Seconds(), Sample: s})
 		if watch == nil || announced {
 			continue
 		}
