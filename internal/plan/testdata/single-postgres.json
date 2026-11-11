@@ -380,6 +380,11 @@
       "field": "services.api.pools.db.min",
       "value": "0",
       "why": "the default, as pgxpool's: each replica opens connections only when callers need them, so a pool fills as load rises, and a burst opens many at once"
+    },
+    {
+      "field": "services.api.pools.db.hold",
+      "value": "call",
+      "why": "the default, as pgxpool's: a request takes a connection for each call and hands it back straight away"
     }
   ]
 }

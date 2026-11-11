@@ -171,6 +171,7 @@ The design lists no assumptions.
 | workload.slo.p99_ms | 100 ms | set in the design; a break on p99 alone needs p99 at or above this as well as 10x the low-load p99 |
 | resources.cpu_period_ms | 100 ms for api, db | Docker's default. A container that uses its CPU share early in a period stalls until the next one, which can show up in p99 when a service has a fraction of a CPU |
 | services.api.pools.db.min | 0 | the default, as pgxpool's: each replica opens connections only when callers need them, so a pool fills as load rises, and a burst opens many at once |
+| services.api.pools.db.hold | call | the default, as pgxpool's: a request takes a connection for each call and hands it back straight away |
 
 ### How the run was planned
 

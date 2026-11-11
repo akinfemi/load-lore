@@ -193,6 +193,17 @@ func (v *validator) service(name string, s *Service) {
 		case t == nil || t.Kind != "postgres":
 			v.errorf(pathKey(p, "target"), CodeOpTarget, "pgbouncer's target must be a postgres service; %q isn't", s.Target)
 		}
+		for _, k := range sortedKeys(s.Config) {
+			kp := pathKey(pathKey(p, "config"), k)
+			if why, ok := pgbouncerOwnKeys[k]; ok {
+				v.errorf(kp, CodeNotApplicable, "%s can't be set in config: %s", k, why)
+			}
+			if k == "max_client_conn" {
+				if n, err := strconv.Atoi(s.Config[k].String()); err != nil || n < 1 {
+					v.errorf(kp, CodeInvalidValue, "max_client_conn must be a whole number of 1 or more, not %q", s.Config[k].String())
+				}
+			}
+		}
 	}
 	if ds := s.Dataset; ds != nil {
 		for i, col := range ds.Indexes {
@@ -320,6 +331,9 @@ func (v *validator) pools(name, p string, s *Service) {
 		if !ok {
 			v.unknownService(pp, t)
 			continue
+		}
+		if pool.Hold == "request" && ts.Kind != "postgres" && ts.Kind != "pgbouncer" {
+			v.errorf(pathKey(pp, "hold"), CodeNotApplicable, "hold: request only applies to postgres and pgbouncer targets; %s is %s", t, describeKind(ts))
 		}
 		if pool.Min != nil && *pool.Min > 0 {
 			switch {
@@ -896,4 +910,20 @@ func describeKind(s *Service) string {
 		return "a " + s.Kind
 	}
 	return "an application service"
+}
+
+// pgbouncerOwnKeys are pgbouncer.ini keys Loadlore sets itself, so the
+// stack can reach PgBouncer and read its metrics, or that have their own
+// field, which the report and the client follow.
+var pgbouncerOwnKeys = map[string]string{
+	"pool_mode":                 "use the pool_mode field",
+	"default_pool_size":         "use the default_pool_size field",
+	"listen_addr":               "Loadlore sets it so the other containers can reach PgBouncer",
+	"listen_port":               "Loadlore sets it so the other containers can reach PgBouncer",
+	"unix_socket_dir":           "Loadlore sets it; PgBouncer is reached over TCP",
+	"auth_type":                 "Loadlore sets it to match the run's database user",
+	"auth_file":                 "Loadlore sets it to match the run's database user",
+	"admin_users":               "Loadlore's exporter reads PgBouncer's statistics as this user",
+	"stats_users":               "Loadlore's exporter reads PgBouncer's statistics",
+	"ignore_startup_parameters": "Loadlore sets it so the exporter and clients can connect",
 }

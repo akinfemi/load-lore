@@ -12,6 +12,7 @@ const (
 	DefaultCPU             = 1.0
 	DefaultMemory          = Size(512 << 20)
 	DefaultPool            = 10
+	DefaultPoolHold        = "call"
 	DefaultCPUJitter       = 0.1
 	DefaultTimeoutMs       = 5000
 	DefaultBackoff         = "none"
@@ -185,6 +186,9 @@ func defaultApp(s *Service, services map[string]*Service) {
 			pool := s.Pools[c.Target]
 			setDefault(&pool.Size, DefaultPool)
 			setDefault(&pool.Min, 0)
+			if pool.Hold == "" {
+				pool.Hold = DefaultPoolHold
+			}
 			s.Pools[c.Target] = pool
 		}
 	})

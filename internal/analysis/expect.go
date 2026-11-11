@@ -55,7 +55,7 @@ type metricFn struct {
 	source string
 }
 
-func metricFor(m design.MetricRef) (metricFn, bool) {
+func metricFor(a *Analysis, m design.MetricRef) (metricFn, bool) {
 	if m.Service == "" {
 		switch m.Metric {
 		case "p50_ms":
@@ -93,7 +93,7 @@ func metricFor(m design.MetricRef) (metricFn, bool) {
 	case "inflight":
 		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.Inflight }), design.MetricCount, SrcInflight}, true
 	case "connections":
-		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.Connections }), design.MetricCount, SrcPGConns}, true
+		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.Connections }), design.MetricCount, connSource(a, m.Service)}, true
 	case "hit_rate":
 		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.HitRate }), design.MetricRatio, SrcHitRate}, true
 	}
@@ -127,7 +127,7 @@ func threshold(a *Analysis, kind design.MetricKind, q design.Quantity) (float64,
 func score(a *Analysis, e *design.Expectation, ws []*Window) ExpectResult {
 	pr := e.Prediction
 	r := ExpectResult{Text: e.Text, Metric: pr.Subject.String(), Status: ExpectUnscored}
-	m, ok := metricFor(pr.Subject)
+	m, ok := metricFor(a, pr.Subject)
 	if !ok {
 		r.Message = "this version of loadl can't measure " + r.Metric
 		return r
@@ -155,7 +155,7 @@ func score(a *Analysis, e *design.Expectation, ws []*Window) ExpectResult {
 		r.Range = "from " + Clock(after) + " to the end"
 	case design.Until:
 		c := pr.Qualifier.Cond
-		cm, ok := metricFor(c.Metric)
+		cm, ok := metricFor(a, c.Metric)
 		if !ok {
 			r.Message = "this version of loadl can't measure " + c.Metric.String()
 			return r

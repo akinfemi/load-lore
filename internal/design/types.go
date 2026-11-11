@@ -223,6 +223,7 @@ type LocalMode struct {
 // Pool is a service's connection pool to one target, per replica. A plain
 // number is its size.
 type Pool struct {
-	Size *int `yaml:"size,omitempty" json:"size,omitempty" jsonschema:"minimum=1,default=10" jsonschema_description:"Connections per replica."`
-	Min  *int `yaml:"min,omitempty" json:"min,omitempty" jsonschema:"minimum=0,default=0" jsonschema_description:"Connections each replica opens before the load starts and keeps open: a warm pool. postgres and pgbouncer targets only. Default 0: connections open only when callers need them, as pgxpool does by default."`
+	Size *int   `yaml:"size,omitempty" json:"size,omitempty" jsonschema:"minimum=1,default=10" jsonschema_description:"Connections per replica."`
+	Min  *int   `yaml:"min,omitempty" json:"min,omitempty" jsonschema:"minimum=0,default=0" jsonschema_description:"Connections each replica opens before the load starts and keeps open: a warm pool. postgres and pgbouncer targets only. Default 0: connections open only when callers need them, as pgxpool does by default."`
+	Hold string `yaml:"hold,omitempty" json:"hold,omitempty" jsonschema:"enum=call,enum=request,default=call" jsonschema_description:"How long a request keeps a connection: for each call (call), or from its first call to the target until it responds, slower calls in between included (request), as Rails and Django check out a connection per request. postgres and pgbouncer targets only."`
 }

@@ -57,7 +57,9 @@ func connectionStorm(a *Analysis) []*Diagnosis {
 	}
 	for _, p := range ws[0].Pools {
 		svc, target := p.Service, p.Target
-		if t := a.Plan.Service(target); t == nil || t.Kind != "postgres" {
+		// PgBouncer's own server connections aren't counted as they open,
+		// and a rise in them is usually slow transactions, not a burst.
+		if t, s := a.Plan.Service(target), a.Plan.Service(svc); t == nil || t.Kind != "postgres" || s == nil || s.Kind != "app" {
 			continue
 		}
 		storm := make([]bool, len(ws))
@@ -149,8 +151,9 @@ func stormDiagnosis(a *Analysis, svc, target string, first, last, episodes int) 
 		}
 		ev(SrcPoolConnect, "%s", t)
 	}
+	psrc := poolSources(a, svc)
 	if pw.Pending != nil && *pw.Pending >= 1 {
-		ev(SrcPoolPending, "up to %s requests waiting for a connection at %s", Count(*pw.Pending), Clock(w.Start))
+		ev(psrc.pending, "up to %s %s waiting for a connection at %s", Count(*pw.Pending), psrc.waiters, Clock(w.Start))
 	}
 	if c := cpuOf(w, target); c != nil {
 		ev(SrcCPU, "%s CPU at %s of its limit at %s", target, Pct(*c), Clock(w.Start))
@@ -159,7 +162,7 @@ func stormDiagnosis(a *Analysis, svc, target string, first, last, episodes int) 
 		d.Evidence = append(d.Evidence, e)
 	}
 	if b, ok := heldBaseline(a, svc, target); ok && pw.HeldMs != nil && *pw.HeldMs >= TargetSlowFactor*b {
-		ev(SrcPoolHeld, "%s's calls to %s took %s each once they had a connection at %s, against %s at low load", svc, target, Ms(*pw.HeldMs), Clock(w.Start), Ms(b))
+		ev(psrc.held, "%s's %ss to %s took %s each once they had a connection at %s, against %s at low load", svc, psrc.unit, target, Ms(*pw.HeldMs), Clock(w.Start), Ms(b))
 	}
 	if episodes > 1 {
 		ev(src, "%d bursts like it in the run; this is the first", episodes)

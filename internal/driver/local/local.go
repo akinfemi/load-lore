@@ -406,7 +406,7 @@ func (d *Driver) Sample(ctx context.Context, elapsed time.Duration) (*driver.Sam
 	if v, ok, err := d.prom.scalar(ctx, `histogram_quantile(0.99, sum(rate(k6_http_req_duration_seconds[10s]))) * 1000`); err == nil && ok && !math.IsNaN(v) {
 		s.P99Ms = &v
 	}
-	cpu, err := d.prom.vector(ctx, `sum by (service) (rate(container_cpu_usage_seconds_total{role=~"app|datastore"}[10s])) / sum by (service) (container_spec_cpu_quota{role=~"app|datastore"} / container_spec_cpu_period{role=~"app|datastore"})`, "service")
+	cpu, err := d.prom.vector(ctx, `sum by (service) (rate(container_cpu_usage_seconds_total{role=~"app|datastore|pgbouncer"}[10s])) / sum by (service) (container_spec_cpu_quota{role=~"app|datastore|pgbouncer"} / container_spec_cpu_period{role=~"app|datastore|pgbouncer"})`, "service")
 	if err == nil {
 		s.CPU = cpu
 	}

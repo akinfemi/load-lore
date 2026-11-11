@@ -159,6 +159,11 @@ type PoolWindow struct {
 	OpenEnd   *float64 `json:"open_end"`
 	Opened    *float64 `json:"opened,omitempty"`
 	ConnectMs *float64 `json:"connect_ms,omitempty"`
+	// HoldMs is the mean time a caller kept a connection, from acquiring
+	// it to releasing it: about HeldMs when it holds one for each call,
+	// and the request's time from its first call when it holds one per
+	// request.
+	HoldMs *float64 `json:"hold_ms,omitempty"`
 }
 
 // EdgeWindow is the traffic on one connection between components.
@@ -472,6 +477,8 @@ func (b *builder) window(i int) *Window {
 		switch {
 		case s.Kind == "app" && len(s.Synthetic) > 0:
 			b.appEdges(w, s, wa, wb)
+		case s.Kind == "pgbouncer":
+			b.pgbouncerPool(w, s, wa, wb)
 		case s.Kind == "lb":
 			sw := w.Services[s.Name]
 			target := w.Services[s.LB.Target]
@@ -537,7 +544,7 @@ func roleOf(kind string) string {
 	case "postgres", "redis":
 		return "datastore"
 	}
-	return kind // app, lb
+	return kind // app, lb, pgbouncer
 }
 
 // cpu is a set of containers' mean CPU use over the window as a fraction of
@@ -614,6 +621,19 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 		}
 		if mx, _, ok := st.gaugeSum("pg_settings_max_connections", svc, wa, wb); ok {
 			sw.MaxConnections = num(mx, true)
+		}
+	case "pgbouncer":
+		db := and(svc, eq("database", plan.DBName))
+		active, _, ok1 := st.gaugeSum("pgbouncer_pools_client_active_connections", db, wa, wb)
+		waiting, _, ok2 := st.gaugeSum("pgbouncer_pools_client_waiting_connections", db, wa, wb)
+		if ok1 && ok2 {
+			sw.Connections = num(active+waiting, true)
+		}
+		if mx, _, ok := st.gaugeSum("pgbouncer_config_max_client_connections", svc, wa, wb); ok {
+			sw.MaxConnections = num(mx, true)
+		}
+		if n, ok := st.increase("pgbouncer_stats_totals_sql_transactions_pooled_total", db, wa, wb); ok {
+			sw.RPS = num(n/(wb-wa), true)
 		}
 	case "redis":
 		hits, ok1 := st.increase("redis_keyspace_hits_total", svc, wa, wb)
@@ -699,9 +719,59 @@ func (b *builder) appEdges(w *Window, s *plan.Service, wa, wb float64) {
 			ccnt, ok4 := st.increase("loadlore_call_duration_seconds_count", m, wa, wb)
 			pw.HeldMs = num(math.Max(0, csum-sum)/ccnt*1000, ok3 && ok4 && ccnt > 0)
 		}
+		hsum, ok5 := st.increase("loadlore_pool_hold_seconds_sum", m, wa, wb)
+		hcnt, ok6 := st.increase("loadlore_pool_hold_seconds_count", m, wa, wb)
+		pw.HoldMs = num(hsum/hcnt*1000, ok5 && ok6 && hcnt > 0)
 		if pw.Max != nil {
 			w.Pools = append(w.Pools, pw)
 		}
+	}
+}
+
+// pgbouncerPool reads a PgBouncer's server connections to its Postgres as
+// a pool: in use against default_pool_size plus reserve_pool, clients
+// waiting for one, the mean wait per transaction and the time each held a
+// server connection. The transactions it forwards are its edge to the
+// Postgres.
+func (b *builder) pgbouncerPool(w *Window, s *plan.Service, wa, wb float64) {
+	st := b.st
+	svc := eq("service", s.Name)
+	db, dbName := and(svc, eq("database", plan.DBName)), and(svc, eq("name", plan.DBName))
+	target := s.PgBouncer.Target
+	e := &EdgeWindow{From: s.Name, To: target}
+	if sw := w.Services[s.Name]; sw != nil {
+		e.RPS = sw.RPS
+	}
+	w.Edges = append(w.Edges, e)
+
+	pw := &PoolWindow{Service: s.Name, Target: target}
+	if mx, _, ok := st.gaugeSum("pgbouncer_pools_server_active_connections", db, wa, wb); ok {
+		pw.InUse = num(mx, true)
+	}
+	if size, _, ok := st.gaugeSum("pgbouncer_databases_pool_size", dbName, wa, wb); ok {
+		reserve, _, _ := st.gaugeSum("pgbouncer_databases_reserve_pool", dbName, wa, wb)
+		pw.Max = num(size+reserve, true)
+	}
+	if mx, _, ok := st.gaugeSum("pgbouncer_pools_client_waiting_connections", db, wa, wb); ok {
+		pw.Pending = num(mx, true)
+	}
+	if open := st.gaugeGrid("pgbouncer_databases_current_connections", dbName, wa, wb); len(open) > 0 {
+		pw.Open, pw.OpenEnd = num(slices.Max(open), true), num(open[len(open)-1], true)
+	}
+	// PgBouncer is first scraped at about the load's start; in the first
+	// window its counters count from that scrape, not from zero.
+	inc := st.increase
+	if w.Index == 0 {
+		inc = st.increaseFromFirst
+	}
+	assigned, ok1 := inc("pgbouncer_stats_totals_server_assignments_total", db, wa, wb)
+	waited, ok2 := inc("pgbouncer_stats_totals_client_wait_seconds_total", db, wa, wb)
+	pw.WaitMs = num(waited/assigned*1000, ok1 && ok2 && assigned > 0)
+	txs, ok3 := inc("pgbouncer_stats_totals_sql_transactions_pooled_total", db, wa, wb)
+	inTx, ok4 := inc("pgbouncer_stats_totals_server_in_transaction_seconds_total", db, wa, wb)
+	pw.HeldMs = num(inTx/txs*1000, ok3 && ok4 && txs > 0)
+	if pw.Max != nil {
+		w.Pools = append(w.Pools, pw)
 	}
 }
 
@@ -724,6 +794,12 @@ const (
 	SrcPoolInUse        = `loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections`
 	SrcPoolPending      = "loadlore_pool_pending (callers waiting for a connection)"
 	SrcPoolWait         = "loadlore_pool_wait_seconds (time to get a connection)"
+	SrcPgbPool          = `pgbouncer_pools_server_active_connections against pgbouncer_databases_pool_size plus reserve_pool (PgBouncer's server connections)`
+	SrcPgbWaiting       = "pgbouncer_pools_client_waiting_connections (clients waiting in PgBouncer for a server connection)"
+	SrcPgbWait          = "pgbouncer_stats_totals_client_wait_seconds_total ÷ server_assignments_total (PgBouncer)"
+	SrcPgbHeld          = "pgbouncer_stats_totals_server_in_transaction_seconds_total ÷ sql_transactions_pooled_total (PgBouncer)"
+	SrcPgbClients       = "pgbouncer_pools_client_{active,waiting}_connections and pgbouncer_config_max_client_connections"
+	SrcPoolHold         = "loadlore_pool_hold_seconds (how long callers kept each connection)"
 	SrcPoolOpen         = "loadlore_pool_connections (in use and idle, summed over replicas)"
 	SrcPoolConnect      = "loadlore_pool_connect_seconds (new connections the pools opened, and how long each took)"
 	SrcPoolHeld         = "loadlore_call_duration_seconds minus loadlore_pool_wait_seconds, per call (time with a connection)"

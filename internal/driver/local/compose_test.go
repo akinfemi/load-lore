@@ -132,3 +132,47 @@ func TestCPUPeriod(t *testing.T) {
 		}
 	}
 }
+
+func TestPgBouncerCompose(t *testing.T) {
+	d, diags, err := design.LoadFile("../../../examples/pgbouncer.yaml")
+	if err != nil || diags.HasErrors() {
+		t.Fatal(err, diags)
+	}
+	p, err := plan.Build(d, plan.Options{RunID: "test-run", Seed: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildCompose(p, stackInput{Project: "loadlore-test-run", K6Script: []byte("// script\n"), DataVols: map[string]string{"db": "v"}, Synthetic: "loadlore/synthetic:dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cf composeFile
+	if err := yaml.Unmarshal(got, &cf); err != nil {
+		t.Fatal(err)
+	}
+	pgb := cf.Services["pgb"]
+	if pgb == nil || pgb.Entrypoint[0] != "/usr/bin/pgbouncer" || pgb.DependsOn["db"].Condition != "service_healthy" || pgb.Labels[LabelRole] != "pgbouncer" {
+		t.Fatalf("pgb service: %+v", pgb)
+	}
+	// It reaches db through its own proxy, so db's faults apply to it.
+	upstream := p.Service("pgb").PgBouncer.Upstream
+	ini := cf.Configs["pgbouncer-ini-pgb"].Content
+	for _, want := range []string{"[databases]\nlab = host=lore-toxiproxy port=" + strings.Split(upstream, ":")[1] + " dbname=lab\n",
+		"pool_mode = transaction\n", "default_pool_size = 20\n", "max_client_conn = 200\n", "admin_users = loadlore\n", "auth_type = scram-sha-256\n"} {
+		if !strings.Contains(ini, want) {
+			t.Errorf("pgbouncer.ini lacks %q:\n%s", want, ini)
+		}
+	}
+	if users := cf.Configs["pgbouncer-userlist-pgb"].Content; users != "\"loadlore\" \"loadlore\"\n" {
+		t.Errorf("userlist.txt %q", users)
+	}
+	if exp := cf.Services["lore-pgbexp-pgb"]; exp == nil || !strings.Contains(exp.Command[0], "@pgb:6432/pgbouncer") {
+		t.Errorf("exporter %+v", exp)
+	}
+	if !strings.Contains(cf.Configs["prometheus"].Content, `"lore-pgbexp-pgb:9127"`) {
+		t.Errorf("pgbouncer isn't scraped:\n%s", cf.Configs["prometheus"].Content)
+	}
+	if cf.Services["api-0"].DependsOn["pgb"].Condition != "service_healthy" {
+		t.Errorf("api starts before pgb: %+v", cf.Services["api-0"].DependsOn)
+	}
+}

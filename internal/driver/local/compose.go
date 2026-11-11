@@ -20,6 +20,7 @@ const (
 	ImageCAdvisor    = "ghcr.io/google/cadvisor:v0.60.6"
 	ImagePGExporter  = "quay.io/prometheuscommunity/postgres-exporter:v0.20.1"
 	ImageRedisExport = "oliver006/redis_exporter:v1.97.0"
+	ImagePgbExporter = "prometheuscommunity/pgbouncer-exporter:v0.12.1"
 	ImageK6          = "grafana/k6:2.3.0"
 	ImageAlpine      = "alpine:3.20"
 )
@@ -48,6 +49,7 @@ type composeFile struct {
 type composeService struct {
 	Image           string                   `yaml:"image"`
 	PullPolicy      string                   `yaml:"pull_policy,omitempty"`
+	Entrypoint      []string                 `yaml:"entrypoint,omitempty"`
 	Command         []string                 `yaml:"command,omitempty"`
 	Environment     map[string]string        `yaml:"environment,omitempty"`
 	CPUs            float64                  `yaml:"cpus,omitempty"`
@@ -191,6 +193,32 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 	}
 
 	for _, s := range p.Services {
+		if s.Kind != "pgbouncer" {
+			continue
+		}
+		c := base(s.Image, s.Name, "pgbouncer", -1, s.CPU, s.Memory)
+		setPeriod(c, s)
+		c.PullPolicy = "missing"
+		ini, users := "pgbouncer-ini-"+s.Name, "pgbouncer-userlist-"+s.Name
+		cf.Configs[ini] = &composeConfig{Content: pgbouncerConfig(s)}
+		cf.Configs[users] = &composeConfig{Content: fmt.Sprintf("%q %q\n", plan.DBUser, plan.DBPassword)}
+		c.Configs = []composeConfigRef{{Source: ini, Target: pgbouncerINI}, {Source: users, Target: pgbouncerUsers}}
+		// The image's entrypoint writes a config from environment variables
+		// when none is mounted; run PgBouncer on the generated one directly.
+		c.Entrypoint = []string{"/usr/bin/pgbouncer"}
+		c.Command = []string{pgbouncerINI}
+		c.Healthcheck = &composeHealth{Test: []string{"CMD", "pg_isready", "-h", "127.0.0.1", "-p", strconv.Itoa(plan.PgBouncerPort), "-U", plan.DBUser, "-d", plan.DBName}, Interval: "1s", Timeout: "3s", Retries: 60}
+		c.DependsOn = map[string]composeDepend{svcToxiproxy: {Condition: "service_started"}, s.PgBouncer.Target: {Condition: "service_healthy"}}
+		cf.Services[s.Name] = c
+		healthyDeps[s.Name] = composeDepend{Condition: "service_healthy"}
+
+		exp := base(ImagePgbExporter, s.Name, "exporter", -1, p.Infra.ExporterCPU, p.Infra.ExporterMem)
+		exp.Command = []string{fmt.Sprintf("--pgBouncer.connectionString=postgres://%s:%s@%s:%d/pgbouncer?sslmode=disable", plan.DBUser, plan.DBPassword, s.Name, plan.PgBouncerPort)}
+		exp.DependsOn = map[string]composeDepend{s.Name: {Condition: "service_healthy"}}
+		cf.Services["lore-pgbexp-"+s.Name] = exp
+	}
+
+	for _, s := range p.Services {
 		if s.Kind != "lb" {
 			continue
 		}
@@ -304,6 +332,39 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 // lbAlgorithms maps design algorithm names to HAProxy balance modes.
 var lbAlgorithms = map[string]string{"round-robin": "roundrobin", "least-conn": "leastconn", "random": "random"}
 
+// Where the PgBouncer image reads its config and users.
+const (
+	pgbouncerINI   = "/etc/pgbouncer/pgbouncer.ini"
+	pgbouncerUsers = "/etc/pgbouncer/userlist.txt"
+)
+
+// pgbouncerConfig is a PgBouncer's pgbouncer.ini: one database, the run's,
+// reached through the proxy in front of its Postgres, then the design's
+// own pgbouncer.ini keys, which win.
+func pgbouncerConfig(s *plan.Service) string {
+	b := s.PgBouncer
+	host, port, _ := strings.Cut(b.Upstream, ":")
+	var w strings.Builder
+	fmt.Fprintf(&w, "[databases]\n%s = host=%s port=%s dbname=%s\n\n[pgbouncer]\n", plan.DBName, host, port, plan.DBName)
+	settings := map[string]string{
+		"listen_addr": "0.0.0.0", "listen_port": strconv.Itoa(plan.PgBouncerPort), "unix_socket_dir": "",
+		"auth_type": "scram-sha-256", "auth_file": pgbouncerUsers,
+		// The exporter reads SHOW POOLS and SHOW STATS as this user.
+		"admin_users": plan.DBUser,
+		"pool_mode":   b.PoolMode, "default_pool_size": strconv.Itoa(b.DefaultPoolSize),
+		"max_client_conn": strconv.Itoa(b.MaxClientConn),
+		// Some drivers send it; PgBouncer refuses unknown startup parameters.
+		"ignore_startup_parameters": "extra_float_digits",
+	}
+	for k, v := range s.Config {
+		settings[k] = v
+	}
+	for _, k := range sortedKeys(settings) {
+		fmt.Fprintf(&w, "%s = %s\n", k, settings[k])
+	}
+	return w.String()
+}
+
 // haproxyConfig is an lb's HAProxy configuration: HTTP mode, active health
 // checks on every replica, and the built-in Prometheus exporter. Everything
 // else is HAProxy's own default.
@@ -366,7 +427,7 @@ func toxiproxyConfig(p *plan.Plan) ([]byte, error) {
 // prometheusConfig scrapes every container of the run once a second. The
 // cAdvisor job keeps only this run's containers.
 func prometheusConfig(p *plan.Plan) string {
-	var app, pg, rd, lbs []string
+	var app, pg, rd, pgb, lbs []string
 	for _, s := range p.Services {
 		switch s.Kind {
 		case "lb":
@@ -382,6 +443,8 @@ func prometheusConfig(p *plan.Plan) string {
 			pg = append(pg, s.Name)
 		case "redis":
 			rd = append(rd, s.Name)
+		case "pgbouncer":
+			pgb = append(pgb, s.Name)
 		}
 	}
 	var b strings.Builder
@@ -397,6 +460,9 @@ func prometheusConfig(p *plan.Plan) string {
 	}
 	for _, name := range rd {
 		job("redis-"+name, []string{fmt.Sprintf("lore-redisexp-%s:9121", name)}, fmt.Sprintf("        labels: {service: %q}\n", name))
+	}
+	for _, name := range pgb {
+		job("pgbouncer-"+name, []string{fmt.Sprintf("lore-pgbexp-%s:9127", name)}, fmt.Sprintf("        labels: {service: %q}\n", name))
 	}
 	for _, name := range lbs {
 		job("lb-"+name, []string{fmt.Sprintf("%s:%d", name, plan.LBStatsPort)}, fmt.Sprintf("        labels: {service: %q}\n", name))

@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,7 @@ func TestGoldenPlans(t *testing.T) {
 		{"single-postgres", "../../examples/single-postgres.yaml", 1},
 		{"single-postgres-half", "../../examples/single-postgres.yaml", 0.5},
 		{"smoke", "../../examples/smoke.yaml", 1},
+		{"pgbouncer", "../../examples/pgbouncer.yaml", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p, err := Build(loadFile(t, tc.path), Options{RunID: "test-run", Scale: tc.scale, Seed: 1})
@@ -383,5 +385,47 @@ func TestConnectionMemory(t *testing.T) {
 	p, _ = Build(d, Options{RunID: "r", Scale: 0.05})
 	if got := p.Service("lb").Memory; got > 256<<20 {
 		t.Errorf("lb above the design: %s", sizeStr(got))
+	}
+}
+
+func TestPgBouncerPlan(t *testing.T) {
+	p, err := Build(loadFile(t, "../../examples/pgbouncer.yaml"), Options{RunID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := p.Service("pgb")
+	if b.Kind != "pgbouncer" || b.Port != PgBouncerPort || b.PgBouncer == nil {
+		t.Fatalf("pgb %+v", b)
+	}
+	// PgBouncer reaches db through its own proxy, so db's faults reach it.
+	if x := p.proxiesInto("pgb", "db"); len(x) != 1 || b.PgBouncer.Upstream != x[0].Addr() || b.PgBouncer.DefaultPoolSize != 20 || b.PgBouncer.MaxClientConn != 200 || b.PgBouncer.PoolMode != "transaction" {
+		t.Errorf("pgbouncer %+v, proxies %v", b.PgBouncer, x)
+	}
+	tgt := p.Service("api").Synthetic[0].Targets["pgb"]
+	if tgt.Kind != "postgres" || tgt.SimpleProtocol || tgt.Rows != 100000 || tgt.Pool != 30 || len(tgt.Addrs) != 1 {
+		t.Errorf("api's pgb target %+v", tgt)
+	}
+	var fields []string
+	for _, a := range p.Assumptions {
+		fields = append(fields, a.Field)
+	}
+	for _, want := range []string{"services.pgb.pool_mode", "services.pgb.default_pool_size", "services.pgb.config.max_client_conn", "services.pgb.config.server_login_retry", "services.api.pools.pgb.min", "services.api.pools.pgb.hold"} {
+		if !slices.Contains(fields, want) {
+			t.Errorf("assumptions lack %s: %v", want, fields)
+		}
+	}
+	if slices.ContainsFunc(p.Notes, func(n string) bool { return strings.Contains(n, "max_client_conn") }) {
+		t.Errorf("121 client connections fit 200: %v", p.Notes)
+	}
+
+	// At PgBouncer's default of 100, 4 x 30 + 1 don't fit.
+	d := loadFile(t, "../../examples/pgbouncer.yaml")
+	delete(d.Services["pgb"].Config, "max_client_conn")
+	p, err = Build(d, Options{RunID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(p.Notes, "pgb: its callers' pools can open 121 client connections, the exporter's included, against max_client_conn 100; PgBouncer refuses the ones beyond it") {
+		t.Errorf("notes %v", p.Notes)
 	}
 }

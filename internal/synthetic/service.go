@@ -199,6 +199,8 @@ func (s *Service) handle(ctx context.Context, req request) error {
 			buf[i] = 1 // touch every page so the memory is really used
 		}
 	}
+	ctx, releaseHeld := withSession(ctx)
+	defer releaseHeld()
 	s.burn()
 	err := s.runCalls(ctx, s.cfg.Calls, req)
 	runtime.KeepAlive(buf)
@@ -236,7 +238,7 @@ func (s *Service) runCalls(ctx context.Context, calls []Call, req request) error
 				s.async.Add(1)
 				go func() {
 					defer s.async.Done()
-					if err := s.call(context.WithoutCancel(ctx), c, req); err != nil {
+					if err := s.call(withoutSession(context.WithoutCancel(ctx)), c, req); err != nil {
 						s.m.asyncDropped.Inc()
 					}
 				}()

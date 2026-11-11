@@ -12,6 +12,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/analysis/analysistest"
 	"github.com/akinfemi/load-lore/internal/driver"
 	"github.com/akinfemi/load-lore/internal/plan"
+	"github.com/akinfemi/load-lore/internal/synthetic"
 )
 
 func analyze(t *testing.T, dir string) *Analysis {
@@ -691,5 +692,73 @@ func TestLatencyBreakCrossCheck(t *testing.T) {
 	a.Verdict = verdict(a)
 	if a.Verdict.Kind != VerdictInconclusive || !strings.Contains(a.Verdict.Doubt, "api's own p99 was 200 ms at 3:40") || !strings.Contains(a.Verdict.Summary, "Doubtful: ") {
 		t.Errorf("kind %s, doubt %q", a.Verdict.Kind, a.Verdict.Doubt)
+	}
+}
+
+// pgbWindows builds api → pgb → db: four low-load windows, then three
+// with p99 up, api's calls to pgb slow, PgBouncer's server pool full and
+// db's transactions slow (dbSlow) or not.
+func pgbWindows(dbSlow, apiPoolFull bool) *Analysis {
+	p := &plan.Plan{Workload: plan.Workload{Entry: "api", PeakRate: 1000}, Services: []*plan.Service{
+		{Name: "api", Kind: "app", CPU: 1, Containers: []string{"api-0"}, Synthetic: []*synthetic.Config{{Targets: map[string]synthetic.Target{"pgb": {Kind: "postgres", Pool: 50}}}}},
+		{Name: "pgb", Kind: "pgbouncer", CPU: 0.5, Containers: []string{"pgb"}, PgBouncer: &plan.PgBouncer{Target: "db", PoolMode: "transaction", DefaultPoolSize: 20, MaxClientConn: 200}},
+		{Name: "db", Kind: "postgres", CPU: 1, Containers: []string{"db"}},
+	}}
+	f := func(v float64) *float64 { return &v }
+	a := &Analysis{Plan: p, PeakOffered: 1000}
+	for i := range 7 {
+		hot := i >= 4
+		w := &Window{Index: i, Start: float64(i * WindowSeconds), Offered: 100 + float64(i)*150, Services: map[string]*ServiceWindow{}}
+		w.RPS, w.Completed, w.ErrorRate, w.Dropped = f(w.Offered), f(w.Offered), f(0), f(0)
+		w.P99 = f(3)
+		apiHeld, pgbHeld, dbCPU, inUse, apiInUse := 1.0, 0.5, 0.3, 4.0, 4.0
+		if hot {
+			w.P99, apiHeld, inUse, apiInUse = f(400), 40, 20, 20
+			if apiPoolFull {
+				inUse, apiInUse = 15, 50
+			}
+			if dbSlow {
+				pgbHeld, dbCPU = 8, 0.75
+			}
+		}
+		w.Services["api"] = &ServiceWindow{CPU: f(0.5), RPS: w.RPS, MeanMs: f(apiHeld + 1)}
+		w.Services["pgb"] = &ServiceWindow{CPU: f(0.2)}
+		w.Services["db"] = &ServiceWindow{CPU: f(dbCPU)}
+		w.Edges = []*EdgeWindow{{From: "api", To: "pgb", RPS: w.RPS}}
+		w.Pools = []*PoolWindow{
+			{Service: "api", Target: "pgb", InUse: f(apiInUse), Max: f(50), Pending: f(0), WaitMs: f(0), HeldMs: f(apiHeld)},
+			{Service: "pgb", Target: "db", InUse: f(inUse), Max: f(20), Pending: f(0), WaitMs: f(0), HeldMs: f(pgbHeld)},
+		}
+		a.Windows = append(a.Windows, w)
+	}
+	a.Verdict = verdict(a)
+	return a
+}
+
+// A knee behind PgBouncer is its Postgres's when that was slow, and
+// PgBouncer's server pool's when the Postgres kept up; never PgBouncer's
+// CPU, which stayed at 20%.
+func TestKneeThroughPgBouncer(t *testing.T) {
+	evidence := func(d *Diagnosis) string {
+		text := ""
+		for _, e := range d.Evidence {
+			text += e.Text + "\n"
+		}
+		return text
+	}
+	// PgBouncer's full server pool tops the saturation list.
+	d := byRule(t, diagnose(pgbWindows(true, false)), "queueing-knee")
+	if text := evidence(d); d.Title != "Queueing knee (db CPU)" || !strings.Contains(text, "pgb → db pool 20 of 20 server connections in use at 0:40: a symptom") || !strings.Contains(text, "pgb's transactions to db took 8.0 ms each") {
+		t.Errorf("%s:\n%s", d.Title, text)
+	}
+	// api's pool to pgb tops it, and its calls to pgb were slow: through
+	// PgBouncer to db.
+	d = byRule(t, diagnose(pgbWindows(true, true)), "queueing-knee")
+	if text := evidence(d); d.Title != "Queueing knee (db CPU)" || !strings.Contains(text, "api → pgb pool 50 of 50 connections in use at 0:40: a symptom") || !strings.Contains(text, "pgb's transactions to db took 8.0 ms each") {
+		t.Errorf("%s:\n%s", d.Title, text)
+	}
+	d = byRule(t, diagnose(pgbWindows(false, false)), "queueing-knee")
+	if d.Title != "Queueing knee (pgb pool to db)" || !strings.Contains(d.Next, "default_pool_size 20") {
+		t.Errorf("%s: %s", d.Title, d.Next)
 	}
 }

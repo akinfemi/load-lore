@@ -362,3 +362,35 @@ func TestIntegrationPoolMinimum(t *testing.T) {
 		t.Errorf("warm pool has %d open", open.inUse+open.idle)
 	}
 }
+
+// With hold request, a request's queries share one connection, held until
+// the request responds; with hold call, each query takes its own.
+func TestIntegrationHoldPerRequest(t *testing.T) {
+	env := startPostgres(t)
+	held := pgTarget(env, 2)
+	held.Hold = HoldRequest
+	s := newService(t, &Config{
+		Service:    "api",
+		Resilience: Resilience{TimeoutMs: 5000},
+		Targets:    map[string]Target{"db": held, "each": pgTarget(env, 2)},
+		Calls:      []Call{call("db", "read"), call("each", "read"), call("db", "read"), call("each", "read")},
+	})
+	ctx := context.Background()
+	for i := range 5 {
+		if err := s.handle(ctx, request{typ: "read", key: int64(i + 1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for target, want := range map[string]float64{"db": 5, "each": 10} {
+		if n := metricValue(t, s, "loadlore_pool_hold_seconds", map[string]string{"target": target}); n != want {
+			t.Errorf("%s: %v connections held, want %v", target, n, want)
+		}
+		if n := metricValue(t, s, "loadlore_pool_wait_seconds", map[string]string{"target": target}); n != want {
+			t.Errorf("%s: %v acquires, want %v", target, n, want)
+		}
+	}
+	// Released at the end of each request: the pool is free again.
+	if snap := s.clients["db"].snapshot(); snap.inUse != 0 {
+		t.Errorf("%d connections still in use", snap.inUse)
+	}
+}

@@ -44,9 +44,10 @@ type Options struct {
 	Root           string    // runs folder; default rundir.Root
 	Progress       io.Writer // plain progress lines
 
-	// CoolTo is a speed index to wait for before starting, the first run's
-	// in a series: pre-flight re-runs the benchmark until the host is
-	// within CoolTolerance of it, for up to CoolLimit. 0 = don't wait.
+	// CoolTo is a speed index to wait for before starting (the first run's
+	// in a series, or the run a scenario check compares this one with).
+	// Pre-flight re-runs the benchmark until the host is within
+	// CoolTolerance of it, for up to CoolLimit. 0 = don't wait.
 	CoolTo int
 	// Series places the run in a run --repeat series; nil for one run.
 	Series *analysis.SeriesRef
@@ -122,7 +123,7 @@ func coolDown(ctx context.Context, drv driver.Driver, p *plan.Plan, target int, 
 			c.Waited = time.Since(start).Seconds()
 			return sp, c
 		}
-		fmt.Fprintf(out, "  cooling down: speed index %d, waiting for %d or more (the first run's %d, less %s)\n", sp.Index, int(math.Ceil(floor)), target, fmtF(CoolTolerance*100)+"%")
+		fmt.Fprintf(out, "  cooling down: speed index %d, waiting for %d or more (the run it's compared with measured %d; within %s counts)\n", sp.Index, int(math.Ceil(floor)), target, fmtF(CoolTolerance*100)+"%")
 		select {
 		case <-ctx.Done():
 			c.Waited = time.Since(start).Seconds()
@@ -197,7 +198,7 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 	if opt.CoolTo > 0 && pf.Host.Speed != nil {
 		pf.Host.Speed, pf.Host.Cooled = coolDown(parent, drv, p, opt.CoolTo, pf.Host.Speed, out)
 		if c := pf.Host.Cooled; !c.Reached {
-			pf.Warnings = append(pf.Warnings, fmt.Sprintf("the host's speed index was still %d after waiting %s, against %d for the first run of the series: this run may break at a lower load because the host is slower, not the design",
+			pf.Warnings = append(pf.Warnings, fmt.Sprintf("the host's speed index was still %d after waiting %s, against %d for the run this one is compared with: it may break at a lower load because the host is slower, not the design",
 				pf.Host.Speed.Index, CoolLimit, c.Target))
 		}
 	}

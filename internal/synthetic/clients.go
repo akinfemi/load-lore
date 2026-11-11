@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -53,6 +54,7 @@ func newClient(name string, t Target, timeout time.Duration, m *metrics) (client
 type pgClient struct {
 	name    string
 	min     int
+	hold    string
 	pool    *pgxpool.Pool
 	spec    dataset.Spec
 	payload string
@@ -89,24 +91,17 @@ func newPGClient(name string, t Target, m *metrics) (*pgClient, error) {
 	}
 	spec := dataset.Spec{Rows: t.Rows, RowBytes: t.RowBytes}
 	return &pgClient{
-		name: name, min: t.PoolMin, pool: pool, spec: spec, m: m,
+		name: name, min: t.PoolMin, hold: t.Hold, pool: pool, spec: spec, m: m,
 		payload: strings.Repeat("w", spec.PayloadLen()),
 	}, nil
 }
 
 func (p *pgClient) do(ctx context.Context, c *Call, r request) (bool, error) {
-	p.pending.Add(1)
-	start := time.Now()
-	conn, err := p.pool.Acquire(ctx)
-	p.pending.Add(-1)
-	p.m.poolWait.WithLabelValues(p.name).Observe(time.Since(start).Seconds())
+	conn, release, err := p.conn(ctx)
 	if err != nil {
-		// A deadline while waiting means the pool, not the database, was
-		// the bottleneck. Connect errors (too many connections, refused)
-		// keep their own cause.
-		return false, poolWaitErr(ctx, err)
+		return false, err
 	}
-	defer conn.Release()
+	defer release()
 
 	key := clampKey(r.key, p.spec.Rows)
 	switch {
@@ -147,6 +142,95 @@ func (p *pgClient) do(ctx context.Context, c *Call, r request) (bool, error) {
 		}
 	}
 	return false, err
+}
+
+// conn is a connection for one call and the func to call after it. With
+// hold request, a request's first call acquires the connection and keeps
+// it in the request's session for its later calls; the session releases
+// it when the request responds.
+func (p *pgClient) conn(ctx context.Context) (*pgxpool.Conn, func(), error) {
+	sess, _ := ctx.Value(sessionKey{}).(*session)
+	if p.hold != HoldRequest || sess == nil {
+		conn, err := p.acquire(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		start := time.Now()
+		return conn, func() { p.release(conn, start) }, nil
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	if h := sess.conns[p.name]; h != nil {
+		if !h.conn.Conn().IsClosed() {
+			return h.conn, func() {}, nil
+		}
+		// A canceled query closes its connection; get another.
+		p.release(h.conn, h.since)
+		delete(sess.conns, p.name)
+	}
+	conn, err := p.acquire(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	sess.conns[p.name] = &heldConn{conn: conn, since: time.Now(), release: p.release}
+	return conn, func() {}, nil
+}
+
+func (p *pgClient) acquire(ctx context.Context) (*pgxpool.Conn, error) {
+	p.pending.Add(1)
+	start := time.Now()
+	conn, err := p.pool.Acquire(ctx)
+	p.pending.Add(-1)
+	p.m.poolWait.WithLabelValues(p.name).Observe(time.Since(start).Seconds())
+	if err != nil {
+		// A deadline while waiting means the pool, not the database, was
+		// the bottleneck. Connect errors (too many connections, refused)
+		// keep their own cause.
+		return nil, poolWaitErr(ctx, err)
+	}
+	return conn, nil
+}
+
+// release returns a connection to the pool and records how long the
+// caller held it.
+func (p *pgClient) release(conn *pgxpool.Conn, since time.Time) {
+	conn.Release()
+	p.m.poolHold.WithLabelValues(p.name).Observe(time.Since(since).Seconds())
+}
+
+// session holds the connections a request keeps until it responds, for
+// targets whose pools hold per request.
+type session struct {
+	mu    sync.Mutex
+	conns map[string]*heldConn // by target
+}
+
+type heldConn struct {
+	conn    *pgxpool.Conn
+	since   time.Time
+	release func(*pgxpool.Conn, time.Time)
+}
+
+type sessionKey struct{}
+
+// withSession gives a request a session and the func that releases what
+// it holds.
+func withSession(ctx context.Context) (context.Context, func()) {
+	s := &session{conns: map[string]*heldConn{}}
+	return context.WithValue(ctx, sessionKey{}, s), func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, h := range s.conns {
+			h.release(h.conn, h.since)
+		}
+		clear(s.conns)
+	}
+}
+
+// withoutSession is ctx for a call that must not share the request's
+// connections: an async call runs alongside the request.
+func withoutSession(ctx context.Context) context.Context {
+	return context.WithValue(ctx, sessionKey{}, (*session)(nil))
 }
 
 func (p *pgClient) snapshot() poolSnapshot {

@@ -278,6 +278,8 @@ func (Pool) shorthandField() string { return "size" }
 func (Pool) JSONSchema() *jsonschema.Schema {
 	props := jsonschema.NewProperties()
 	props.Set("size", &jsonschema.Schema{Type: "integer", Minimum: json.Number("1"), Default: DefaultPool, Description: "Connections per replica."})
+	props.Set("hold", &jsonschema.Schema{Type: "string", Enum: []any{"call", "request"}, Default: "call",
+		Description: "How long a request keeps a connection: for each call (call), or from its first call to the target until it responds, slower calls in between included (request). postgres and pgbouncer targets only."})
 	props.Set("min", &jsonschema.Schema{Type: "integer", Minimum: json.Number("0"), Default: 0,
 		Description: "Connections each replica opens before the load starts and keeps open: a warm pool. postgres and pgbouncer targets only. Default 0: connections open only when callers need them."})
 	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{

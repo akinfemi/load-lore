@@ -52,6 +52,9 @@ const (
 	// A caller's CPU tops a knee, but its requests spent at least this
 	// share of their time in calls to a busy target: the target is named.
 	KneeDownstreamShare = 0.5
+	// A connection held this many times longer than its calls took is
+	// held across the request, mostly idle.
+	HoldIdleFactor = 2.0
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
@@ -148,10 +151,11 @@ func poolExhausted(a *Analysis) []*Diagnosis {
 		ev := func(src, format string, args ...any) {
 			d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf(format, args...), Source: src})
 		}
+		src := poolSources(a, k.svc)
 		first := poolAt(ws[from], k.svc, k.target)
-		ev(SrcPoolInUse, "%s of %s connections in use at %s (%s to %s)", Count(*first.InUse), Count(*first.Max), Clock(ws[from].Start), Clock(ws[from].Start), Clock(ws[to].Start+WindowSeconds))
+		ev(src.inUse, "%s of %s %s in use at %s (%s to %s)", Count(*first.InUse), Count(*first.Max), src.conns, Clock(ws[from].Start), Clock(ws[from].Start), Clock(ws[to].Start+WindowSeconds))
 		if p.Pending != nil {
-			ev(SrcPoolPending, "up to %s requests waiting for a connection at %s", Count(*p.Pending), Clock(w.Start))
+			ev(src.pending, "up to %s %s waiting for a connection at %s", Count(*p.Pending), src.waiters, Clock(w.Start))
 		}
 		if p.WaitMs != nil {
 			t := fmt.Sprintf("mean wait for a connection %s at %s", Ms(*p.WaitMs), Clock(w.Start))
@@ -160,7 +164,7 @@ func poolExhausted(a *Analysis) []*Diagnosis {
 					t += fmt.Sprintf(", up from %s at %s", Ms(*before.WaitMs), Clock(ws[from-1].Start))
 				}
 			}
-			ev(SrcPoolWait, "%s", t)
+			ev(src.wait, "%s", t)
 		}
 		if c := cpuOf(w, k.target); c != nil {
 			ev(SrcCPU, "%s CPU at %s of its limit at %s: not saturated", k.target, Pct(*c), Clock(w.Start))
@@ -169,10 +173,40 @@ func poolExhausted(a *Analysis) []*Diagnosis {
 			ev(SrcCPU, "%s CPU at %s of its limit at %s", k.svc, Pct(*c), Clock(w.Start))
 		}
 		if sw := w.Services[k.target]; sw != nil && sw.Connections != nil && sw.MaxConnections != nil {
-			ev(SrcPGConns, "%s had %s connections open, max_connections %s", k.target, Count(*sw.Connections), Count(*sw.MaxConnections))
+			ev(connSource(a, k.target), "%s had %s connections open, %s %s", k.target, Count(*sw.Connections), connLimit(a, k.target), Count(*sw.MaxConnections))
 		}
 		if base, ok := heldBaseline(a, k.svc, k.target); ok && p.HeldMs != nil {
-			ev(SrcPoolHeld, "%s per call once a connection was free at %s, against %s at low load: %s answered at its usual speed", Ms(*p.HeldMs), Clock(w.Start), Ms(base), k.target)
+			ev(src.held, "%s per %s once a connection was free at %s, against %s at low load: %s answered at its usual speed", Ms(*p.HeldMs), src.unit, Clock(w.Start), Ms(base), k.target)
+		}
+		// Held across a whole request, a connection is busy far longer
+		// than its queries take: that, not the target, fills the pool.
+		if p.HoldMs != nil && p.HeldMs != nil && *p.HoldMs >= HoldIdleFactor**p.HeldMs {
+			ev(SrcPoolHold, "each connection was held %s at %s while its calls took %s with it: held across the request, it sat idle most of that time", Ms(*p.HoldMs), Clock(w.Start), Ms(*p.HeldMs))
+		}
+		if b := a.Plan.Service(k.svc); b != nil && b.PgBouncer != nil {
+			d.Summary = fmt.Sprintf("From %s, every server connection %s had to %s was in use and clients waited in %s for one, while %s still had CPU to spare. Requests were queueing for a connection, not for the database.",
+				Clock(ws[from].Start), k.svc, k.target, k.svc, k.target)
+			d.Next = fmt.Sprintf("Raise %s's default_pool_size (%d now), keeping it and every other connection under %s's max_connections", k.svc, b.PgBouncer.DefaultPoolSize, k.target)
+			if t := a.Plan.Service(k.target); t != nil && t.Config["max_connections"] != "" {
+				d.Next += " (" + t.Config["max_connections"] + ")"
+			}
+			if b.PgBouncer.PoolMode == "session" {
+				d.Next += ", or switch pool_mode to transaction: in session mode a client holds a server connection for as long as it stays connected."
+			} else {
+				d.Next += ", or cut the time each transaction holds one."
+			}
+			out = append(out, d)
+			continue
+		}
+		if t := a.Plan.Service(k.target); t != nil && t.PgBouncer != nil {
+			d.Next = fmt.Sprintf("Resize the pools to %s across replicas: client connections to PgBouncer are cheap, and it queues the ones beyond its %d server connections", k.target, t.PgBouncer.DefaultPoolSize)
+			if s := a.Plan.Service(k.svc); s != nil && len(s.Synthetic) > 0 {
+				pool, n := s.Synthetic[0].Targets[k.target].Pool, len(s.Containers)
+				d.Next += fmt.Sprintf(": %d %s × %d connections = %d, against max_client_conn %d", n, plural(n, "replica", "replicas"), pool, n*pool, t.PgBouncer.MaxClientConn)
+			}
+			d.Next += "."
+			out = append(out, d)
+			continue
 		}
 		d.Next = "Add PgBouncer, or resize the pools across replicas"
 		if s := a.Plan.Service(k.svc); s != nil && len(s.Synthetic) > 0 {
@@ -235,10 +269,15 @@ func queueingKnee(a *Analysis) *Diagnosis {
 				if c == nil {
 					break
 				}
-				top = &Saturation{Component: target, What: "CPU", Value: *c,
+				next := &Saturation{Component: target, What: "CPU", Value: *c,
 					Detail: fmt.Sprintf("%s CPU at %s of its limit", target, Pct(*c)), Source: SrcCPU}
 				symptom := Evidence{Text: fmt.Sprintf("%s at %s: a symptom, since connections stayed in use longer while %s was slow to answer", pool.Detail, Clock(w.Start), target), Source: pool.Source}
-				return kneeDiagnosis(a, k, *top, &symptom, why)
+				if r, more, ok := behindPgBouncer(a, ws[k:k+KneeWindows], target); ok {
+					next, why = &r, append(why, more...)
+				} else if a.Plan.Service(target).PgBouncer != nil {
+					break // a PgBouncer that kept up: not where requests queued
+				}
+				return kneeDiagnosis(a, k, *next, &symptom, why)
 			}
 		}
 		// A caller's CPU near its limit isn't where requests queue when
@@ -251,16 +290,101 @@ func queueingKnee(a *Analysis) *Diagnosis {
 				if target == "" || c == nil {
 					continue
 				}
-				caller := *top
-				top = &Saturation{Component: target, What: "CPU", Value: *c,
+				next := &Saturation{Component: target, What: "CPU", Value: *c,
 					Detail: fmt.Sprintf("%s CPU at %s of its limit", target, Pct(*c)), Source: SrcCPU}
-				symptom := Evidence{Text: fmt.Sprintf("%s at %s: not where requests queued, since most of their time went to calls to %s", caller.Detail, Clock(w.Start), target), Source: caller.Source}
-				return kneeDiagnosis(a, k, *top, &symptom, why)
+				symptom := Evidence{Text: fmt.Sprintf("%s at %s: not where requests queued, since most of their time went to calls to %s", top.Detail, Clock(w.Start), target), Source: top.Source}
+				if r, more, ok := behindPgBouncer(a, ws[k:k+KneeWindows], target); ok {
+					next, why = &r, append(why, more...)
+				} else if a.Plan.Service(target).PgBouncer != nil {
+					continue
+				}
+				return kneeDiagnosis(a, k, *next, &symptom, why)
 			}
 		}
 		return kneeDiagnosis(a, k, *top, nil, nil)
 	}
 	return nil
+}
+
+// behindPgBouncer follows a slow PgBouncer to what made it slow over the
+// knee's windows: its Postgres, when that was busy; else its server pool,
+// when full, since clients then queue in PgBouncer; else its own CPU, when
+// at PoolTargetCPUMax or more. ok is false for a target that isn't a
+// PgBouncer, or one that kept up.
+func behindPgBouncer(a *Analysis, ws []*Window, target string) (Saturation, []Evidence, bool) {
+	t := a.Plan.Service(target)
+	if t == nil || t.PgBouncer == nil {
+		return Saturation{}, nil, false
+	}
+	db := t.PgBouncer.Target
+	full := func(w *Window) (*PoolWindow, bool) {
+		p := poolAt(w, target, db)
+		return p, p != nil && p.InUse != nil && p.Max != nil && *p.Max > 0 && *p.InUse >= PoolFullShare**p.Max
+	}
+	for _, w := range ws {
+		why := targetBusy(a, w, target, db)
+		c := cpuOf(w, db)
+		if len(why) == 0 || c == nil {
+			continue
+		}
+		var peak float64
+		for _, x := range ws {
+			if v := cpuOf(x, db); v != nil {
+				peak = math.Max(peak, *v)
+			}
+		}
+		ev := []Evidence{}
+		if p, ok := full(w); ok {
+			ev = append(ev, Evidence{Text: fmt.Sprintf("%s's %s of %s server connections to %s were in use at %s, so its clients waited for %s", target, Count(*p.InUse), Count(*p.Max), db, Clock(w.Start), db), Source: SrcPgbPool})
+		}
+		return Saturation{Component: db, What: "CPU", Value: peak, Detail: fmt.Sprintf("%s CPU at %s of its limit", db, Pct(peak)), Source: SrcCPU}, append(ev, why...), true
+	}
+	for _, w := range ws {
+		if p, ok := full(w); ok {
+			u := *p.InUse / *p.Max
+			return Saturation{Component: target, What: "pool to " + db, Value: u,
+				Detail: fmt.Sprintf("%s → %s pool %s of %s server connections in use", target, db, Count(*p.InUse), Count(*p.Max)), Source: SrcPgbPool}, nil, true
+		}
+	}
+	for _, w := range ws {
+		if c := cpuOf(w, target); c != nil && *c >= PoolTargetCPUMax {
+			return Saturation{Component: target, What: "CPU", Value: *c, Detail: fmt.Sprintf("%s CPU at %s of its limit", target, Pct(*c)), Source: SrcCPU}, nil, true
+		}
+	}
+	return Saturation{}, nil, false
+}
+
+// connLimit and connSource name a service's connection limit and where its
+// connection count comes from: max_connections on a Postgres,
+// max_client_conn on a PgBouncer.
+func connLimit(a *Analysis, svc string) string {
+	if s := a.Plan.Service(svc); s != nil && s.PgBouncer != nil {
+		return "max_client_conn"
+	}
+	return "max_connections"
+}
+
+func connSource(a *Analysis, svc string) string {
+	if s := a.Plan.Service(svc); s != nil && s.PgBouncer != nil {
+		return SrcPgbClients
+	}
+	return SrcPGConns
+}
+
+// poolSrc names a pool's metrics and its words: an application service's
+// own pools, or a PgBouncer's server connections.
+type poolSrc struct {
+	inUse, pending, wait, held string
+	conns, waiters, unit       string
+}
+
+func poolSources(a *Analysis, svc string) poolSrc {
+	if s := a.Plan.Service(svc); s != nil && s.PgBouncer != nil {
+		return poolSrc{inUse: SrcPgbPool, pending: SrcPgbWaiting, wait: SrcPgbWait, held: SrcPgbHeld,
+			conns: "server connections", waiters: "clients", unit: "transaction"}
+	}
+	return poolSrc{inUse: SrcPoolInUse, pending: SrcPoolPending, wait: SrcPoolWait, held: SrcPoolHeld,
+		conns: "connections", waiters: "requests", unit: "call"}
 }
 
 // downstreamBusy finds a target svc's requests spent most of their time
@@ -312,7 +436,8 @@ func targetBusy(a *Analysis, w *Window, svc, target string) []Evidence {
 	}
 	p := poolAt(w, svc, target)
 	if base, ok := heldBaseline(a, svc, target); ok && p != nil && p.HeldMs != nil && *p.HeldMs >= TargetSlowFactor*base && *p.HeldMs >= base+TargetSlowMinMs {
-		out = append(out, Evidence{Text: fmt.Sprintf("%s's calls to %s took %s each once they had a connection at %s, against %s at low load", svc, target, Ms(*p.HeldMs), Clock(w.Start), Ms(base)), Source: SrcPoolHeld})
+		src := poolSources(a, svc)
+		out = append(out, Evidence{Text: fmt.Sprintf("%s's %ss to %s took %s each once they had a connection at %s, against %s at low load", svc, src.unit, target, Ms(*p.HeldMs), Clock(w.Start), Ms(base)), Source: src.held})
 	}
 	if e, ok := throttled(a, w, target); ok && len(out) > 0 {
 		out = append(out, e)
@@ -357,6 +482,11 @@ func kneeDiagnosis(a *Analysis, k int, r Saturation, symptom *Evidence, why []Ev
 		Summary: fmt.Sprintf("From %s, p99 stayed above %s (%s at low load) with %s at %s. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.",
 			Clock(w.Start), Ms(math.Max(KneeLatencyFactor*base, base+KneeLatencyMinMs)), Ms(base), name, Pct(r.Value)),
 		Next: "Add capacity or cut per-request work on " + r.Component + ", then re-run the ramp.",
+	}
+	if t, ok := strings.CutPrefix(r.What, "pool to "); ok {
+		if b := a.Plan.Service(r.Component); b != nil && b.PgBouncer != nil {
+			d.Next = fmt.Sprintf("Give %s more server connections (default_pool_size %d) if %s has room for them, or cut the time each transaction holds one, then re-run the ramp.", r.Component, b.PgBouncer.DefaultPoolSize, t)
+		}
 	}
 
 	// The knee's shape: the median p99 of the windows in each band of

@@ -346,14 +346,14 @@ func saturation(a *Analysis, w *Window) []Saturation {
 		if sw.Connections != nil && sw.MaxConnections != nil && *sw.MaxConnections > 0 {
 			u := *sw.Connections / *sw.MaxConnections
 			out = append(out, Saturation{Component: s.Name, What: "connections", Value: u,
-				Detail: fmt.Sprintf("%s connections %s of max_connections %s", s.Name, Count(*sw.Connections), Count(*sw.MaxConnections)), Source: SrcPGConns})
+				Detail: fmt.Sprintf("%s connections %s of %s %s", s.Name, Count(*sw.Connections), connLimit(a, s.Name), Count(*sw.MaxConnections)), Source: connSource(a, s.Name)})
 		}
 	}
 	for _, p := range w.Pools {
 		if p.InUse != nil && p.Max != nil && *p.Max > 0 {
 			u := *p.InUse / *p.Max
 			out = append(out, Saturation{Component: p.Service, What: "pool to " + p.Target, Value: u,
-				Detail: fmt.Sprintf("%s → %s pool %s of %s connections in use", p.Service, p.Target, Count(*p.InUse), Count(*p.Max)), Source: SrcPoolInUse})
+				Detail: fmt.Sprintf("%s → %s pool %s of %s %s in use", p.Service, p.Target, Count(*p.InUse), Count(*p.Max), poolSources(a, p.Service).conns), Source: poolSources(a, p.Service).inUse})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Value > out[j].Value })

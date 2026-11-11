@@ -1,0 +1,35 @@
+# Four api replicas reach Postgres through PgBouncer in transaction mode:
+# 4 x 30 client connections share PgBouncer's 20 server connections, and
+# clients beyond them wait in PgBouncer instead of opening more on db.
+version: 1
+name: pgbouncer
+services:
+  lb:
+    kind: lb
+    target: api
+  api:
+    image: loadlore/synthetic
+    replicas: 4
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 0.5
+      calls:
+        - { target: pgb, op: read, count: 2 }
+        - { target: pgb, op: write, when: write }
+    pools: { pgb: 30 }
+  pgb:
+    kind: pgbouncer
+    target: db
+    pool_mode: transaction
+    default_pool_size: 20
+    config: { max_client_conn: 200 }   # 4 x 30 client connections, plus the exporter's
+    resources: { cpu: 0.5, memory: 128m }
+  db:
+    kind: postgres
+    resources: { cpu: 1, memory: 512m }
+    dataset: { rows: 100000, row_bytes: 256 }
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 50, to: 1000, over: 1m }
+  mix: { read: 0.9, write: 0.1 }

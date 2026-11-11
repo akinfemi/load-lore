@@ -93,6 +93,12 @@ const (
 	KindHTTP     = "http"
 )
 
+// How long a caller keeps a pool connection: Target.Hold.
+const (
+	HoldCall    = "call"
+	HoldRequest = "request"
+)
+
 // Target is how to reach one dependency. Addrs are usually Toxiproxy
 // listeners: one for a datastore, one per replica for an application
 // service, which the HTTP client round-robins across.
@@ -103,6 +109,11 @@ type Target struct {
 	// PoolMin is how many connections each replica opens before it reports
 	// ready and keeps open (postgres only); 0 opens them on demand.
 	PoolMin int `json:"pool_min,omitempty"`
+	// Hold is how long a caller keeps a connection (postgres only): for one
+	// call (HoldCall, the default), or from a request's first call to the
+	// target until the request responds (HoldRequest), as frameworks that
+	// check out a connection per request do.
+	Hold string `json:"hold,omitempty"`
 
 	// Postgres.
 	Database       string `json:"database,omitempty"`
@@ -178,6 +189,10 @@ func (c *Config) Validate() error {
 			bad("target %s: pool_min %d with pool %d", name, t.PoolMin, t.Pool)
 		case t.PoolMin > 0 && t.Kind != KindPostgres:
 			bad("target %s: pool_min is for postgres targets", name)
+		case t.Hold != "" && t.Hold != HoldCall && t.Hold != HoldRequest:
+			bad("target %s: hold %q", name, t.Hold)
+		case t.Hold == HoldRequest && t.Kind != KindPostgres:
+			bad("target %s: hold request is for postgres targets", name)
 		case t.Kind == KindPostgres && (t.Rows < 1 || t.RowBytes < 1):
 			bad("target %s: postgres needs rows and row_bytes", name)
 		}

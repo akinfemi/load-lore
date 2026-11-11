@@ -23,6 +23,7 @@ const (
 	AppPort       = 8080
 	LBStatsPort   = 8405
 	PostgresPort  = 5432
+	PgBouncerPort = 6432
 	RedisPort     = 6379
 	ProxyHost     = "lore-toxiproxy"
 	ProxyBasePort = 20000
@@ -73,7 +74,7 @@ type Assumption struct {
 // Service is one design service, expanded to containers.
 type Service struct {
 	Name       string   `json:"name"`
-	Kind       string   `json:"kind"` // app, postgres, redis, lb
+	Kind       string   `json:"kind"` // app, postgres, redis, pgbouncer, lb
 	Image      string   `json:"image"`
 	Containers []string `json:"containers"`    // one per replica: api-0, api-1; or db
 	CPU        float64  `json:"cpu"`           // per container, after scaling
@@ -91,6 +92,18 @@ type Service struct {
 
 	// Load balancers.
 	LB *LB `json:"lb,omitempty"`
+
+	// PgBouncer.
+	PgBouncer *PgBouncer `json:"pgbouncer,omitempty"`
+}
+
+// PgBouncer is a PgBouncer's settings and the Postgres behind it.
+type PgBouncer struct {
+	Target          string `json:"target"`
+	PoolMode        string `json:"pool_mode"`
+	DefaultPoolSize int    `json:"default_pool_size"`
+	MaxClientConn   int    `json:"max_client_conn"`
+	Upstream        string `json:"upstream"` // the proxy in front of the target
 }
 
 // LB is a load balancer's settings and the replicas behind it.
@@ -267,8 +280,12 @@ const (
 	pinnedPG17       = "postgres:17.11"
 	pinnedRedis8     = "redis:8.2"
 	pinnedHAProxy    = "haproxy:3.2.26"
-	redisMemoryShare = 0.75
-	loadGeneratorKey = "load"
+	pinnedPgBouncer  = "edoburu/pgbouncer:v1.26.1-p0" // PgBouncer 1.26.1
+	minMemoryPgb     = 32 << 20
+	// PgBouncer's own default for max_client_conn.
+	pgbDefaultMaxClientConn = 100
+	redisMemoryShare        = 0.75
+	loadGeneratorKey        = "load"
 )
 
 // Build makes a plan from a design that passed validation.
@@ -365,6 +382,16 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 			s.Image = pinnedRedis8
 		}
 		s.Containers = []string{name}
+	case ds.Kind == "pgbouncer":
+		s.Kind, s.Port, minMem = "pgbouncer", PgBouncerPort, minMemoryPgb
+		s.Image = pinnedPgBouncer
+		s.Containers = []string{name}
+		s.PgBouncer = &PgBouncer{Target: ds.Target, PoolMode: ds.PoolMode, DefaultPoolSize: *ds.DefaultPoolSize, MaxClientConn: pgbDefaultMaxClientConn}
+		if v, ok := ds.Config["max_client_conn"]; ok {
+			if n, err := strconv.Atoi(v.String()); err == nil {
+				s.PgBouncer.MaxClientConn = n
+			}
+		}
 	case ds.Kind == "lb":
 		s.Kind, s.Port, minMem = "lb", AppPort, minMemoryApp
 		s.Image = pinnedHAProxy
@@ -503,7 +530,7 @@ func (p *Plan) proxies(d *design.Design, byName map[string]*Service) {
 	}
 	for _, name := range d.ServiceNames() {
 		ds := d.Services[name]
-		if ds.Kind == "lb" {
+		if ds.Kind == "lb" || ds.Kind == "pgbouncer" {
 			t := byName[ds.Target]
 			for _, c := range t.Containers {
 				add(name, ds.Target, c, t.Port)
@@ -571,6 +598,22 @@ func (p *Plan) lbs(d *design.Design, byName map[string]*Service) {
 		}
 		s.LB.ServerPort = byName[s.LB.Target].Port
 	}
+	for _, name := range d.ServiceNames() {
+		s := byName[name]
+		if s.PgBouncer == nil {
+			continue
+		}
+		s.PgBouncer.Upstream = p.proxiesInto(name, s.PgBouncer.Target)[0].Addr()
+		clients := 1 // the exporter's
+		for _, caller := range d.ServiceNames() {
+			if pool, ok := d.Services[caller].Pools[name]; ok && byName[caller].Kind == "app" {
+				clients += *pool.Size * len(byName[caller].Containers)
+			}
+		}
+		if clients > s.PgBouncer.MaxClientConn {
+			p.note("%s: its callers' pools can open %d client connections, the exporter's included, against max_client_conn %d; PgBouncer refuses the ones beyond it", name, clients, s.PgBouncer.MaxClientConn)
+		}
+	}
 }
 
 func (p *Plan) syntheticConfigs(d *design.Design, name string, s *Service, byName map[string]*Service) {
@@ -585,6 +628,9 @@ func (p *Plan) syntheticConfigs(d *design.Design, name string, s *Service, byNam
 		}
 		pool := ds.Pools[target]
 		st := synthetic.Target{Addrs: addrs, Pool: *pool.Size, PoolMin: *pool.Min}
+		if pool.Hold == synthetic.HoldRequest {
+			st.Hold = synthetic.HoldRequest
+		}
 		switch t.Kind {
 		case "app", "lb":
 			st.Kind = synthetic.KindHTTP
@@ -592,6 +638,15 @@ func (p *Plan) syntheticConfigs(d *design.Design, name string, s *Service, byNam
 			st.Kind = synthetic.KindPostgres
 			st.Database, st.User, st.Password = DBName, DBUser, DBPassword
 			st.Rows, st.RowBytes = max(t.Dataset.Rows, 1), t.Dataset.RowBytes
+		case "pgbouncer":
+			// Through PgBouncer to its Postgres, whose dataset it reads.
+			db := byName[t.PgBouncer.Target]
+			st.Kind = synthetic.KindPostgres
+			st.Database, st.User, st.Password = DBName, DBUser, DBPassword
+			st.Rows, st.RowBytes = max(db.Dataset.Rows, 1), db.Dataset.RowBytes
+			// The client prepares statements as it does against Postgres:
+			// PgBouncer tracks them across server connections in every
+			// pool mode (max_prepared_statements).
 		case "redis":
 			st.Kind = synthetic.KindRedis
 			st.RowBytes = rowBytesBehind(byName)
@@ -824,8 +879,11 @@ func (p *Plan) proxiedOps(d *design.Design, rate float64) float64 {
 					}
 					n := r * share * float64(*c.Count)
 					ops += n
-					if t := d.Services[c.Target]; t.IsApp() || t.Kind == "lb" {
+					switch t := d.Services[c.Target]; {
+					case t.IsApp() || t.Kind == "lb":
 						visit(c.Target, n)
+					case t.Kind == "pgbouncer":
+						ops += n // and on from PgBouncer to its Postgres
 					}
 					walk(c.OnMiss, n)
 				}
@@ -856,6 +914,9 @@ func (p *Plan) assume(d *design.Design) {
 	})
 	p.assumePeriods(d)
 	for _, name := range d.ServiceNames() {
+		if s := d.Services[name]; s.Kind == "pgbouncer" {
+			p.assumePgBouncer(name, s)
+		}
 		if s := d.Services[name]; s.Kind == "lb" {
 			p.Assumptions = append(p.Assumptions, Assumption{
 				Field: "services." + name + " timeouts", Value: "connect 5s, server 60s",
@@ -867,7 +928,7 @@ func (p *Plan) assume(d *design.Design) {
 		s := d.Services[name]
 		for _, t := range slices.Sorted(maps.Keys(s.Pools)) {
 			ts, pool := d.Services[t], s.Pools[t]
-			if ts == nil || ts.Kind != "postgres" || pool.Min == nil {
+			if ts == nil || (ts.Kind != "postgres" && ts.Kind != "pgbouncer") || pool.Min == nil {
 				continue
 			}
 			a := Assumption{Field: "services." + name + ".pools." + t + ".min", Value: strconv.Itoa(*pool.Min),
@@ -876,6 +937,12 @@ func (p *Plan) assume(d *design.Design) {
 				a.Why = fmt.Sprintf("set in the design: each replica opens %d connections before the load starts and keeps them open", *pool.Min)
 			}
 			p.Assumptions = append(p.Assumptions, a)
+			h := Assumption{Field: "services." + name + ".pools." + t + ".hold", Value: pool.Hold,
+				Why: "the default, as pgxpool's: a request takes a connection for each call and hands it back straight away"}
+			if pool.Hold == synthetic.HoldRequest {
+				h.Why = "set in the design: a request keeps the connection from its first call to " + t + " until it responds, through any slower calls in between, as Rails and Django check out a connection per request"
+			}
+			p.Assumptions = append(p.Assumptions, h)
 		}
 	}
 	for _, name := range d.ServiceNames() {
@@ -920,6 +987,30 @@ func (p *Plan) assumePeriods(d *design.Design) {
 	})
 }
 
+// assumePgBouncer prints the PgBouncer settings results depend on.
+func (p *Plan) assumePgBouncer(name string, ds *design.Service) {
+	b := p.Service(name).PgBouncer
+	field := "services." + name + "."
+	_, setMax := ds.Config["max_client_conn"]
+	why := "PgBouncer's own default: clients beyond it are refused"
+	if setMax {
+		why = "set in the design: clients beyond it are refused"
+	}
+	p.Assumptions = append(p.Assumptions,
+		Assumption{Field: field + "pool_mode", Value: b.PoolMode,
+			Why: "a server connection serves one client's transaction, then the next client's (transaction); for the whole client connection (session); or for one statement (statement). Loadlore's default is transaction, PgBouncer's is session"},
+		Assumption{Field: field + "default_pool_size", Value: strconv.Itoa(b.DefaultPoolSize),
+			Why: fmt.Sprintf("server connections to %s for the database and user; clients beyond them wait in PgBouncer for one", b.Target)},
+		Assumption{Field: field + "config.max_client_conn", Value: strconv.Itoa(b.MaxClientConn), Why: why},
+	)
+	retry, why := "15s", "PgBouncer's own default"
+	if v, ok := ds.Config["server_login_retry"]; ok {
+		retry, why = v.String()+"s", "set in the design"
+	}
+	p.Assumptions = append(p.Assumptions, Assumption{Field: field + "config.server_login_retry", Value: retry,
+		Why: why + ": after a failed connection to " + b.Target + ", PgBouncer waits this long before trying again, so it can recover from a restart of " + b.Target + " later than a direct client would"})
+}
+
 // clampHalf rounds up to the next half core and clamps.
 func clampHalf(v, lo, hi float64) float64 {
 	return math.Min(hi, math.Max(lo, math.Ceil(v*2)/2))
@@ -930,7 +1021,7 @@ func (p *Plan) TotalCPU() float64 {
 	t := p.Infra.LoadCPU + p.Infra.ProxyCPU + p.Infra.PromCPU + p.Infra.CAdvisorCPU
 	for _, s := range p.Services {
 		t += s.CPU * float64(len(s.Containers))
-		if s.Kind == "postgres" || s.Kind == "redis" {
+		if s.Kind == "postgres" || s.Kind == "redis" || s.Kind == "pgbouncer" {
 			t += p.Infra.ExporterCPU
 		}
 	}
@@ -942,7 +1033,7 @@ func (p *Plan) TotalMemory() int64 {
 	t := p.Infra.LoadMemory + p.Infra.ProxyMemory + p.Infra.PromMemory + p.Infra.CAdvisorMem
 	for _, s := range p.Services {
 		t += s.Memory * int64(len(s.Containers))
-		if s.Kind == "postgres" || s.Kind == "redis" {
+		if s.Kind == "postgres" || s.Kind == "redis" || s.Kind == "pgbouncer" {
 			t += p.Infra.ExporterMem
 		}
 	}

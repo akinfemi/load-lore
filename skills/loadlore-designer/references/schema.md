@@ -60,7 +60,7 @@ api:
   concurrency: { model: threads, max: 200 }   # threads (default) | event-loop | workers
 ```
 
-A pool is a size, or `{ size, min }`. `min` (default `0`, postgres and pgbouncer targets only) is how many connections each replica opens before the load starts and keeps open: a warm pool. With `0`, connections open only when callers need them, as pgxpool does by default, so a burst can make every replica open many Postgres connections at once (the connection storm rule names it). `pools: { db: { size: 24, min: 24 } }` opens all 24 up front. The report prints each pool's `min` as an assumption.
+A pool is a size, or `{ size, min }`. `min` (default `0`, postgres and pgbouncer targets only) is how many connections each replica opens before the load starts and keeps open: a warm pool. With `0`, connections open only when callers need them, as pgxpool does by default, so a burst can make every replica open many Postgres connections at once (the connection storm rule names it). `pools: { db: { size: 24, min: 24 } }` opens all 24 up front. `hold` (default `call`, postgres and pgbouncer targets only) is how long a request keeps a connection: `call` takes one for each call and hands it back straight away; `request` keeps the connection from the request's first call to that target until it responds, through any slower calls in between, as Rails and Django check out a connection per request. A held connection sits idle while the request waits on something else, so a pool fills long before the database is busy. The report prints each pool's `min` and `hold` as assumptions.
 
 `concurrency` approximates the real runtime:
 
@@ -102,7 +102,7 @@ Resilience fields apply to every outbound call of the service:
 | --- | --- | --- |
 | `postgres` | `version` (default `"17"`), `config` (any postgresql.conf key; Postgres's own defaults apply, such as `max_connections` 100 and `shared_buffers` 128MB), `dataset` | |
 | `redis` | `version` (default `"8"`), `config` (any redis.conf key) | Unless `config` sets them, `maxmemory` is 75% of the container's memory limit and `maxmemory-policy` is `allkeys-lru`, as managed Redis usually does. Both are printed as assumptions in every report, and `--scale` scales `maxmemory`. `maxmemory: 0` restores stock Redis, including being OOM-killed when the cache outgrows its container |
-| `pgbouncer` | `target` (required, a postgres service), `pool_mode` (`transaction`; also `session`, `statement`), `default_pool_size` (`20`), `config` (any pgbouncer.ini key) | |
+| `pgbouncer` | `target` (required, a postgres service), `pool_mode` (`transaction`; also `session`, `statement`), `default_pool_size` (`20`), `config` (pgbouncer.ini keys) | PgBouncer 1.26. Clients beyond `default_pool_size` server connections wait in PgBouncer. `max_client_conn` defaults to PgBouncer's 100, and the plan notes when the callers' pools can open more. Loadlore sets the listen, auth and admin keys itself, and `pool_mode` and `default_pool_size` are fields, so `config` can't set those |
 | `lb` | `target` (required, an application service), `algorithm`, `health_check` | A load balancer (HAProxy) in front of the target's replicas. See below |
 
 `lb` spreads requests across the healthy replicas of its target. Call it like an application service (`op: http`), or make it the workload `entry`:

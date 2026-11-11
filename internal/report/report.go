@@ -191,6 +191,9 @@ func diagramSection(d *doc, a *analysis.Analysis) {
 	if kinds["postgres"] {
 		src = append(src, "conns from "+analysis.SrcPGConns)
 	}
+	if kinds["pgbouncer"] {
+		src = append(src, "PgBouncer's client conns from "+analysis.SrcPgbClients+", its server pools from "+analysis.SrcPgbPool+" and "+analysis.SrcPgbWaiting+", and transactions/s on its edges from pgbouncer_stats_totals_sql_transactions_pooled_total")
+	}
 	if kinds["redis"] {
 		src = append(src, "hit rate from "+analysis.SrcHitRate)
 	}
@@ -248,8 +251,11 @@ func annotations(a *analysis.Analysis, w *analysis.Window) *diagram.Annotations 
 	for _, e := range w.Edges {
 		var parts []string
 		unit := " calls/s"
-		if e.From == "load" || isLB(a.Plan, e.From) {
+		switch s := a.Plan.Service(e.From); {
+		case e.From == "load" || isLB(a.Plan, e.From):
 			unit = " rps"
+		case s != nil && s.PgBouncer != nil:
+			unit = " transactions/s"
 		}
 		if e.RPS != nil {
 			parts = append(parts, analysis.Rate(*e.RPS)+unit)
@@ -652,11 +658,11 @@ func environmentSection(d *doc, a *analysis.Analysis) {
 		if c := h.Cooled; c != nil {
 			switch {
 			case c.Waited == 0:
-				d.line("- Cool-down: none needed; the first benchmark (%d) was within %s of the series' first run (%d)", c.First, analysis.Pct(c.Tolerance), c.Target)
+				d.line("- Cool-down: none needed; the first benchmark (%d) was within %s of the run it's compared with (%d)", c.First, analysis.Pct(c.Tolerance), c.Target)
 			case c.Reached:
-				d.line("- Cool-down: waited %s for the host to cool, from speed index %d to within %s of the series' first run (%d)", waited(c.Waited), c.First, analysis.Pct(c.Tolerance), c.Target)
+				d.line("- Cool-down: waited %s for the host to cool, from speed index %d to within %s of the run it's compared with (%d)", waited(c.Waited), c.First, analysis.Pct(c.Tolerance), c.Target)
 			default:
-				d.line("- Cool-down: waited %s, but the speed index stayed more than %s below the series' first run (%d, from %d first)", waited(c.Waited), analysis.Pct(c.Tolerance), c.Target, c.First)
+				d.line("- Cool-down: waited %s, but the speed index stayed more than %s below the run it's compared with (%d, from %d first)", waited(c.Waited), analysis.Pct(c.Tolerance), c.Target, c.First)
 			}
 		}
 		switch h.HostCPU {
@@ -740,7 +746,7 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 			return "–"
 		}})
 		switch s.Kind {
-		case "postgres":
+		case "postgres", "pgbouncer":
 			cols = append(cols, col{name + " conns", func(w *analysis.Window) string {
 				if sw := w.Services[name]; sw != nil {
 					return opt(sw.Connections, analysis.Count)
@@ -828,8 +834,14 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 		d.line("| %s |", strings.Join(vals, " | "))
 	}
 	d.line("")
-	d.line("Columns: offered is %s; served is %s; dropped is %s; errors are %s; p50 and p99 are from %s; CPU is %s, mean over the window; conns are %s; hit rate is from %s; up is %s; pools are %s (peak in use/size, +peak waiting), wait is the mean from %s; k6 and Toxiproxy CPU are against their budgets.",
-		analysis.SrcOffered, analysis.SrcRPS, analysis.SrcDropped, analysis.SrcErrors, analysis.SrcK6Latency, analysis.SrcCPU, analysis.SrcPGConns, analysis.SrcHitRate, analysis.SrcLBHealthy, analysis.SrcPoolInUse, analysis.SrcPoolWait)
+	conns := analysis.SrcPGConns
+	pools := analysis.SrcPoolInUse + " (peak in use/size, +peak waiting), wait is the mean from " + analysis.SrcPoolWait
+	if slices.ContainsFunc(a.Plan.Services, func(s *plan.Service) bool { return s.PgBouncer != nil }) {
+		conns += "; a PgBouncer's are its clients, from " + analysis.SrcPgbClients
+		pools += "; a PgBouncer's are its server connections, from " + analysis.SrcPgbPool + ", and its wait " + analysis.SrcPgbWait
+	}
+	d.line("Columns: offered is %s; served is %s; dropped is %s; errors are %s; p50 and p99 are from %s; CPU is %s, mean over the window; conns are %s; hit rate is from %s; up is %s; pools are %s; k6 and Toxiproxy CPU are against their budgets.",
+		analysis.SrcOffered, analysis.SrcRPS, analysis.SrcDropped, analysis.SrcErrors, analysis.SrcK6Latency, analysis.SrcCPU, conns, analysis.SrcHitRate, analysis.SrcLBHealthy, pools)
 	if hostSampled {
 		d.line("")
 		d.line("Host steal is %s; other CPUs are %s.", analysis.SrcHostSteal, analysis.SrcHostOthers)

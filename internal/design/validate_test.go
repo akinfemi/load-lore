@@ -207,6 +207,13 @@ func TestValidationDiagnostics(t *testing.T) {
 		{"pool min over size", map[string]string{"services.api.pools": "{db: {size: 4, min: 5}}"}, []string{"error services.api.pools.db.min range"}},
 		{"pool min over default size", map[string]string{"services.api.pools": "{db: {min: 11}}"}, []string{"error services.api.pools.db.min range"}},
 		{"pool min not for http", map[string]string{"services.web": "{image: loadlore/synthetic, behavior: {calls: [{target: api, op: http}]}, pools: {api: {min: 2}}}"}, []string{"error services.web.pools.api.min not-applicable", "warning services.web.behavior.calls[0].target no-lb"}},
+		{"pgbouncer owns listen_port", map[string]string{"services.pgb": "{kind: pgbouncer, target: db, config: {listen_port: 7000}}"}, []string{"error services.pgb.config.listen_port not-applicable"}},
+		{"pgbouncer pool_mode is a field", map[string]string{"services.pgb": "{kind: pgbouncer, target: db, config: {pool_mode: session}}"}, []string{"error services.pgb.config.pool_mode not-applicable"}},
+		{"pgbouncer max_client_conn number", map[string]string{"services.pgb": "{kind: pgbouncer, target: db, config: {max_client_conn: lots}}"}, []string{"error services.pgb.config.max_client_conn invalid-value"}},
+		{"pgbouncer other keys pass", map[string]string{"services.pgb": "{kind: pgbouncer, target: db, config: {max_client_conn: 500, server_idle_timeout: 60}}"}, nil},
+		{"hold request", map[string]string{"services.api.pools": "{db: {size: 4, hold: request}}"}, nil},
+		{"hold not for http", map[string]string{"services.web": "{image: loadlore/synthetic, behavior: {calls: [{target: api, op: http}]}, pools: {api: {hold: request}}}"}, []string{"error services.web.pools.api.hold not-applicable", "warning services.web.behavior.calls[0].target no-lb"}},
+		{"hold bad value", map[string]string{"services.api.pools": "{db: {hold: forever}}"}, []string{"error services.api.pools.db.hold invalid-value"}},
 		{"pool unknown field", map[string]string{"services.api.pools": "{db: {size: 4, warm: true}}"}, []string{"error services.api.pools.db.warm unknown-field"}},
 
 		// Workload.

@@ -107,7 +107,7 @@ func (c *promClient) vector(ctx context.Context, query, label string) (map[strin
 }
 
 // exportedMetrics selects which series a run keeps.
-var exportedMetrics = regexp.MustCompile(`^(loadlore_|container_|pg_|redis_|k6_|toxiproxy_|haproxy_|up$|scrape_duration_seconds$)`)
+var exportedMetrics = regexp.MustCompile(`^(loadlore_|container_|pg_|redis_|k6_|toxiproxy_|haproxy_|pgbouncer_|up$|scrape_duration_seconds$)`)
 
 // export writes every kept series over [from, to] to dir/<metric>.json as
 // the raw samples Prometheus stored, with their real scrape (or push)
