@@ -355,3 +355,34 @@ func TestPrintCheckVariant(t *testing.T) {
 		t.Errorf("got\n%s\nwant it to end\n%s", out, want)
 	}
 }
+
+func TestPredict(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "connection-pool-trap")
+	if err := os.CopyFS(dir, os.DirFS("../../scenarios/connection-pool-trap")); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "design.yaml")
+
+	out, _, code := runCLI(t, "predict", path, "--json")
+	var listed predictResult
+	if code != exitOK || json.Unmarshal([]byte(out), &listed) != nil || len(listed.Questions) != 4 || listed.Questions[2].Choices == nil {
+		t.Fatalf("listing: exit %d, %s", code, out)
+	}
+
+	out, _, code = runCLI(t, "predict", path, "--json", "--answer", "1=600", "--answer", "2=never", "--answer", "3=db", "--answer", "4=they hit max_connections")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	b, _ := os.ReadFile(path)
+	want := "expect:\n  - p99_ms < 500 until load_rps >= 600\n  - error_rate < 1% throughout\n  - note: \"db gives out first\"\n  - note: \"pools 3x bigger: they hit max_connections\"\n"
+	if !strings.HasSuffix(string(b), want) {
+		t.Errorf("design ends\n%s", b[len(b)-300:])
+	}
+
+	if _, errOut, code := runCLI(t, "predict", path, "--json", "--answer", "1=600"); code == exitOK || !strings.Contains(errOut, "questions 2, 3, 4 have no answer") {
+		t.Errorf("missing answers: exit %d, %s", code, errOut)
+	}
+	if _, errOut, code := runCLI(t, "predict", "../../examples/smoke.yaml"); code == exitOK || !strings.Contains(errOut, "isn't part of a scenario") {
+		t.Errorf("not a scenario: exit %d, %s", code, errOut)
+	}
+}

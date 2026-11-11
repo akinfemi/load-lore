@@ -97,6 +97,11 @@ level: 1
 concepts: [pools]
 minutes: 10
 host: { cpus: 2, memory: 2g, reference: test machine, speed: 1000 }
+predict:
+  - ask: When does p99 pass 500 ms?
+    answer: rps
+    expect: p99_ms < 500 until load_rps >= {answer}
+    never: p99_ms < 500 throughout
 check:
   problem: { verdict: broke, diagnoses: [pool-exhausted] }
   solutions:

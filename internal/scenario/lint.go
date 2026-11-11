@@ -59,6 +59,14 @@ func (s *Scenario) Lint() []Problem {
 	if m.Host.Reference == "" || m.Host.Speed <= 0 {
 		bad(MetaFile, "host.reference and host.speed are required: the machine the scenario was checked on and its host speed index, as loadl run prints it")
 	}
+	for i, q := range m.Predict {
+		if p := q.Problem(); p != "" {
+			bad(MetaFile, "predict[%d]: %s", i, p)
+		}
+	}
+	if len(m.Predict) == 0 {
+		warn(MetaFile, "predict lists no questions, so loadl predict has nothing to ask; add the README's questions with the expect line each answer becomes")
+	}
 	if v := m.Check.Problem.Verdict; v != "broke" && v != "held" {
 		bad(MetaFile, "check.problem.verdict must be broke or held, not %q", v)
 	}

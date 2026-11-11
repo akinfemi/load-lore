@@ -27,7 +27,7 @@ Keep it short. Sections, in this order:
 
 1. **Title.** The scenario's question, such as "When do you need to scale your database?", then one line with the level, the minutes and the concepts.
 2. **The story.** Two or three sentences in plain terms, then the diagram: the exact output of `loadl diagram design.yaml` in a ```mermaid block. `loadl scenario check` fails when the diagram doesn't match the design, so regenerate it after every design change.
-3. **The question.** What the learner must predict before running. Tell them to write it under `expect` in `design.yaml`, or to tell their AI assistant.
+3. **The question.** What the learner must predict before running. Tell them to run `loadl predict design.yaml`, which asks the questions in `meta.yaml`'s `predict` block, or to write the lines under `expect` themselves, or to tell their AI assistant.
 4. **Run it.** The exact command, how long it takes, and the host it needs (from `meta.yaml`), with the `--scale` advice for smaller machines. Mention `loadl hint`.
 5. **What to try next.** Open directions that don't single out the fix, and a pointer to `solutions/` with a spoiler warning.
 
@@ -74,6 +74,19 @@ check:
     # bigger-db: { min_gain: 1.5, diagnoses: [queueing-knee] }
   variants:                    # one claim per variants/ folder; verdict required
     # bigger-pools: { verdict: broke, signals: [errors] }
+```
+
+`predict` lists the README's questions for `loadl predict`. Each takes an answer of a kind, `rps` (an offered load, or `never`), `service` (one of the design's services) or `text`, and becomes the `expect` line in `expect`, with `{answer}` where the answer goes; an `rps` question also gives the `never` line. A question the grammar can't score becomes a quoted `note`:
+
+```yaml
+predict:
+  - ask: At what offered load, in requests per second, will p99 pass 500 ms? Answer never if you think it stays fast.
+    answer: rps
+    expect: p99_ms < 500 until load_rps >= {answer}
+    never: p99_ms < 500 throughout
+  - ask: Which component gives out first?
+    answer: service
+    expect: 'note: "{answer} gives out first"'
 ```
 
 Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Breaking points move with core speed, so state the claims as relative results (broke or held, which rule fired, the gain from a fix), never as request rates. Rule ids are `pool-exhausted`, `queueing-knee` and `connection-storm` in this version. Break signals are `latency`, `errors` and `throughput`; a claim with `signals` needs `verdict: broke`.

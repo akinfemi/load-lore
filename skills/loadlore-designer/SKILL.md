@@ -87,6 +87,7 @@ Then offer the command to run it: `loadl run design.yaml` (local mode).
 | `loadl validate <file> --json` | The validate loop |
 | `loadl diagram <file> [--ascii]` | Showing the design |
 | `loadl scenarios [search] --json` | Finding a library scenario to start from |
+| `loadl predict <design> --json [--answer N=value]` | Before a scenario run: list its questions, ask the user each one, then write their answers as expect lines. Never answer for them |
 | `loadl hint [scenario] --json` | The next hint for the scenario of the latest run, one at a time |
 | `loadl scenario check <folder> [--static] [--scale s]` | Checking a new scenario: files, diagram, claims, then a run of each design |
 | `loadl doctor --json` | Before a first run, or when runs fail to start or drift: Docker, capacity per scenario, image, host speed and power, each with its fix |

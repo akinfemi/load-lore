@@ -29,7 +29,7 @@ Before you run anything, write down your answers:
 2. Which component gives out first?
 3. What does it look like from outside: slow responses, errors, or both?
 
-Put them in the `expect` block at the bottom of `design.yaml`. The report scores each one against what the run measured. The two lines already there are examples; the grammar is in the [design file reference](../../skills/loadlore-designer/references/schema.md).
+`loadl predict design.yaml` asks questions like these and writes your answers into the `expect` block at the bottom of `design.yaml`, or write them there yourself. The report scores each one against what the run measured. The two lines already there are examples; the grammar is in the [design file reference](../../skills/loadlore-designer/references/schema.md).
 
 ## Run it
 

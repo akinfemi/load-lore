@@ -67,7 +67,29 @@ type Meta struct {
 	Minutes  int      `yaml:"minutes" json:"minutes"` // rough time to work through it
 	Host     Host     `yaml:"host" json:"host"`
 	Check    Claims   `yaml:"check" json:"check"`
+	// Predict is what loadl predict asks before a run, each answer
+	// becoming an expect line.
+	Predict []Question `yaml:"predict" json:"predict"`
 }
+
+// Question is one prediction loadl predict asks for.
+type Question struct {
+	Ask string `yaml:"ask" json:"ask"`
+	// Answer is what kind of answer it takes: rps (an offered load, or
+	// "never"), service (one of the design's services) or text.
+	Answer string `yaml:"answer" json:"answer"`
+	// Expect is the expect line the answer becomes, with {answer} where
+	// the answer goes; Never is the line for an rps answer of "never".
+	Expect string `yaml:"expect" json:"expect"`
+	Never  string `yaml:"never,omitempty" json:"never,omitempty"`
+}
+
+// Answer kinds.
+const (
+	AnswerRPS     = "rps"
+	AnswerService = "service"
+	AnswerText    = "text"
+)
 
 // Host is what Docker must have available for the scenario at --scale 1,
 // Loadlore's own containers included. Smaller hosts need a smaller --scale.
@@ -323,4 +345,31 @@ func ParseHints(md []byte) []Hint {
 	}
 	flush()
 	return hints
+}
+
+// Problem says what's wrong with a question, for the lint; "" when
+// nothing is.
+func (q Question) Problem() string {
+	if strings.TrimSpace(q.Ask) == "" {
+		return "ask is required: the question, as the learner reads it"
+	}
+	if !strings.Contains(q.Expect, "{answer}") {
+		return "expect must contain {answer}, where the answer goes"
+	}
+	sample := map[string]string{AnswerRPS: "1000", AnswerService: "svc", AnswerText: "an answer"}[q.Answer]
+	if sample == "" {
+		return fmt.Sprintf("answer must be rps, service or text, not %q", q.Answer)
+	}
+	if q.Answer == AnswerRPS && q.Never == "" {
+		return "never is required for an rps answer: the line when the learner answers never"
+	}
+	for _, l := range []string{strings.ReplaceAll(q.Expect, "{answer}", sample), q.Never} {
+		if l == "" || strings.HasPrefix(l, "note:") {
+			continue
+		}
+		if _, err := design.ParseExpect(l); err != nil {
+			return fmt.Sprintf("%q isn't a valid expect line: %v", l, err)
+		}
+	}
+	return ""
 }

@@ -19,6 +19,7 @@ loadl run examples/smoke.yaml                  # run on local Docker; results in
 loadl report latest                            # rewrite a run's report.md; --print shows it as text with small charts, --json gives the analysis
 loadl compare <run-a> <run-b>                  # two runs side by side, with the design diff
 loadl scenarios                                # the scenario library
+loadl predict scenarios/<name>/design.yaml     # answer the scenario's questions; they become expect lines
 loadl hint                                     # the next hint for the scenario you're running
 loadl scenario check scenarios/<name>          # run a scenario and its solutions; check its claims
 loadl down                                     # remove anything a run left behind

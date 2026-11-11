@@ -76,6 +76,7 @@ func newRootCmd() *cobra.Command {
 		newScenarioCmd(g),
 		newDownCmd(g),
 		newDoctorCmd(g),
+		newPredictCmd(g),
 		newVersionCmd(g),
 	)
 	return root
