@@ -56,9 +56,12 @@ type World struct {
 	// DBThrottled is db's CFS throttled seconds per second of load; nil
 	// leaves the series out.
 	DBThrottled func(t float64) float64
-	InUse       func(t float64) float64
-	Pending     func(t float64) float64
-	WaitS       func(t float64) float64 // mean pool wait per acquire
+	// HeldS is api's time per call to db once it has a connection; nil
+	// leaves loadlore_call_duration_seconds out.
+	HeldS   func(t float64) float64
+	InUse   func(t float64) float64
+	Pending func(t float64) float64
+	WaitS   func(t float64) float64 // mean pool wait per acquire
 
 	// HostCPU is run.json's host.host_cpu. With HostCPUSampled, the run
 	// has /proc/stat samples of an 8-CPU host: Steal is the share of CPU
@@ -170,6 +173,11 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 	if w.DBThrottled != nil {
 		dbThrottled = newC(counters, "container_cpu_cfs_throttled_seconds_total", map[string]string{"service": "db", "role": "datastore", "name": "db"})
 	}
+	var callSum, callCnt *counter
+	if w.HeldS != nil {
+		callSum = newC(counters, "loadlore_call_duration_seconds_sum", map[string]string{"service": "api", "target": "db", "op": "read"})
+		callCnt = newC(counters, "loadlore_call_duration_seconds_count", map[string]string{"service": "api", "target": "db", "op": "read"})
+	}
 	waitSum := newC(counters, "loadlore_pool_wait_seconds_sum", map[string]string{"service": "api", "target": "db"})
 	waitCnt := newC(counters, "loadlore_pool_wait_seconds_count", map[string]string{"service": "api", "target": "db"})
 	inUse := newC(gauges, "loadlore_pool_connections", map[string]string{"service": "api", "target": "db", "state": "in_use"})
@@ -228,6 +236,10 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			if w.DBThrottled != nil {
 				add(dbThrottled, w.DBThrottled(el))
 			}
+			if callSum != nil {
+				add(callSum, (w.WaitS(el)+w.HeldS(el))*ok)
+				add(callCnt, ok)
+			}
 			add(waitSum, w.WaitS(el)*ok)
 			add(waitCnt, ok)
 			set(inUse, w.InUse(el))
@@ -249,6 +261,10 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			add(dbCPU, 0.01)
 			if dbThrottled != nil {
 				add(dbThrottled, 0)
+			}
+			if callSum != nil {
+				add(callSum, 0)
+				add(callCnt, 0)
 			}
 			set(inUse, 0)
 			set(pending, 0)

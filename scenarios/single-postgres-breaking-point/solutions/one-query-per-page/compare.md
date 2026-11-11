@@ -2,6 +2,10 @@
 
 _A: run `single-postgres-breaking-point-20261110-004633` · B: run `single-postgres-breaking-point-one-query-per-page-20261110-084325`_
 
+**Same verdict, different results.** Both broke at 2:50 (2,958 rps offered), but B served at most 3,422 rps against A's 2,791 (1.23×); from the break on, B served 68% of the offered load against A's 50%; p99 at the break was 233 ms against 990 ms.
+
+<sub>Served: k6_http_reqs_total{expected_response="true"} (k6: successful responses); offered: the load profile in plan.json (offered arrival rate); p99: k6_http_req_duration_seconds (k6 histogram, end to end).</sub>
+
 | | A | B |
 | --- | --- | --- |
 | Design | single-postgres-breaking-point | single-postgres-breaking-point-one-query-per-page |
@@ -18,15 +22,11 @@ _A: run `single-postgres-breaking-point-20261110-004633` · B: run `single-postg
 
 <sub>Sources as in each run's report: served from k6_http_reqs_total{expected_response="true"} (k6: successful responses), p99 from k6_http_req_duration_seconds (k6 histogram, end to end), errors from k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6).</sub>
 
-**Before reading the difference:**
-
-- The runs ran on hosts of different sizes.
-
 ## Verdicts
 
-**A.** Broke 2:50 into the load, at 2,958 rps offered: p99 reached 990 ms (3.2 ms at low load). Most saturated then: api → db pool 96 of 96 connections in use. After the break the load generator couldn't send 50% of the arrivals the profile asked for (546,431 arrivals from 3:00; k6_dropped_iterations_total (k6: arrivals it couldn't start)): slow responses held its 4,000 VUs, so served throughput from then on is partly the generator's limit, not only the system's.
+**A.** Broke 2:50 into the load, at 2,958 rps offered: p99 reached 990 ms (3.2 ms at low load). Most saturated then: api → db pool 96 of 96 connections in use, waiting on db (CPU 98%, CPU-throttled 40.2 s, 8.6 ms per call with a connection, 0.1 ms at low load). After the break the load generator couldn't send 50% of the arrivals the profile asked for (546,431 arrivals from 3:00; k6_dropped_iterations_total (k6: arrivals it couldn't start)): slow responses held its 4,000 VUs, so served throughput from then on is partly the generator's limit, not only the system's.
 
-**B.** Broke 2:50 into the load, at 2,958 rps offered: p99 reached 233 ms (3.6 ms at low load). Most saturated then: api → db pool 96 of 96 connections in use. After the break the load generator couldn't send 33% of the arrivals the profile asked for (355,690 arrivals from 3:10; k6_dropped_iterations_total (k6: arrivals it couldn't start)): slow responses held its 4,000 VUs, so served throughput from then on is partly the generator's limit, not only the system's.
+**B.** Broke 2:50 into the load, at 2,958 rps offered: p99 reached 233 ms (3.6 ms at low load). Most saturated then: api → db pool 96 of 96 connections in use, waiting on db (CPU 87%, CPU-throttled 17.1 s, 7.8 ms per call with a connection, 0.4 ms at low load). After the break the load generator couldn't send 33% of the arrivals the profile asked for (355,690 arrivals from 3:10; k6_dropped_iterations_total (k6: arrivals it couldn't start)): slow responses held its 4,000 VUs, so served throughput from then on is partly the generator's limit, not only the system's.
 
 ## Charts
 

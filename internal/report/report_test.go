@@ -107,6 +107,33 @@ func TestCompare(t *testing.T) {
 	}
 }
 
+// Two runs that broke at the same time lead with how they differed, and
+// hosts that differ only by a VM's memory drift aren't called different.
+func TestCompareTieAndHosts(t *testing.T) {
+	a, err := analysis.Analyze(analysistest.WriteRun(t, poolWorld(), 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := analysis.Analyze(analysistest.WriteRun(t, poolWorld(), 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ha, hb := *a.Environment.Host, *a.Environment.Host
+	ha.MemoryBytes, hb.MemoryBytes = 10403422208, 10403430400
+	a.Environment.Host, b.Environment.Host = &ha, &hb
+	md := Compare(a, b)
+	if !strings.Contains(md, "**Same verdict, different results.** Both broke at 0:40 (450 rps offered), but B served at most") || !strings.Contains(md, "from the break on, B served") {
+		t.Errorf("no tie lead:\n%s", md[:min(len(md), 800)])
+	}
+	if strings.Contains(md, "different hosts") {
+		t.Error("memory drift called a different host")
+	}
+	hb.CPUs = 4
+	if md := Compare(a, b); !strings.Contains(md, "The runs ran on different hosts: 8 CPUs and 4 (A, then B)") {
+		t.Error("CPU difference not named")
+	}
+}
+
 func TestUnifiedDiff(t *testing.T) {
 	x := "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n"
 	y := "a\nb\nC\nd\ne\nf\ng\nh\ni\nj\nk\n"

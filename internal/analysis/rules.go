@@ -41,8 +41,11 @@ const (
 	KneeWindows       = 3    // for 30 seconds in a row: a knee doesn't recover by itself
 	LittleMinInflight = 20   // below this, sampling noise swamps Little's law
 	// A pool's target is busy, so a full pool is its symptom, when its CPU
-	// is at PoolTargetCPUMax or more, it was CPU-throttled for ThrottledMin
-	// or more, or its time per call with a connection rose this much.
+	// is at PoolTargetCPUMax or more or its time per call with a connection
+	// rose this much. Throttling alone doesn't count: a Postgres at 0.5 CPU
+	// is throttled for a second or more in most windows from 30% CPU, with
+	// a handful of connections in use, while it still answers at its usual
+	// speed. When throttling does slow it, the time per call shows it.
 	TargetSlowFactor = 3.0 // at least 3x its low-load value ...
 	TargetSlowMinMs  = 1.0 // ... and at least 1 ms above it
 )
@@ -238,19 +241,20 @@ func queueingKnee(a *Analysis) *Diagnosis {
 }
 
 // targetBusy is the evidence that a pool's target was the slow part in a
-// window: its CPU near its limit, CPU throttling, or calls that took
-// longer once they had a connection. Nil means the target was idle.
+// window: its CPU near its limit, or calls that took longer once they had
+// a connection. Nil means the target kept up. CPU throttling in the window
+// is added as the likely reason, but isn't evidence alone.
 func targetBusy(a *Analysis, w *Window, svc, target string) []Evidence {
 	var out []Evidence
 	if c := cpuOf(w, target); c != nil && *c >= PoolTargetCPUMax {
 		out = append(out, Evidence{Text: fmt.Sprintf("%s CPU at %s of its limit at %s", target, Pct(*c), Clock(w.Start)), Source: SrcCPU})
 	}
-	if e, ok := throttled(a, w, target); ok {
-		out = append(out, e)
-	}
 	p := poolAt(w, svc, target)
 	if base, ok := heldBaseline(a, svc, target); ok && p != nil && p.HeldMs != nil && *p.HeldMs >= TargetSlowFactor*base && *p.HeldMs >= base+TargetSlowMinMs {
 		out = append(out, Evidence{Text: fmt.Sprintf("%s's calls to %s took %s each once they had a connection at %s, against %s at low load", svc, target, Ms(*p.HeldMs), Clock(w.Start), Ms(base)), Source: SrcPoolHeld})
+	}
+	if e, ok := throttled(a, w, target); ok && len(out) > 0 {
+		out = append(out, e)
 	}
 	return out
 }
@@ -259,10 +263,7 @@ func targetBusy(a *Analysis, w *Window, svc, target string) []Evidence {
 // windows the low-load p99 comes from.
 func heldBaseline(a *Analysis, svc, target string) (float64, bool) {
 	var xs []float64
-	for _, w := range a.Windows {
-		if a.Verdict.Break != nil && w.Index >= a.Verdict.Break.Window {
-			break
-		}
+	for _, w := range healthy(a.Windows) {
 		if p := poolAt(w, svc, target); p != nil && p.HeldMs != nil && w.Offered <= BaselineShare*a.PeakOffered {
 			xs = append(xs, *p.HeldMs)
 		}

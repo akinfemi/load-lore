@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -482,6 +483,9 @@ func TestKneeFollowsPoolToBusyTarget(t *testing.T) {
 	if b := a.Verdict.Break; b == nil || b.At != 170 {
 		t.Fatalf("break %+v", b)
 	}
+	if want := "Most saturated then: api → db pool 96 of 96 connections in use, waiting on db (CPU 87%, CPU-throttled 17.1 s, 7.8 ms per call with a connection, 0.4 ms at low load)."; !strings.Contains(a.Verdict.Summary, want) {
+		t.Errorf("summary lacks %q:\n%s", want, a.Verdict.Summary)
+	}
 	ds := diagnose(a)
 	if len(ds) != 1 || ds[0].Rule != "queueing-knee" {
 		t.Fatalf("diagnoses %+v", ds)
@@ -501,27 +505,38 @@ func TestKneeFollowsPoolToBusyTarget(t *testing.T) {
 	}
 }
 
-// A full pool in front of a throttled database is the database's knee,
-// and not pool exhaustion, even with the database's average CPU low.
-func TestFullPoolBeforeThrottledTarget(t *testing.T) {
+// A full pool in front of a database whose calls slowed down is the
+// database's knee, not pool exhaustion, even with its average CPU at 50%.
+// With the same throttling but calls at their usual speed, the pool is to
+// blame: the connection pool trap.
+func TestFullPoolFollowsTarget(t *testing.T) {
 	w := analysistest.Healthy()
 	w.DBCPU = func(float64) float64 { return 0.5 }
 	w.InUse = func(t float64) float64 { return math.Min(10, 2+t/5) } // full from 40 s
 	w.Pending = func(t float64) float64 { return math.Max(0, (t-40)*3) }
 	w.WaitS = func(t float64) float64 { return math.Max(0.0001, (t-40)/200) }
 	w.P99 = func(t float64) float64 { return math.Max(0.005, (t-40)/50) }
-	w.DBThrottled = func(t float64) float64 {
-		if t >= 40 {
-			return 0.5
+	w.DBThrottled = func(t float64) float64 { return 0.3 } // 3 s per window throughout
+	titles := func(w analysistest.World) []string {
+		var out []string
+		for _, d := range analyze(t, analysistest.WriteRun(t, w, 1)).Diagnoses {
+			out = append(out, d.Title)
 		}
-		return 0
+		return out
 	}
-	a := analyze(t, analysistest.WriteRun(t, w, 1))
-	var titles []string
-	for _, d := range a.Diagnoses {
-		titles = append(titles, d.Title)
+
+	w.HeldS = func(t float64) float64 {
+		if t >= 40 {
+			return 0.005
+		}
+		return 0.0005
 	}
-	if len(titles) != 1 || titles[0] != "Queueing knee (db CPU)" {
-		t.Errorf("diagnoses %q", titles)
+	if got := titles(w); len(got) != 1 || got[0] != "Queueing knee (db CPU)" {
+		t.Errorf("slow db: diagnoses %q", got)
+	}
+
+	w.HeldS = func(float64) float64 { return 0.0005 }
+	if got := titles(w); len(got) == 0 || got[0] != "Connection pool exhausted (api → db)" || slices.Contains(got, "Queueing knee (db CPU)") {
+		t.Errorf("db throttled but answering at its usual speed: diagnoses %q", got)
 	}
 }

@@ -97,7 +97,7 @@ func verdict(a *Analysis) Verdict {
 	for i, w := range ws {
 		hard[i] = hardSignals(w)
 	}
-	v.BaselineP99 = baselineP99(ws, a.PeakOffered, hard)
+	v.BaselineP99 = baselineP99(ws, a.PeakOffered)
 	for _, w := range ws {
 		if w.RPS != nil && (v.MaxRPS == nil || *w.RPS > *v.MaxRPS) {
 			v.MaxRPS, v.MaxRPSAt = w.RPS, w.Start
@@ -158,11 +158,24 @@ func maxPtr(cur, v *float64) *float64 {
 // a system that is already failing has no low-load latency to compare
 // against. A single short window, as when k6 is still starting its VUs,
 // doesn't end the baseline.
-func baselineP99(ws []*Window, peak float64, hard [][]string) *float64 {
-	healthy := ws
-	if i := findBreak(hard, nil); i >= 0 {
-		healthy = ws[:i]
+func baselineP99(ws []*Window, peak float64) *float64 {
+	return baselineFrom(healthy(ws), peak)
+}
+
+// healthy is ws up to the first shortfall or errors in a row: the windows
+// a low-load baseline may come from.
+func healthy(ws []*Window) []*Window {
+	hard := make([][]string, len(ws))
+	for i, w := range ws {
+		hard[i] = hardSignals(w)
 	}
+	if i := findBreak(hard, nil); i >= 0 {
+		return ws[:i]
+	}
+	return ws
+}
+
+func baselineFrom(healthy []*Window, peak float64) *float64 {
 	var xs []float64
 	for _, w := range healthy {
 		if w.P99 != nil && w.Offered <= BaselineShare*peak {
@@ -375,6 +388,33 @@ func MostSaturated(ss []Saturation) (Saturation, bool) {
 	return Saturation{}, false
 }
 
+// waitingOn names a full pool's target when the target was busy: the pool
+// is what was observed, the target why. Throttling is listed as the
+// likely reason when the target was busy.
+func waitingOn(a *Analysis, i int, top Saturation) string {
+	target, ok := strings.CutPrefix(top.What, "pool to ")
+	if !ok || i >= len(a.Windows) {
+		return ""
+	}
+	w := a.Windows[i]
+	if len(targetBusy(a, w, top.Component, target)) == 0 {
+		return ""
+	}
+	var parts []string
+	if c := cpuOf(w, target); c != nil {
+		parts = append(parts, "CPU "+Pct(*c))
+	}
+	if sw := w.Services[target]; sw != nil && sw.Throttled != nil && *sw.Throttled >= ThrottledMin {
+		parts = append(parts, fmt.Sprintf("CPU-throttled %.1f s", *sw.Throttled))
+	}
+	if p := poolAt(w, top.Component, target); p != nil && p.HeldMs != nil {
+		if base, ok := heldBaseline(a, top.Component, target); ok {
+			parts = append(parts, fmt.Sprintf("%s per call with a connection, %s at low load", Ms(*p.HeldMs), Ms(base)))
+		}
+	}
+	return fmt.Sprintf(", waiting on %s (%s)", target, strings.Join(parts, ", "))
+}
+
 // inconclusive finds signs that Loadlore's own tooling, not the system, set
 // the limit before the break (or anywhere, if nothing broke). Dropped
 // arrivals in the break window itself are a consequence of the break.
@@ -504,7 +544,7 @@ func (v *Verdict) summary(a *Analysis) string {
 		}
 		s = fmt.Sprintf("Broke %s into the load, at %s rps offered: %s.", Clock(b.At), Rate(b.Offered), joinAnd(what))
 		if top, ok := MostSaturated(b.Saturation); ok {
-			s += " Most saturated then: " + top.Detail + "."
+			s += " Most saturated then: " + top.Detail + waitingOn(a, b.Window, top) + "."
 		}
 		// Faults and container deaths near the break; a death a fault
 		// caused is already described by the fault.

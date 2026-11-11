@@ -21,6 +21,9 @@ func Compare(a, b *analysis.Analysis) string {
 	d.line("# Compare: %s", title)
 	d.line("")
 	d.p("_A: run `%s` · B: run `%s`_", a.RunID, b.RunID)
+	if lead := tieLead(a, b); lead != "" {
+		d.p("%s", lead)
+	}
 
 	d.line("| | A | B |")
 	d.line("| --- | --- | --- |")
@@ -152,6 +155,18 @@ func optMs(p *float64) string {
 	return analysis.Ms(*p)
 }
 
+// Hosts count as the same size within these shares. A VM's reported
+// memory moves by a few KiB between runs, and the speed index by about
+// 10% on one machine.
+const (
+	HostMemoryTolerance = 0.05
+	HostSpeedTolerance  = 0.15
+)
+
+func apart(x, y, share float64) bool {
+	return math.Abs(x-y) > share*math.Max(x, y)
+}
+
 // caveats are differences that make a comparison less than like for like.
 func caveats(a, b *analysis.Analysis) []string {
 	var out []string
@@ -161,8 +176,20 @@ func caveats(a, b *analysis.Analysis) []string {
 	if a.Environment.Duration != b.Environment.Duration || a.PeakOffered != b.PeakOffered {
 		out = append(out, "The load profiles differ, so windows at the same time had different offered load. Compare the offered columns.")
 	}
-	if ha, hb := a.Environment.Host, b.Environment.Host; ha != nil && hb != nil && (ha.CPUs != hb.CPUs || ha.MemoryBytes != hb.MemoryBytes) {
-		out = append(out, "The runs ran on hosts of different sizes.")
+	if ha, hb := a.Environment.Host, b.Environment.Host; ha != nil && hb != nil {
+		var diff []string
+		if ha.CPUs != hb.CPUs {
+			diff = append(diff, fmt.Sprintf("%d CPUs and %d", ha.CPUs, hb.CPUs))
+		}
+		if apart(float64(ha.MemoryBytes), float64(hb.MemoryBytes), HostMemoryTolerance) {
+			diff = append(diff, fmt.Sprintf("%s and %s of memory", gib(ha.MemoryBytes), gib(hb.MemoryBytes)))
+		}
+		if ha.Speed != nil && hb.Speed != nil && apart(float64(ha.Speed.Index), float64(hb.Speed.Index), HostSpeedTolerance) {
+			diff = append(diff, fmt.Sprintf("speed index %d and %d", ha.Speed.Index, hb.Speed.Index))
+		}
+		if len(diff) > 0 {
+			out = append(out, "The runs ran on different hosts: "+strings.Join(diff, ", ")+" (A, then B). CPU limits are fractions of the host's cores, so the same design can break at a different load.")
+		}
 	}
 	if a.Seed != b.Seed || a.Seed == 0 {
 		out = append(out, "The runs didn't share a --seed, so they drew different keys and read/write sequences.")
@@ -395,4 +422,59 @@ func unifiedDiff(x, y, nameX, nameY string) string {
 		k = end
 	}
 	return out.String()
+}
+
+// tieLead says how two runs with the same verdict differ, since the
+// verdict alone would make them look alike: the most each served, and
+// around a shared break, how much of the offered load each served after
+// it and its p99 at the break.
+func tieLead(a, b *analysis.Analysis) string {
+	if shortVerdict(a) != shortVerdict(b) || a.Verdict.MaxRPS == nil || b.Verdict.MaxRPS == nil {
+		return ""
+	}
+	ra, rb := *a.Verdict.MaxRPS, *b.Verdict.MaxRPS
+	parts := []string{fmt.Sprintf("B served at most %s rps against A's %s (%s)", analysis.Rate(rb), analysis.Rate(ra), ratio(rb, ra))}
+	ba, bb := a.Verdict.Break, b.Verdict.Break
+	if ba != nil && bb != nil {
+		sa, oka := servedShare(a, ba.Window)
+		sb, okb := servedShare(b, bb.Window)
+		if oka && okb {
+			parts = append(parts, fmt.Sprintf("from the break on, B served %s of the offered load against A's %s", analysis.Pct(sb), analysis.Pct(sa)))
+		}
+		if ba.P99 != nil && bb.P99 != nil {
+			parts = append(parts, fmt.Sprintf("p99 at the break was %s against %s", analysis.Ms(*bb.P99), analysis.Ms(*ba.P99)))
+		}
+	} else if a.Verdict.WorstP99 != nil && b.Verdict.WorstP99 != nil {
+		parts = append(parts, fmt.Sprintf("B's worst 10-second p99 was %s against A's %s", analysis.Ms(*b.Verdict.WorstP99), analysis.Ms(*a.Verdict.WorstP99)))
+	}
+	both := "Both runs have the same verdict"
+	switch {
+	case ba != nil:
+		both = fmt.Sprintf("Both broke at %s (%s rps offered)", analysis.Clock(ba.At), analysis.Rate(ba.Offered))
+	case a.Verdict.Kind == analysis.VerdictHeld:
+		both = "Both held the whole profile"
+	}
+	return fmt.Sprintf("**Same verdict, different results.** %s, but %s.\n\n<sub>Served: %s; offered: %s; p99: %s.</sub>",
+		both, strings.Join(parts, "; "), analysis.SrcRPS, analysis.SrcOffered, analysis.SrcK6Latency)
+}
+
+func ratio(x, y float64) string {
+	if y <= 0 {
+		return "no ratio"
+	}
+	return fmt.Sprintf("%.2f×", x/y)
+}
+
+// servedShare is successful responses over offered arrivals from window i
+// to the end of the analyzed windows.
+func servedShare(x *analysis.Analysis, i int) (float64, bool) {
+	var served, offered float64
+	for _, w := range x.Windows[i:min(x.Analyzed, len(x.Windows))] {
+		if w.RPS == nil {
+			return 0, false
+		}
+		served += *w.RPS
+		offered += w.Offered
+	}
+	return served / offered, offered > 0
 }
