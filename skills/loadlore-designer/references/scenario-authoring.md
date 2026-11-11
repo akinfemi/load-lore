@@ -15,6 +15,10 @@ scenarios/<scenario-name>/
       README.md    # what changed, why it helps, what it costs
       design.yaml  # the improved design
       report.md    # the report from a reference run of it (copied from .loadlore/runs/<id>/)
+  variants/        # optional
+    <variant-name>/
+      README.md    # what the variant is and what it shows
+      design.yaml  # a design the learner is likely to try
 ```
 
 ## README.md
@@ -64,21 +68,42 @@ check:
   problem:
     verdict: broke             # broke or held: what the starting design must do
     diagnoses: [queueing-knee] # rules that must fire
+    # signals: [latency]       # break signals that must show at the break
   solutions:
     one-query-per-page: {}     # helps: holds, or serves min_gain x the peak throughput or more
     # bigger-db: { min_gain: 1.5, diagnoses: [queueing-knee] }
+  variants:                    # one claim per variants/ folder; verdict required
+    # bigger-pools: { verdict: broke, signals: [errors] }
 ```
 
-Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Breaking points move with core speed, so state the claims as relative results (broke or held, which rule fired, the gain from a fix), never as request rates. Rule ids are `pool-exhausted`, `queueing-knee` and `connection-storm` in this version.
+Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Breaking points move with core speed, so state the claims as relative results (broke or held, which rule fired, the gain from a fix), never as request rates. Rule ids are `pool-exhausted`, `queueing-knee` and `connection-storm` in this version. Break signals are `latency`, `errors` and `throughput`; a claim with `signals` needs `verdict: broke`.
 
 ## Solutions
 
 At least one. Each is a folder with a full `design.yaml` (named `<scenario>-<solution>`), a `README.md` explaining what changed, why it helps and what it costs, and the `report.md` of a reference run. Where there are several reasonable fixes, include more than one; showing trade-offs is part of the lesson. A solution must not need more host than `meta.yaml` states.
 
+## Variants
+
+A variant is a design the learner is likely to try that must show a stated outcome. Usually it is the obvious fix walking into a trap: the api's pools made 3x bigger run into Postgres `max_connections`, and the run breaks with errors.
+
+Add one for the fix the hints lead the learner to try, when its failure is part of the lesson. The check then keeps that failure true. Without one, a change to the load profile can quietly turn the trap into a fix, and nothing notices.
+
+Each variant is a folder in `variants/` with a full `design.yaml` (named `<scenario>-<variant>`) and a `README.md` saying what the variant is and what it shows. Like solutions, it's a spoiler.
+
+Every variant needs a claim in `meta.yaml`, and the claim needs a verdict:
+
+```yaml
+check:
+  variants:
+    bigger-pools: { verdict: broke, signals: [errors] }
+```
+
+`diagnoses` and `signals` work as they do for the problem. Variants run after the solutions, each once the host has cooled to the starting design's speed. A variant's claim doesn't depend on another run, so it never runs again. Hints may point at a variant once the learner has tried the fix ("variants/bigger-pools shows what happens.").
+
 ## Checks before handing over
 
-1. `loadl scenario check <folder> --static` passes: every file is there, every design validates, the README's diagram matches, and the claims name real solutions and rules.
-2. `loadl scenario check <folder>` passes on a quiet host at `--scale 1`: the starting design shows the problem and each solution helps. Small scales may not reproduce it: a fraction of a CPU stalls under throttling and fails in its own way. When a solution's run and the starting design's measure host speed indexes more than 10% apart, the slower one runs again once the host has cooled; still apart, the check ends `INCONCLUSIVE` rather than passing or failing, since the host's speed could explain the difference. Let the machine cool, check it's on mains power, and run the check again.
+1. `loadl scenario check <folder> --static` passes: every file is there, every design validates, the README's diagram matches, and the claims name real solutions, variants, rules and signals.
+2. `loadl scenario check <folder>` passes on a quiet host at `--scale 1`: the starting design shows the problem, each solution helps, and each variant shows its claim. Small scales may not reproduce it: a fraction of a CPU stalls under throttling and fails in its own way. When a solution's run and the starting design's measure host speed indexes more than 10% apart, the slower one runs again once the host has cooled; still apart, the check ends `INCONCLUSIVE` rather than passing or failing, since the host's speed could explain the difference. Let the machine cool, check it's on mains power, and run the check again.
 3. The README contains no answer; reread it as a learner.
 4. Every assumption in the designs is listed and plausible.
 

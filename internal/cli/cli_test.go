@@ -335,3 +335,23 @@ func TestPrintCheckInconclusive(t *testing.T) {
 		t.Errorf("ok exit: %v", err)
 	}
 }
+
+// Variants print after the solutions, labelled as variants.
+func TestPrintCheckVariant(t *testing.T) {
+	r := &scenario.CheckResult{
+		Scenario: "demo", Lint: []scenario.Problem{}, Status: scenario.StatusFailed,
+		Problem: &scenario.RunCheck{Name: "problem", RunDir: "/runs/demo-1", Status: scenario.StatusOK, OK: true,
+			Claims: []scenario.ClaimResult{{Claim: "verdict broke", OK: true, Detail: "broke at 1:10"}}},
+		Solutions: []*scenario.RunCheck{{Name: "bigger", RunDir: "/runs/bigger-1", Status: scenario.StatusOK, OK: true,
+			Claims: []scenario.ClaimResult{{Claim: "helps", OK: true, Detail: "held through the profile"}}}},
+		Variants: []*scenario.RunCheck{{Name: "bigger-pools", RunDir: "/runs/bigger-pools-1", Status: scenario.StatusFailed,
+			Claims: []scenario.ClaimResult{{Claim: "verdict broke", OK: true, Detail: "broke at 1:10"}, {Claim: "break signal errors", OK: false, Detail: "at the break: latency"}}}},
+	}
+	var b bytes.Buffer
+	printCheck(&b, r, false)
+	want := "  solution bigger (run bigger-1)\n    ok   helps: held through the profile\n" +
+		"  variant bigger-pools (run bigger-pools-1)\n    ok   verdict broke: broke at 1:10\n    FAIL break signal errors: at the break: latency\nFAILED\n"
+	if out := b.String(); !strings.HasSuffix(out, want) {
+		t.Errorf("got\n%s\nwant it to end\n%s", out, want)
+	}
+}

@@ -35,11 +35,12 @@ type CheckResult struct {
 	Lint      []Problem   `json:"lint"`
 	Problem   *RunCheck   `json:"problem,omitempty"`
 	Solutions []*RunCheck `json:"solutions"`
+	Variants  []*RunCheck `json:"variants"`
 }
 
 // RunCheck is one design's run and its claims.
 type RunCheck struct {
-	Name         string        `json:"name"` // "problem" or the solution's name
+	Name         string        `json:"name"` // "problem", or the solution's or variant's name
 	Design       string        `json:"design"`
 	RunDir       string        `json:"run_dir,omitempty"`
 	Error        string        `json:"error,omitempty"`
@@ -47,7 +48,8 @@ type RunCheck struct {
 	Summary      string        `json:"summary,omitempty"`
 	BreakAt      *float64      `json:"break_at_s,omitempty"`
 	BreakLoad    *float64      `json:"break_offered_rps,omitempty"`
-	PeakRPS      *float64      `json:"peak_rps,omitempty"` // most successful responses/s in any window
+	BreakSignals []string      `json:"break_signals,omitempty"` // latency, errors, throughput at the break
+	PeakRPS      *float64      `json:"peak_rps,omitempty"`      // most successful responses/s in any window
 	Diagnoses    []string      `json:"diagnoses"`
 	Claims       []ClaimResult `json:"claims"`
 	OK           bool          `json:"ok"`                     // Status is ok
@@ -78,10 +80,10 @@ type ClaimResult struct {
 	Detail string `json:"detail"`
 }
 
-// Check lints the folder, then runs the starting design and each solution
-// in turn and checks their claims. With run nil it only lints.
+// Check lints the folder, then runs the starting design, each solution and
+// each variant in turn and checks their claims. With run nil it only lints.
 func Check(ctx context.Context, s *Scenario, dir string, run RunFunc) *CheckResult {
-	res := &CheckResult{Scenario: s.Name, Path: dir, Lint: s.Lint(), Solutions: []*RunCheck{}}
+	res := &CheckResult{Scenario: s.Name, Path: dir, Lint: s.Lint(), Solutions: []*RunCheck{}, Variants: []*RunCheck{}}
 	if res.Lint == nil {
 		res.Lint = []Problem{}
 	}
@@ -104,16 +106,29 @@ func Check(ctx context.Context, s *Scenario, dir string, run RunFunc) *CheckResu
 		res.Solutions = append(res.Solutions, rc)
 		rerunSlower(ctx, run, res)
 	}
+	for _, name := range s.Variants {
+		if ctx.Err() != nil {
+			break
+		}
+		// A variant's claims stand on their own, not against another
+		// run, so it waits for the starting design's speed but never runs
+		// again.
+		res.Variants = append(res.Variants, runOne(ctx, run, name, filepath.Join(dir, filepath.FromSlash(VariantDesign(name))), res.Problem.SpeedIndex))
+	}
 
 	// The claims are judged once the runs are in, so every solution is
 	// judged against the starting design's last run.
-	problemClaims(res.Problem, s.Meta.Check.Problem)
-	failed := !res.Problem.OK || len(res.Solutions) != len(s.Solutions)
+	ownClaims(res.Problem, s.Meta.Check.Problem)
+	failed := !res.Problem.OK || len(res.Solutions) != len(s.Solutions) || len(res.Variants) != len(s.Variants)
 	inconclusive := false
 	for _, rc := range res.Solutions {
 		solutionClaims(rc, s.Meta.Check.Solutions[rc.Name], res.Problem)
 		failed = failed || rc.Status == StatusFailed
 		inconclusive = inconclusive || rc.Status == StatusInconclusive
+	}
+	for _, rc := range res.Variants {
+		ownClaims(rc, s.Meta.Check.Variants[rc.Name])
+		failed = failed || rc.Status == StatusFailed
 	}
 	switch {
 	case failed:
@@ -186,6 +201,7 @@ func runOne(ctx context.Context, run RunFunc, name, designPath string, coolTo in
 	if b := a.Verdict.Break; b != nil {
 		at, load := b.At, b.Offered
 		rc.BreakAt, rc.BreakLoad = &at, &load
+		rc.BreakSignals = b.Signals
 	}
 	for _, d := range a.Diagnoses {
 		if !slices.Contains(rc.Diagnoses, d.Rule) {
@@ -213,13 +229,16 @@ func (rc *RunCheck) usable() bool {
 	return true
 }
 
-func problemClaims(rc *RunCheck, c Claim) {
+// ownClaims judges the starting design's run or a variant's: their claims
+// stand on their own, not against another run.
+func ownClaims(rc *RunCheck, c Claim) {
 	defer rc.settle()
 	if !rc.usable() {
 		return
 	}
 	rc.claim("verdict "+c.Verdict, rc.Verdict == c.Verdict, rc.Summary)
 	rc.diagnosisClaims(c)
+	rc.signalClaims(c)
 }
 
 func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck) {
@@ -241,6 +260,7 @@ func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck) {
 		rc.claim("verdict "+c.Verdict, rc.Verdict == c.Verdict, rc.Summary)
 	}
 	rc.diagnosisClaims(c)
+	rc.signalClaims(c)
 
 	gain := DefaultMinGain
 	if c.MinGain != nil {
@@ -271,6 +291,16 @@ func (rc *RunCheck) diagnosisClaims(c Claim) {
 			got = "fired: " + strings.Join(rc.Diagnoses, ", ")
 		}
 		rc.claim("diagnosis "+want, slices.Contains(rc.Diagnoses, want), got)
+	}
+}
+
+func (rc *RunCheck) signalClaims(c Claim) {
+	for _, want := range c.Signals {
+		got := "it didn't break"
+		if rc.BreakAt != nil {
+			got = "at the break: " + strings.Join(rc.BreakSignals, ", ")
+		}
+		rc.claim("break signal "+want, slices.Contains(rc.BreakSignals, want), got)
 	}
 }
 

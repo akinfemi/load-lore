@@ -46,11 +46,11 @@ Use this when the user points at their own repo and asks to "test my app" or "se
 
 ### D. Write a scenario
 
-Follow `references/scenario-authoring.md`. In short: a folder with `README.md` (the story, the question and the diagram), `design.yaml` (the starting point, named after the folder), `hints.md` (one `## ` section per hint, never the answer in hint 1), `meta.yaml` (including the `check` claims), and at least one folder in `solutions/`. Run `loadl scenario check <folder> --static` while writing, and the full `loadl scenario check <folder>` before handing it over.
+Follow `references/scenario-authoring.md`. In short: a folder with `README.md` (the story, the question and the diagram), `design.yaml` (the starting point, named after the folder), `hints.md` (one `## ` section per hint, never the answer in hint 1), `meta.yaml` (including the `check` claims), at least one folder in `solutions/`, and a folder in `variants/` for a fix the hints lead to whose failure is part of the lesson. Run `loadl scenario check <folder> --static` while writing, and the full `loadl scenario check <folder>` before handing it over.
 
 ### F. A learner working through a library scenario
 
-`loadl scenarios --json` lists them. The learner runs the scenario's `design.yaml`; `loadl hint` reveals the next hint for it. Ground rule 4 applies with extra force: don't reveal hints or the `solutions/` folder ahead of `loadl hint`, unless the learner asks you to.
+`loadl scenarios --json` lists them. The learner runs the scenario's `design.yaml`; `loadl hint` reveals the next hint for it. Ground rule 4 applies with extra force: don't reveal hints or the `solutions/` and `variants/` folders ahead of `loadl hint`, unless the learner asks you to.
 
 ### E. After a run
 

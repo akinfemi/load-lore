@@ -154,9 +154,54 @@ func TestLint(t *testing.T) {
 	}
 }
 
+func TestLintVariants(t *testing.T) {
+	s, err := Open(writeScenario(t, variantFiles("{ verdict: broke, signals: [latency] }", "{ verdict: broke, signals: [errors] }")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ps := s.Lint(); HasErrors(ps) || len(s.Variants) != 1 || s.Variants[0] != "bigger-pools" {
+		t.Errorf("clean folder: variants %v, %v", s.Variants, ps)
+	}
+
+	// orphan has no claim, ghost has no folder, and bigger-pools is
+	// misnamed and has no README.
+	files := variantFiles("{ verdict: broke, signals: [slow] }", "{ signals: [errors] }")
+	files["meta.yaml"] += "    ghost: { verdict: held, signals: [errors] }\n"
+	files["variants/orphan/design.yaml"] = strings.Replace(demoDesign, "name: demo", "name: demo-orphan", 1)
+	files["variants/orphan/README.md"] = "# Orphan\n"
+	files["variants/bigger-pools/design.yaml"] = demoDesign
+	delete(files, "variants/bigger-pools/README.md")
+	s, err = Open(writeScenario(t, files))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range s.Lint() {
+		got = append(got, p.String())
+	}
+	all := strings.Join(got, "\n")
+	for _, want := range []string{
+		`meta.yaml: error: check.problem.signals: no signal "slow"; a break's signals are latency, errors, throughput`,
+		`meta.yaml: error: check.variants.bigger-pools.verdict is required`,
+		`meta.yaml: error: check.variants.bigger-pools.signals need verdict broke`,
+		`meta.yaml: error: check.variants.ghost: there's no variants/ghost folder`,
+		`meta.yaml: error: check.variants.ghost.signals need verdict broke`,
+		`meta.yaml: error: check.variants.orphan is required: what a run of variants/orphan must show`,
+		`variants/bigger-pools/README.md: error: missing: say what the variant is and what it shows`,
+		`variants/bigger-pools/design.yaml: error: name is "demo"; a variant's design is named <scenario>-<variant>, "demo-bigger-pools"`,
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "variants/orphan/") {
+		t.Errorf("orphan's own files are fine:\n%s", all)
+	}
+}
+
 func TestForDesign(t *testing.T) {
-	dir := writeScenario(t, demoFiles())
-	for _, p := range []string{filepath.Join(dir, "design.yaml"), filepath.Join(dir, "solutions", "bigger", "design.yaml")} {
+	dir := writeScenario(t, variantFiles("{ verdict: broke }", "{ verdict: broke }"))
+	for _, p := range []string{filepath.Join(dir, "design.yaml"), filepath.Join(dir, "solutions", "bigger", "design.yaml"), filepath.Join(dir, "variants", "bigger-pools", "design.yaml")} {
 		if s, ok := ForDesign(p); !ok || s.Name != "demo" {
 			t.Errorf("%s: %v", p, ok)
 		}

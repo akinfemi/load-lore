@@ -25,9 +25,12 @@ func (p Problem) String() string {
 	return fmt.Sprintf("%s: %s: %s", p.File, kind, p.Message)
 }
 
+// breakSignals are the signals a break can show, as analysis.Break.Signals.
+var breakSignals = []string{"latency", "errors", "throughput"}
+
 // Lint checks a scenario folder without running anything: every file is
 // there, every design validates, the README's diagram matches its design,
-// and the claims name real solutions and rules.
+// and the claims name real solutions, variants, rules and signals.
 func (s *Scenario) Lint() []Problem {
 	var ps []Problem
 	bad := func(file, format string, args ...any) {
@@ -66,6 +69,20 @@ func (s *Scenario) Lint() []Problem {
 			bad(MetaFile, "check.solutions.%s: there's no solutions/%s folder", name, name)
 		}
 	}
+	for name, c := range m.Check.Variants {
+		claims["check.variants."+name] = c
+		if !slices.Contains(s.Variants, name) {
+			bad(MetaFile, "check.variants.%s: there's no variants/%s folder", name, name)
+		}
+		if c.Verdict == "" {
+			bad(MetaFile, "check.variants.%s.verdict is required: broke or held, what the variant must do", name)
+		}
+	}
+	for _, name := range s.Variants {
+		if _, ok := m.Check.Variants[name]; !ok {
+			bad(MetaFile, "check.variants.%s is required: what a run of variants/%s must show, such as { verdict: broke, signals: [errors] }", name, name)
+		}
+	}
 	for at, c := range claims {
 		for _, r := range c.Diagnoses {
 			if !slices.Contains(analysis.RuleIDs, r) {
@@ -75,12 +92,20 @@ func (s *Scenario) Lint() []Problem {
 		if c.Verdict != "" && c.Verdict != "broke" && c.Verdict != "held" {
 			bad(MetaFile, "%s.verdict must be broke or held, not %q", at, c.Verdict)
 		}
+		for _, sg := range c.Signals {
+			if !slices.Contains(breakSignals, sg) {
+				bad(MetaFile, "%s.signals: no signal %q; a break's signals are %s", at, sg, strings.Join(breakSignals, ", "))
+			}
+		}
+		if len(c.Signals) > 0 && c.Verdict != "broke" {
+			bad(MetaFile, "%s.signals need verdict broke: only a run that broke has break signals", at)
+		}
 		if c.MinGain != nil && *c.MinGain <= 1 {
 			bad(MetaFile, "%s.min_gain must be above 1", at)
 		}
 	}
 
-	d := s.lintDesign(DesignFile, s.Name, &ps)
+	d := s.lintDesign(DesignFile, s.Name, "a scenario's design is named after its folder", &ps)
 	readme, err := s.ReadFile(ReadmeFile)
 	switch {
 	case err != nil:
@@ -100,7 +125,7 @@ func (s *Scenario) Lint() []Problem {
 		bad(SolutionsDir, "at least one solution is required, as solutions/<name>/design.yaml")
 	}
 	for _, name := range s.Solutions {
-		s.lintDesign(SolutionDesign(name), "", &ps)
+		s.lintDesign(SolutionDesign(name), "", "", &ps)
 		if _, err := s.ReadFile(SolutionsDir + "/" + name + "/" + ReadmeFile); err != nil {
 			bad(SolutionsDir+"/"+name+"/"+ReadmeFile, "missing: say what changed and why it helps")
 		}
@@ -108,13 +133,19 @@ func (s *Scenario) Lint() []Problem {
 			warn(SolutionsDir+"/"+name+"/"+ReportFile, "no reference report; copy one from a run of this design")
 		}
 	}
+	for _, name := range s.Variants {
+		s.lintDesign(VariantDesign(name), s.Name+"-"+name, "a variant's design is named <scenario>-<variant>", &ps)
+		if _, err := s.ReadFile(VariantsDir + "/" + name + "/" + ReadmeFile); err != nil {
+			bad(VariantsDir+"/"+name+"/"+ReadmeFile, "missing: say what the variant is and what it shows")
+		}
+	}
 	slices.SortStableFunc(ps, func(a, b Problem) int { return strings.Compare(a.File, b.File) })
 	return ps
 }
 
 // lintDesign loads one design and records its errors. name, when set, is
-// the name the design must have.
-func (s *Scenario) lintDesign(file, name string, ps *[]Problem) *design.Design {
+// the name the design must have, and why says why.
+func (s *Scenario) lintDesign(file, name, why string, ps *[]Problem) *design.Design {
 	raw, err := s.ReadFile(file)
 	if err != nil {
 		*ps = append(*ps, Problem{File: file, Message: "missing"})
@@ -131,7 +162,7 @@ func (s *Scenario) lintDesign(file, name string, ps *[]Problem) *design.Design {
 		*ps = append(*ps, Problem{File: file, Message: diagText(w), Warning: true})
 	}
 	if name != "" && d.Name != name {
-		*ps = append(*ps, Problem{File: file, Message: fmt.Sprintf("name is %q; a scenario's design is named after its folder, %q", d.Name, name)})
+		*ps = append(*ps, Problem{File: file, Message: fmt.Sprintf("name is %q; %s, %q", d.Name, why, name)})
 	}
 	return d
 }

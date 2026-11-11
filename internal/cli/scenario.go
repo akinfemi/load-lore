@@ -233,7 +233,8 @@ func currentScenario(args []string, st hintState) (*scenario.Scenario, error) {
 }
 
 // libraryByDesignName matches a design copied out of a scenario: its name
-// is the scenario's, or the scenario's plus a suffix, as solutions are.
+// is the scenario's, or the scenario's plus a suffix, as solutions' and
+// variants' are.
 func libraryByDesignName(name string) *scenario.Scenario {
 	lib, err := scenario.Library()
 	if err != nil {
@@ -268,12 +269,15 @@ func newScenarioCheckCmd(g *globalOpts) *cobra.Command {
 		Use:   "check <folder | name>",
 		Short: "Run a scenario and its solutions to confirm it shows the problem and each solution helps",
 		Long: `Check a scenario folder: every file is there and every design validates,
-the README's diagram matches the design, then the starting design and each
-solution run in turn and must show what meta.yaml's check block claims.
+the README's diagram matches the design, then the starting design, each
+solution and each variant run in turn and must show what meta.yaml's check
+block claims.
 
 A solution helps when it holds, or its peak throughput (the most successful
 responses per second in any window) is at least min_gain times the starting
-design's (default 1.2). --static skips the runs. Runs are
+design's (default 1.2). A variant is a design a learner is likely to try,
+such as the fix the hints lead to; it must show its own claim, such as
+breaking with errors. --static skips the runs. Runs are
 stored like any other, so each has its report.
 
 A machine slows as it heats up, so each solution's run waits for the host
@@ -283,7 +287,9 @@ waiting for the faster one's speed; a new run of the starting design
 replaces the old one for every solution. A solution still more than 10%
 apart after that is inconclusive, since the host's speed, not the design,
 could explain the difference: the check ends INCONCLUSIVE, not FAILED, if
-no claim failed, and exits 1 either way.`,
+no claim failed, and exits 1 either way. Variants run last, each waiting
+for the starting design's speed too; their claims don't depend on another
+run, so they never run again.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := scenario.Find(args[0])
@@ -346,43 +352,14 @@ func printCheck(w io.Writer, r *scenario.CheckResult, static bool) {
 	for _, p := range r.Lint {
 		fmt.Fprintf(w, "  %s\n", p)
 	}
-	for _, rc := range append([]*scenario.RunCheck{r.Problem}, r.Solutions...) {
-		if rc == nil {
-			continue
-		}
-		label := "starting design"
-		if rc.Name != "problem" {
-			label = "solution " + rc.Name
-		}
-		fmt.Fprintf(w, "  %s", label)
-		if rc.RunDir != "" {
-			fmt.Fprintf(w, " (run %s)", filepath.Base(rc.RunDir))
-		}
-		fmt.Fprintln(w)
-		for _, x := range rc.Replaced {
-			what, against := "the starting design", "the starting design"
-			if rc.Name != "problem" {
-				what = "this solution"
-			}
-			if x.Against != "problem" {
-				against = "solution " + x.Against
-			}
-			now := fmt.Sprintf("now %d", x.NewSpeed)
-			if x.NewSpeed == 0 {
-				now = "the re-run measured none"
-			}
-			fmt.Fprintf(w, "    re-ran %s: speed index %d against %d for %s; %s (replaces run %s)\n", what, x.SpeedIndex, x.AgainstSpeed, against, now, filepath.Base(x.RunDir))
-		}
-		for _, c := range rc.Claims {
-			mark := "ok  "
-			if !c.OK {
-				mark = "FAIL"
-			}
-			fmt.Fprintf(w, "    %s %s: %s\n", mark, c.Claim, c.Detail)
-		}
-		if rc.Inconclusive != "" {
-			fmt.Fprintf(w, "    inconclusive: %s\n", rc.Inconclusive)
-		}
+	if r.Problem != nil {
+		printRunCheck(w, "starting design", r.Problem)
+	}
+	for _, rc := range r.Solutions {
+		printRunCheck(w, "solution "+rc.Name, rc)
+	}
+	for _, rc := range r.Variants {
+		printRunCheck(w, "variant "+rc.Name, rc)
 	}
 	switch {
 	case r.Status == scenario.StatusInconclusive:
@@ -393,6 +370,40 @@ func printCheck(w io.Writer, r *scenario.CheckResult, static bool) {
 		fmt.Fprintln(w, "ok (files only; without --static the designs run too)")
 	default:
 		fmt.Fprintln(w, "ok")
+	}
+}
+
+// printRunCheck prints one design's run, its re-runs and its claims.
+func printRunCheck(w io.Writer, label string, rc *scenario.RunCheck) {
+	fmt.Fprintf(w, "  %s", label)
+	if rc.RunDir != "" {
+		fmt.Fprintf(w, " (run %s)", filepath.Base(rc.RunDir))
+	}
+	fmt.Fprintln(w)
+	// Only the starting design and solutions run again; a variant never does.
+	for _, x := range rc.Replaced {
+		what, against := "the starting design", "the starting design"
+		if rc.Name != "problem" {
+			what = "this solution"
+		}
+		if x.Against != "problem" {
+			against = "solution " + x.Against
+		}
+		now := fmt.Sprintf("now %d", x.NewSpeed)
+		if x.NewSpeed == 0 {
+			now = "the re-run measured none"
+		}
+		fmt.Fprintf(w, "    re-ran %s: speed index %d against %d for %s; %s (replaces run %s)\n", what, x.SpeedIndex, x.AgainstSpeed, against, now, filepath.Base(x.RunDir))
+	}
+	for _, c := range rc.Claims {
+		mark := "ok  "
+		if !c.OK {
+			mark = "FAIL"
+		}
+		fmt.Fprintf(w, "    %s %s: %s\n", mark, c.Claim, c.Detail)
+	}
+	if rc.Inconclusive != "" {
+		fmt.Fprintf(w, "    inconclusive: %s\n", rc.Inconclusive)
 	}
 }
 

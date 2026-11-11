@@ -1,5 +1,6 @@
 // Package scenario reads scenario folders: a starting design, its story,
-// hints, improved designs and the claims `loadl scenario check` verifies.
+// hints, improved designs, the designs a learner is likely to try, and the
+// claims `loadl scenario check` verifies.
 //
 //	<name>/
 //	  README.md      the story, the question, what to try, the diagram
@@ -10,6 +11,10 @@
 //	    README.md    what changed and why
 //	    design.yaml  the improved design
 //	    report.md    a reference run's report (optional)
+//	  variants/<variant>/
+//	    README.md    what the variant is and what it shows
+//	    design.yaml  a design a learner is likely to try, such as the
+//	                 obvious fix walking into a trap
 package scenario
 
 import (
@@ -36,6 +41,7 @@ const (
 	ReadmeFile     = "README.md"
 	HintsFile      = "hints.md"
 	SolutionsDir   = "solutions"
+	VariantsDir    = "variants"
 	ReportFile     = "report.md"
 	DefaultMinGain = 1.2
 )
@@ -48,6 +54,7 @@ type Scenario struct {
 	Hints     []Hint   `json:"-"` // revealed one at a time by loadl hint
 	HintCount int      `json:"hints"`
 	Solutions []string `json:"solutions"`
+	Variants  []string `json:"variants"`
 
 	fsys fs.FS
 }
@@ -75,18 +82,23 @@ type Host struct {
 }
 
 // Claims holds the claims `loadl scenario check` verifies: the starting
-// design shows the problem, and each solution helps.
+// design shows the problem, each solution helps, and each variant shows
+// what its claim says.
 type Claims struct {
 	Problem   Claim            `yaml:"problem" json:"problem"`
 	Solutions map[string]Claim `yaml:"solutions,omitempty" json:"solutions,omitempty"`
+	Variants  map[string]Claim `yaml:"variants,omitempty" json:"variants,omitempty"`
 }
 
 // Claim is what a run of one design must show.
 type Claim struct {
-	// Verdict is broke or held. Required for the problem.
+	// Verdict is broke or held. Required for the problem and variants.
 	Verdict string `yaml:"verdict,omitempty" json:"verdict,omitempty"`
 	// Diagnoses are rule ids that must fire.
 	Diagnoses []string `yaml:"diagnoses,omitempty" json:"diagnoses,omitempty"`
+	// Signals are break signals (latency, errors, throughput) that must be
+	// among the run's at the break. They need verdict broke.
+	Signals []string `yaml:"signals,omitempty" json:"signals,omitempty"`
 	// MinGain applies to solutions when the problem broke: the solution
 	// must hold, or serve at least this many times the problem's peak
 	// throughput (the most successful responses per second in any
@@ -175,7 +187,8 @@ func Find(ref string) (*Scenario, error) {
 }
 
 // ForDesign finds the scenario a design file belongs to: its own folder
-// holds meta.yaml, or it is solutions/<name>/design.yaml under one.
+// holds meta.yaml, or it is solutions/<name>/design.yaml or
+// variants/<name>/design.yaml under one.
 func ForDesign(designPath string) (*Scenario, bool) {
 	abs, err := filepath.Abs(designPath)
 	if err != nil {
@@ -183,7 +196,7 @@ func ForDesign(designPath string) (*Scenario, bool) {
 	}
 	dir := filepath.Dir(abs)
 	candidates := []string{dir}
-	if filepath.Base(filepath.Dir(dir)) == SolutionsDir {
+	if b := filepath.Base(filepath.Dir(dir)); b == SolutionsDir || b == VariantsDir {
 		candidates = append(candidates, filepath.Dir(filepath.Dir(dir)))
 	}
 	for _, c := range candidates {
@@ -197,7 +210,7 @@ func ForDesign(designPath string) (*Scenario, bool) {
 }
 
 func read(fsys fs.FS, name string) (*Scenario, error) {
-	s := &Scenario{Name: name, fsys: fsys, Solutions: []string{}}
+	s := &Scenario{Name: name, fsys: fsys, Solutions: []string{}, Variants: []string{}}
 	raw, err := fs.ReadFile(fsys, MetaFile)
 	if err != nil {
 		return nil, fmt.Errorf("no %s: %w", MetaFile, err)
@@ -211,14 +224,21 @@ func read(fsys fs.FS, name string) (*Scenario, error) {
 		s.Hints = ParseHints(hints)
 		s.HintCount = len(s.Hints)
 	}
-	if entries, err := fs.ReadDir(fsys, SolutionsDir); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				s.Solutions = append(s.Solutions, e.Name())
-			}
+	s.Solutions = append(s.Solutions, folders(fsys, SolutionsDir)...)
+	s.Variants = append(s.Variants, folders(fsys, VariantsDir)...)
+	return s, nil
+}
+
+// folders lists the folders in dir, none when it's missing.
+func folders(fsys fs.FS, dir string) []string {
+	var out []string
+	entries, _ := fs.ReadDir(fsys, dir)
+	for _, e := range entries {
+		if e.IsDir() {
+			out = append(out, e.Name())
 		}
 	}
-	return s, nil
+	return out
 }
 
 // ReadFile reads a file in the scenario folder, such as "design.yaml" or
@@ -229,6 +249,9 @@ func (s *Scenario) ReadFile(name string) ([]byte, error) {
 
 // SolutionDesign is the path of a solution's design inside the folder.
 func SolutionDesign(name string) string { return path.Join(SolutionsDir, name, DesignFile) }
+
+// VariantDesign is the path of a variant's design inside the folder.
+func VariantDesign(name string) string { return path.Join(VariantsDir, name, DesignFile) }
 
 // Materialize returns the scenario's folder on disk, copying the built-in
 // copy under dir first.

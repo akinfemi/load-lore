@@ -54,6 +54,12 @@ func checkSpeeds(t *testing.T, plan map[string][]speedRun) (*CheckResult, []stri
 		"bigger: { min_gain: 1.5 }", "bigger: {}\n    pooled: {}", 1)
 	files["solutions/pooled/design.yaml"] = strings.Replace(demoDesign, "name: demo", "name: demo-pooled", 1)
 	files["solutions/pooled/README.md"] = "# Pooled\n"
+	return checkPlanned(t, files, plan)
+}
+
+// checkPlanned checks a scenario folder on the planned runs.
+func checkPlanned(t *testing.T, files map[string]string, plan map[string][]speedRun) (*CheckResult, []string) {
+	t.Helper()
 	dir := writeScenario(t, files)
 	s, err := Open(dir)
 	if err != nil {
@@ -240,5 +246,96 @@ func TestCheckInconclusive(t *testing.T) {
 	})
 	if res.OK || res.Status != StatusFailed || solution(res, "bigger").Status != StatusInconclusive || solution(res, "pooled").Status != StatusFailed {
 		t.Errorf("status %s: %+v", res.Status, res.Solutions)
+	}
+}
+
+// variantFiles is the demo scenario with a variant, bigger-pools, and the
+// given claims for the starting design and the variant.
+func variantFiles(problem, variant string) map[string]string {
+	files := demoFiles()
+	files["meta.yaml"] = strings.Replace(files["meta.yaml"], "{ verdict: broke, diagnoses: [pool-exhausted] }", problem, 1) +
+		"  variants:\n    bigger-pools: " + variant + "\n"
+	files["variants/bigger-pools/design.yaml"] = strings.Replace(demoDesign, "name: demo", "name: demo-bigger-pools", 1)
+	files["variants/bigger-pools/README.md"] = "# Bigger pools\n"
+	return files
+}
+
+// biggerPools is the check's run of the bigger-pools variant.
+func biggerPools(res *CheckResult) *RunCheck {
+	for _, rc := range res.Variants {
+		if rc.Name == "bigger-pools" {
+			return rc
+		}
+	}
+	return nil
+}
+
+// A variant runs after the solutions, cooled to the starting design's
+// speed, and is judged on its own: its verdict and its break signals. It
+// never runs again, however far its speed index is from the starting
+// design's.
+func TestCheckVariant(t *testing.T) {
+	broke, _, healthy := speedFixtures(t)
+	errW := analysistest.Healthy()
+	errW.Failed = func(t float64) float64 { return 0.2 * boolF(t > 70) }
+	errs := analysistest.WriteRun(t, errW, 1)
+
+	files := variantFiles("{ verdict: broke, signals: [latency] }", "{ verdict: broke, signals: [errors] }")
+	res, calls := checkPlanned(t, files, map[string][]speedRun{
+		"demo":         {{broke, 1000}},
+		"bigger":       {{healthy, 1000}},
+		"bigger-pools": {{errs, 850}},
+	})
+	wantCalls(t, calls, "demo-1 cooled to 0", "bigger-1 cooled to 1000", "bigger-pools-1 cooled to 1000")
+	if !res.OK || res.Status != StatusOK {
+		t.Errorf("status %s: %+v", res.Status, res.Variants)
+	}
+	v := biggerPools(res)
+	if v == nil || v.Status != StatusOK || !slices.Contains(v.BreakSignals, "errors") || len(v.Claims) != 2 || v.Claims[1].Claim != "break signal errors" || len(v.Replaced) != 0 {
+		t.Fatalf("variant: %+v", v)
+	}
+	if c := res.Problem.Claims; len(c) != 2 || c[1].Claim != "break signal latency" || !c[1].OK || c[1].Detail != "at the break: latency" {
+		t.Errorf("problem claims: %+v", c)
+	}
+
+	// A variant that breaks without the claimed signal fails the check,
+	// and failed wins over a solution that is inconclusive.
+	res, _ = checkPlanned(t, files, map[string][]speedRun{
+		"demo":         {{broke, 1000}},
+		"bigger":       {{healthy, 800}, {healthy, 850}},
+		"bigger-pools": {{broke, 1000}},
+	})
+	v = biggerPools(res)
+	if res.OK || res.Status != StatusFailed || solution(res, "bigger").Status != StatusInconclusive || v.Status != StatusFailed {
+		t.Errorf("status %s, variant %s", res.Status, v.Status)
+	}
+	if c := v.Claims; len(c) != 2 || !c[0].OK || c[1].OK || c[1].Detail != "at the break: latency" {
+		t.Errorf("variant claims: %+v", c)
+	}
+
+	// One that held has no break signals.
+	res, _ = checkPlanned(t, files, map[string][]speedRun{
+		"demo":         {{broke, 1000}},
+		"bigger":       {{healthy, 1000}},
+		"bigger-pools": {{healthy, 1000}},
+	})
+	if c := biggerPools(res).Claims; res.Status != StatusFailed || len(c) != 2 || c[0].OK || c[1].OK || c[1].Detail != "it didn't break" {
+		t.Errorf("status %s, held variant: %+v", res.Status, c)
+	}
+}
+
+// Signals apply to the starting design's claim too.
+func TestCheckProblemSignals(t *testing.T) {
+	broke, _, healthy := speedFixtures(t)
+	res, _ := checkPlanned(t, variantFiles("{ verdict: broke, signals: [errors] }", "{ verdict: broke }"), map[string][]speedRun{
+		"demo":         {{broke, 1000}},
+		"bigger":       {{healthy, 1000}},
+		"bigger-pools": {{broke, 1000}},
+	})
+	if p := res.Problem; res.Status != StatusFailed || p.Status != StatusFailed || len(p.Claims) != 2 || p.Claims[1].OK || p.Claims[1].Detail != "at the break: latency" {
+		t.Errorf("status %s, problem: %+v", res.Status, res.Problem)
+	}
+	if v := biggerPools(res); v.Status != StatusOK {
+		t.Errorf("variant: %+v", v)
 	}
 }
