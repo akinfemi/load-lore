@@ -1,17 +1,17 @@
-# Compare: single-postgres-breaking-point vs single-postgres-breaking-point-one-query-per-page
+# Compare: when-to-scale-your-database vs when-to-scale-your-database-one-query-per-page
 
-_A: run `single-postgres-breaking-point-20261111-015507` · B: run `single-postgres-breaking-point-one-query-per-page-20261111-014627`_
+_A: run `when-to-scale-your-database-20261111-160637` · B: run `when-to-scale-your-database-one-query-per-page-20261111-161415`_
 
 | | A | B |
 | --- | --- | --- |
-| Design | single-postgres-breaking-point | single-postgres-breaking-point-one-query-per-page |
-| Verdict | broke at 3:00 (3,122 rps offered) | broke at 4:10 (4,265 rps offered) |
-| Most served | 2,950 rps at 2:50 | 4,085 rps at 4:00 |
-| Worst 10-second p99 | 4.18 s | 3.86 s |
+| Design | when-to-scale-your-database | when-to-scale-your-database-one-query-per-page |
+| Verdict | broke at 4:10 (2,990 rps offered) | held |
+| Most served | 2,873 rps at 4:00 | 3,501 rps at 6:20 |
+| Worst 10-second p99 | 2.65 s | 608 ms |
 | Worst error rate | 0% | 0% |
-| Diagnoses | Connection storm (api → db) from 2:00; Queueing knee (db CPU) from 2:30 | Connection storm (api → db) from 1:00; Queueing knee (db CPU) from 3:10 |
-| Predictions held | 1 of 2 | 2 of 2 |
-| Peak offered | 5,000 rps | 5,000 rps |
+| Diagnoses | Connection storm (api → db) from 2:30; Queueing knee (db CPU) from 3:50 | Connection storm (api → db) from 3:20 |
+| Predictions held | 2 of 2 | 1 of 2 |
+| Peak offered | 3,500 rps | 3,500 rps |
 | Scale, seed | 1, 1 | 1, 1 |
 | Host | 8 CPUs, 9.7 GiB, Docker 29.5.2 | 8 CPUs, 9.7 GiB, Docker 29.5.2 |
 | Data | fresh copy | fresh copy |
@@ -24,9 +24,9 @@ _A: run `single-postgres-breaking-point-20261111-015507` · B: run `single-postg
 
 ## Verdicts
 
-**A.** Broke 3:00 into the load, at 3,122 rps offered: p99 reached 1.25 s (2.9 ms at low load). Most saturated then: db CPU at 101% of its limit. After the break the load generator couldn't send 54% of the arrivals the profile asked for (539,768 arrivals from 3:10; k6_dropped_iterations_total (k6: arrivals it couldn't start)): slow responses held its 4,000 VUs, so served throughput from then on is partly the generator's limit, not only the system's.
+**A.** Broke 4:10 into the load, at 2,990 rps offered: p99 reached 1.11 s (3.1 ms at low load) and only 2,404 rps succeeded. Most saturated then: db CPU at 99% of its limit. After the break the load generator couldn't send 30% of the arrivals the profile asked for (162,831 arrivals from 4:20; k6_dropped_iterations_total (k6: arrivals it couldn't start)): slow responses held its 4,000 VUs, so served throughput from then on is partly the generator's limit, not only the system's.
 
-**B.** Broke 4:10 into the load, at 4,265 rps offered: p99 reached 904 ms (2.4 ms at low load). Most saturated then: db CPU at 101% of its limit. After the break the load generator couldn't send 36% of the arrivals the profile asked for (263,526 arrivals from 4:20; k6_dropped_iterations_total (k6: arrivals it couldn't start)): slow responses held its 4,000 VUs, so served throughput from then on is partly the generator's limit, not only the system's.
+**B.** Held the whole profile: up to 3,500 rps offered, 3,501 rps served at best, worst 10-second p99 608 ms, at most 0% errors.
 
 ## Charts
 
@@ -40,11 +40,11 @@ config:
 ---
 xychart-beta
     title "Throughput"
-    x-axis "seconds" 0 --> 400
-    y-axis "requests/s" 0 --> 6000
-    line [181.667, 345, 508.333, 671.667, 835, 998.333, 1161.667, 1325, 1488.333, 1651.667, 1815, 1978.333, 2141.667, 2305, 2468.333, 2631.667, 2795, 2958.333, 3121.667, 3285, 3448.333, 3611.667, 3775, 3938.333, 4101.667, 4265, 4428.333, 4591.667, 4755, 4918.333, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000]
-    line [176.889, 346.345, 513.312, 680.239, 847.162, 1014.094, 1180.939, 1347.883, 1514.767, 1682.044, 1849.223, 2016.894, 2176.396, 2350.677, 2517.004, 2683.856, 2850.889, 2949.542, 2827.543, 1965.193, 2311.262, 2388.398, 2361.964, 2072.834, 1881.981, 2031.356, 2035.659, 2055.076, 2175.96, 2118.925, 2302.556, 2216.102, 2220.806, 2158.422, 2337.471, 2150.717, 2244.651, 2118.95, 1999.645, 2098.355, 2259.192]
-    line [174.146, 345.472, 512.229, 670.786, 846.053, 999.572, 1179.174, 1328.432, 1512.397, 1674.592, 1841.376, 1987.437, 2179.742, 2340.021, 2506.658, 2674.04, 2840.664, 3007.322, 3173.549, 3340.319, 3507.628, 3673.532, 3840.892, 4007.198, 4084.616, 4072.088, 3275.988, 3636.747, 3637.842, 3552.332, 3650.626, 3586.121, 3525.728, 3447.451, 3174.578, 2628.83, 2814.527, 2874.192, 2696.429, 2754.836, 2748.946]
+    x-axis "seconds" 0 --> 410
+    y-axis "requests/s" 0 --> 4000
+    line [156.667, 270, 383.333, 496.667, 610, 723.333, 836.667, 950, 1063.333, 1176.667, 1290, 1403.333, 1516.667, 1630, 1743.333, 1856.667, 1970, 2083.333, 2196.667, 2310, 2423.333, 2536.667, 2650, 2763.333, 2876.667, 2990, 3103.333, 3216.667, 3330, 3443.333, 3500, 3500, 3500, 3500, 3500, 3500, 3500, 3500, 3500, 3500, 3500, 3500]
+    line [149.332, 265.983, 379.379, 492.676, 606.007, 719.391, 832.639, 946.26, 1059.25, 1172.553, 1286.098, 1399.315, 1512.626, 1626.059, 1739.5, 1844.378, 1974.149, 2079.56, 2192.516, 2306.098, 2419.344, 2532.43, 2645.811, 2759.737, 2872.617, 2404.164, 2310.339, 2360.629, 2109.098, 2233.962, 2418.592, 2493.227, 2535.734, 2442.842, 2543.969, 2556.936, 2435.943, 2464.948, 2559.215, 2344.651, 2442.317, 2407.159]
+    line [150.908, 266.819, 380.352, 493.509, 606.866, 720.239, 833.37, 946.955, 1060.211, 1173.523, 1286.928, 1400.081, 1513.534, 1627.051, 1740.189, 1853.356, 1967.001, 2080.205, 2193.554, 2306.848, 2420.048, 2533.581, 2647.079, 2760.197, 2873.528, 2986.968, 3100.26, 3213.543, 3326.59, 3440.269, 3500.078, 3499.602, 3500.263, 3500.043, 3500.38, 3499.633, 3499.349, 3499.959, 3500.735, 3499.938, 3499.795, 3500.063]
 ```
 
 <sub>Grey: offered (A). Blue: served, A. Orange: served, B (k6_http_reqs_total{expected_response="true"} (k6: successful responses)). Windows without data are drawn at 0.</sub>
@@ -59,10 +59,10 @@ config:
 ---
 xychart-beta
     title "p99 latency, end to end"
-    x-axis "seconds" 0 --> 400
-    y-axis "ms" 0 --> 5000
-    line [4.33, 2.863, 2.853, 2.69, 2.33, 2.925, 2.711, 2.623, 2.664, 4.202, 2.75, 3.839, 588.321, 165.548, 4.125, 80.64, 27.383, 489.988, 1252.565, 3011.617, 3011.018, 2993.195, 2901.504, 3586.854, 3986.658, 3784.405, 3538.298, 4178.403, 3031.969, 3524.331, 3268.7, 3343.241, 3217.829, 3542.019, 3546.201, 3331.507, 3033.331, 3343.66, 3372.584, 3929.978, 3640.394]
-    line [4.132, 2.892, 2.329, 2.097, 1.858, 2.403, 173.538, 1.516, 1.879, 2.042, 2.143, 2.03, 2.659, 3.006, 2.633, 2.604, 79.391, 54.681, 11.513, 92.261, 61.354, 44.764, 64.839, 198.853, 460.323, 904.47, 2169.321, 2151.887, 2354.638, 2564.778, 2488.754, 2555.165, 2790.292, 3000, 3166.218, 3649.606, 3649.398, 3266.942, 3863.276, 3356.474, 3329.247]
+    x-axis "seconds" 0 --> 410
+    y-axis "ms" 0 --> 3000
+    line [4.576, 3.761, 3.136, 3.248, 2.551, 2.695, 2.798, 2.675, 2.452, 2.347, 2.662, 2.708, 2.594, 2.393, 2.436, 696.863, 11.617, 2.451, 2.528, 2.934, 4.604, 12.485, 12.577, 39.649, 22.912, 1110.68, 1824.718, 2143.762, 2555.25, 2647.995, 2314.767, 1966.43, 1943.822, 2163.246, 2224.792, 2170.21, 2169.437, 2148.749, 2141.536, 2518.847, 2352.047, 2161.83]
+    line [4.076, 2.19, 1.777, 1.741, 1.59, 1.649, 1.845, 1.777, 1.776, 1.695, 1.641, 1.678, 1.586, 1.584, 2.006, 1.889, 1.96, 2.346, 2.123, 2.192, 608.308, 2.187, 2.202, 2.246, 2.002, 2.682, 5.034, 2.917, 2.338, 3.811, 3.809, 3.562, 12.186, 2.745, 3.974, 43.672, 3.164, 3.851, 41.223, 2.741, 5.346, 4.585]
 ```
 
 <sub>Blue: A. Orange: B (k6_http_req_duration_seconds (k6 histogram, end to end)). Windows without data are drawn at 0.</sub>
@@ -71,47 +71,48 @@ xychart-beta
 
 | t | offered A | offered B | served A | served B | p99 A | p99 B | errors A | errors B |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0:00 | 182 | 182 | 177 | 174 | 4.3 ms | 4.1 ms | 0% | 0% |
-| 0:10 | 345 | 345 | 346 | 345 | 2.9 ms | 2.9 ms | 0% | 0% |
-| 0:20 | 508 | 508 | 513 | 512 | 2.9 ms | 2.3 ms | 0% | 0% |
-| 0:30 | 672 | 672 | 680 | 671 | 2.7 ms | 2.1 ms | 0% | 0% |
-| 0:40 | 835 | 835 | 847 | 846 | 2.3 ms | 1.9 ms | 0% | 0% |
-| 0:50 | 998 | 998 | 1,014 | 1,000 | 2.9 ms | 2.4 ms | 0% | 0% |
-| 1:00 | 1,162 | 1,162 | 1,181 | 1,179 | 2.7 ms | 174 ms | 0% | 0% |
-| 1:10 | 1,325 | 1,325 | 1,348 | 1,328 | 2.6 ms | 1.5 ms | 0% | 0% |
-| 1:20 | 1,488 | 1,488 | 1,515 | 1,512 | 2.7 ms | 1.9 ms | 0% | 0% |
-| 1:30 | 1,652 | 1,652 | 1,682 | 1,675 | 4.2 ms | 2.0 ms | 0% | 0% |
-| 1:40 | 1,815 | 1,815 | 1,849 | 1,841 | 2.8 ms | 2.1 ms | 0% | 0% |
-| 1:50 | 1,978 | 1,978 | 2,017 | 1,987 | 3.8 ms | 2.0 ms | 0% | 0% |
-| 2:00 | 2,142 | 2,142 | 2,176 | 2,180 | 588 ms | 2.7 ms | 0% | 0% |
-| 2:10 | 2,305 | 2,305 | 2,351 | 2,340 | 166 ms | 3.0 ms | 0% | 0% |
-| 2:20 | 2,468 | 2,468 | 2,517 | 2,507 | 4.1 ms | 2.6 ms | 0% | 0% |
-| 2:30 | 2,632 | 2,632 | 2,684 | 2,674 | 81 ms | 2.6 ms | 0% | 0% |
-| 2:40 | 2,795 | 2,795 | 2,851 | 2,841 | 27 ms | 79 ms | 0% | 0% |
-| 2:50 | 2,958 | 2,958 | 2,950 | 3,007 | 490 ms | 55 ms | 0% | 0% |
-| 3:00 | 3,122 | 3,122 | 2,828 | 3,174 | 1.25 s | 12 ms | 0% | 0% |
-| 3:10 | 3,285 | 3,285 | 1,965 | 3,340 | 3.01 s | 92 ms | 0% | 0% |
-| 3:20 | 3,448 | 3,448 | 2,311 | 3,508 | 3.01 s | 61 ms | 0% | 0% |
-| 3:30 | 3,612 | 3,612 | 2,388 | 3,674 | 2.99 s | 45 ms | 0% | 0% |
-| 3:40 | 3,775 | 3,775 | 2,362 | 3,841 | 2.90 s | 65 ms | 0% | 0% |
-| 3:50 | 3,938 | 3,938 | 2,073 | 4,007 | 3.59 s | 199 ms | 0% | 0% |
-| 4:00 | 4,102 | 4,102 | 1,882 | 4,085 | 3.99 s | 460 ms | 0% | 0% |
-| 4:10 | 4,265 | 4,265 | 2,031 | 4,072 | 3.78 s | 904 ms | 0% | 0% |
-| 4:20 | 4,428 | 4,428 | 2,036 | 3,276 | 3.54 s | 2.17 s | 0% | 0% |
-| 4:30 | 4,592 | 4,592 | 2,055 | 3,637 | 4.18 s | 2.15 s | 0% | 0% |
-| 4:40 | 4,755 | 4,755 | 2,176 | 3,638 | 3.03 s | 2.35 s | 0% | 0% |
-| 4:50 | 4,918 | 4,918 | 2,119 | 3,552 | 3.52 s | 2.56 s | 0% | 0% |
-| 5:00 | 5,000 | 5,000 | 2,303 | 3,651 | 3.27 s | 2.49 s | 0% | 0% |
-| 5:10 | 5,000 | 5,000 | 2,216 | 3,586 | 3.34 s | 2.56 s | 0% | 0% |
-| 5:20 | 5,000 | 5,000 | 2,221 | 3,526 | 3.22 s | 2.79 s | 0% | 0% |
-| 5:30 | 5,000 | 5,000 | 2,158 | 3,447 | 3.54 s | 3.00 s | 0% | 0% |
-| 5:40 | 5,000 | 5,000 | 2,337 | 3,175 | 3.55 s | 3.17 s | 0% | 0% |
-| 5:50 | 5,000 | 5,000 | 2,151 | 2,629 | 3.33 s | 3.65 s | 0% | 0% |
-| 6:00 | 5,000 | 5,000 | 2,245 | 2,815 | 3.03 s | 3.65 s | 0% | 0% |
-| 6:10 | 5,000 | 5,000 | 2,119 | 2,874 | 3.34 s | 3.27 s | 0% | 0% |
-| 6:20 | 5,000 | 5,000 | 2,000 | 2,696 | 3.37 s | 3.86 s | 0% | 0% |
-| 6:30 | 5,000 | 5,000 | 2,098 | 2,755 | 3.93 s | 3.36 s | 0% | 0% |
-| 6:40 | 5,000 | 5,000 | 2,259 | 2,749 | 3.64 s | 3.33 s | 0% | 0% |
+| 0:00 | 157 | 157 | 149 | 151 | 4.6 ms | 4.1 ms | 0% | 0% |
+| 0:10 | 270 | 270 | 266 | 267 | 3.8 ms | 2.2 ms | 0% | 0% |
+| 0:20 | 383 | 383 | 379 | 380 | 3.1 ms | 1.8 ms | 0% | 0% |
+| 0:30 | 497 | 497 | 493 | 494 | 3.2 ms | 1.7 ms | 0% | 0% |
+| 0:40 | 610 | 610 | 606 | 607 | 2.6 ms | 1.6 ms | 0% | 0% |
+| 0:50 | 723 | 723 | 719 | 720 | 2.7 ms | 1.6 ms | 0% | 0% |
+| 1:00 | 837 | 837 | 833 | 833 | 2.8 ms | 1.8 ms | 0% | 0% |
+| 1:10 | 950 | 950 | 946 | 947 | 2.7 ms | 1.8 ms | 0% | 0% |
+| 1:20 | 1,063 | 1,063 | 1,059 | 1,060 | 2.5 ms | 1.8 ms | 0% | 0% |
+| 1:30 | 1,177 | 1,177 | 1,173 | 1,174 | 2.3 ms | 1.7 ms | 0% | 0% |
+| 1:40 | 1,290 | 1,290 | 1,286 | 1,287 | 2.7 ms | 1.6 ms | 0% | 0% |
+| 1:50 | 1,403 | 1,403 | 1,399 | 1,400 | 2.7 ms | 1.7 ms | 0% | 0% |
+| 2:00 | 1,517 | 1,517 | 1,513 | 1,514 | 2.6 ms | 1.6 ms | 0% | 0% |
+| 2:10 | 1,630 | 1,630 | 1,626 | 1,627 | 2.4 ms | 1.6 ms | 0% | 0% |
+| 2:20 | 1,743 | 1,743 | 1,739 | 1,740 | 2.4 ms | 2.0 ms | 0% | 0% |
+| 2:30 | 1,857 | 1,857 | 1,844 | 1,853 | 697 ms | 1.9 ms | 0% | 0% |
+| 2:40 | 1,970 | 1,970 | 1,974 | 1,967 | 12 ms | 2.0 ms | 0% | 0% |
+| 2:50 | 2,083 | 2,083 | 2,080 | 2,080 | 2.5 ms | 2.3 ms | 0% | 0% |
+| 3:00 | 2,197 | 2,197 | 2,193 | 2,194 | 2.5 ms | 2.1 ms | 0% | 0% |
+| 3:10 | 2,310 | 2,310 | 2,306 | 2,307 | 2.9 ms | 2.2 ms | 0% | 0% |
+| 3:20 | 2,423 | 2,423 | 2,419 | 2,420 | 4.6 ms | 608 ms | 0% | 0% |
+| 3:30 | 2,537 | 2,537 | 2,532 | 2,534 | 12 ms | 2.2 ms | 0% | 0% |
+| 3:40 | 2,650 | 2,650 | 2,646 | 2,647 | 13 ms | 2.2 ms | 0% | 0% |
+| 3:50 | 2,763 | 2,763 | 2,760 | 2,760 | 40 ms | 2.2 ms | 0% | 0% |
+| 4:00 | 2,877 | 2,877 | 2,873 | 2,874 | 23 ms | 2.0 ms | 0% | 0% |
+| 4:10 | 2,990 | 2,990 | 2,404 | 2,987 | 1.11 s | 2.7 ms | 0% | 0% |
+| 4:20 | 3,103 | 3,103 | 2,310 | 3,100 | 1.82 s | 5.0 ms | 0% | 0% |
+| 4:30 | 3,217 | 3,217 | 2,361 | 3,214 | 2.14 s | 2.9 ms | 0% | 0% |
+| 4:40 | 3,330 | 3,330 | 2,109 | 3,327 | 2.56 s | 2.3 ms | 0% | 0% |
+| 4:50 | 3,443 | 3,443 | 2,234 | 3,440 | 2.65 s | 3.8 ms | 0% | 0% |
+| 5:00 | 3,500 | 3,500 | 2,419 | 3,500 | 2.31 s | 3.8 ms | 0% | 0% |
+| 5:10 | 3,500 | 3,500 | 2,493 | 3,500 | 1.97 s | 3.6 ms | 0% | 0% |
+| 5:20 | 3,500 | 3,500 | 2,536 | 3,500 | 1.94 s | 12 ms | 0% | 0% |
+| 5:30 | 3,500 | 3,500 | 2,443 | 3,500 | 2.16 s | 2.7 ms | 0% | 0% |
+| 5:40 | 3,500 | 3,500 | 2,544 | 3,500 | 2.22 s | 4.0 ms | 0% | 0% |
+| 5:50 | 3,500 | 3,500 | 2,557 | 3,500 | 2.17 s | 44 ms | 0% | 0% |
+| 6:00 | 3,500 | 3,500 | 2,436 | 3,499 | 2.17 s | 3.2 ms | 0% | 0% |
+| 6:10 | 3,500 | 3,500 | 2,465 | 3,500 | 2.15 s | 3.9 ms | 0% | 0% |
+| 6:20 | 3,500 | 3,500 | 2,559 | 3,501 | 2.14 s | 41 ms | 0% | 0% |
+| 6:30 | 3,500 | 3,500 | 2,345 | 3,500 | 2.52 s | 2.7 ms | 0% | 0% |
+| 6:40 | 3,500 | 3,500 | 2,442 | 3,500 | 2.35 s | 5.3 ms | 0% | 0% |
+| 6:50 | 3,500 | 3,500 | 2,407 | 3,500 | 2.16 s | 4.6 ms | 0% | 0% |
 
 </details>
 
@@ -119,20 +120,21 @@ xychart-beta
 
 ### A
 
-- **Connection storm (api → db), from 2:00.** At 2:00, api's pools opened 66 connections to db within 10 seconds, at 2,142 rps offered, and p99 reached 588 ms (2.9 ms at low load). The pools open connections only when callers need them, so when a short slowdown leaves requests waiting, every replica opens more at once. Each new Postgres connection starts a server process and authenticates, which takes db's CPU from queries just when it is short of it.
-- **Queueing knee (db CPU), from 2:30.** From 2:30, p99 stayed above 13 ms (2.9 ms at low load) with db CPU at 75%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
+- **Connection storm (api → db), from 2:30.** At 2:30, api's pools opened 80 connections to db within 10 seconds, at 1,857 rps offered, and p99 reached 697 ms (3.1 ms at low load). The pools open connections only when callers need them, so when a short slowdown leaves requests waiting, every replica opens more at once. Each new Postgres connection starts a server process and authenticates, which takes db's CPU from queries just when it is short of it.
+- **Queueing knee (db CPU), from 3:50.** From 3:50, p99 stayed above 13 ms (3.1 ms at low load) with db CPU at 84%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
 
 ### B
 
-- **Connection storm (api → db), from 1:00.** At 1:00, api's pools opened 81 connections to db within 10 seconds, at 1,162 rps offered, and p99 reached 174 ms (2.4 ms at low load). The pools open connections only when callers need them, so when a short slowdown leaves requests waiting, every replica opens more at once. Each new Postgres connection starts a server process and authenticates, which takes db's CPU from queries just when it is short of it.
-- **Queueing knee (db CPU), from 3:10.** From 3:10, p99 stayed above 12 ms (2.4 ms at low load) with db CPU at 74%. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.
+- **Connection storm (api → db), from 3:20.** At 3:20, api's pools opened 81 connections to db within 10 seconds, at 2,423 rps offered, and p99 reached 608 ms (1.8 ms at low load). The pools open connections only when callers need them, so when a short slowdown leaves requests waiting, every replica opens more at once. Each new Postgres connection starts a server process and authenticates, which takes db's CPU from queries just when it is short of it.
 
 ## Predictions
 
 | Prediction | A | B |
 | --- | --- | --- |
-| `p99_ms < 300 until load_rps >= 3000` | broken, worst 588 ms (broke at 2:00) | held, worst 174 ms |
-| `error_rate < 1% throughout` | held, worst 0% | held, worst 0% |
+| `break_load_rps within 25% of 3000` | held, worst 2,990 rps at 4:10 | not in this design |
+| `errors_load_rps none` | held, worst no failures | not in this design |
+| `p99_ms < 300 until load_rps >= 3000` | not in this design | broken, worst 608 ms (broke at 3:20) |
+| `error_rate < 1% throughout` | not in this design | held, worst 0% |
 
 ## Design changes
 
@@ -141,8 +143,8 @@ xychart-beta
 +++ B/design.yaml
 @@ -1,5 +1,5 @@
  version: 1
--name: single-postgres-breaking-point
-+name: single-postgres-breaking-point-one-query-per-page
+-name: when-to-scale-your-database
++name: when-to-scale-your-database-one-query-per-page
  
  # A feed service: every request returns a page of three items from Postgres,
  # and one request in ten also updates an item.
@@ -163,6 +165,8 @@ xychart-beta
 -# before you run it.
 +# The starting design's predictions, kept so the two reports compare.
  expect:
-   - p99_ms < 300 until load_rps >= 3000
-   - error_rate < 1% throughout
+-  - break_load_rps within 25% of 3000
+-  - errors_load_rps none
++  - p99_ms < 300 until load_rps >= 3000
++  - error_rate < 1% throughout
 ```

@@ -25,8 +25,9 @@ check:
     diagnoses: [queueing-knee]
   solutions:
     # helps: holds, or serves min_gain x the starting design's peak
-    # throughput or more. Measured at --scale 1: 4,085 rps against 2,950
-    # (1.38x); an earlier pair measured 3,422 against 2,791 (1.23x).
+    # throughput or more. At --scale 1 with a 0.4-CPU Postgres and a
+    # 3,500 rps peak it held the profile, against 2,873 rps for the
+    # starting design (at least 1.22x).
     one-query-per-page: { min_gain: 1.15 }
 
 # What `loadl predict` asks before a run; each answer becomes an expect
