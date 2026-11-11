@@ -124,6 +124,34 @@ func TestReportErrorCauses(t *testing.T) {
 	}
 }
 
+func TestText(t *testing.T) {
+	dir := analysistest.WriteRun(t, poolWorld(), 1)
+	a, err := Write(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txt := Text(a, "runs/x/report.md", 80)
+	for _, want := range []string{
+		"fixture · run fixture-run", "\nBROKE. Broke 0:40 into the load",
+		"  offered ", "  served  ", "  p99     ", "^ break at 0:40",
+		"Diagnosis\n  1. Connection pool exhausted (api → db), from 0:40", "Try next: Add PgBouncer",
+		"Predictions\n", "  held      error_rate < 1%",
+		"Full report, with the diagram and charts: runs/x/report.md",
+	} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("text lacks %q", want)
+		}
+	}
+	for i, l := range strings.Split(txt, "\n") {
+		if n := len([]rune(l)); n > 80 && !strings.HasPrefix(l, "Full report") {
+			t.Errorf("line %d is %d columns: %q", i, n, l)
+		}
+	}
+	if strings.Contains(txt, "```") {
+		t.Error("markdown in the text report")
+	}
+}
+
 func TestCompare(t *testing.T) {
 	a, err := analysis.Analyze(analysistest.WriteRun(t, analysistest.Healthy(), 1))
 	if err != nil {

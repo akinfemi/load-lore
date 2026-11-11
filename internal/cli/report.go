@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -38,19 +39,23 @@ design. --json prints the analysis instead of a summary.`,
 			case g.json:
 				return writeJSON(out, a)
 			case print:
-				b, err := os.ReadFile(filepath.Join(dir, report.FileName))
-				if err != nil {
-					return err
-				}
-				_, err = out.Write(b)
+				_, err := fmt.Fprint(out, report.Text(a, filepath.Join(dir, report.FileName), termWidth()))
 				return err
 			}
 			printSummary(cmd, a, filepath.Join(dir, report.FileName))
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&print, "print", false, "print the markdown report instead of a summary")
+	cmd.Flags().BoolVar(&print, "print", false, "print the report as plain text with small charts, instead of a summary")
 	return cmd
+}
+
+// termWidth is the terminal's width from COLUMNS, else 80.
+func termWidth() int {
+	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 {
+		return n
+	}
+	return 80
 }
 
 // printSummary prints the verdict, the diagnoses and the predictions in a

@@ -16,7 +16,7 @@ loadl validate examples/single-postgres.yaml   # errors carry field paths; --jso
 loadl diagram examples/single-postgres.yaml    # Mermaid; --ascii for the terminal
 loadl schema --json                            # JSON Schema of the design file
 loadl run examples/smoke.yaml                  # run on local Docker; results in .loadlore/runs/<run-id>/
-loadl report latest                            # rewrite a run's report.md; --print shows it, --json gives the analysis
+loadl report latest                            # rewrite a run's report.md; --print shows it as text with small charts, --json gives the analysis
 loadl compare <run-a> <run-b>                  # two runs side by side, with the design diff
 loadl scenarios                                # the scenario library
 loadl hint                                     # the next hint for the scenario you're running
