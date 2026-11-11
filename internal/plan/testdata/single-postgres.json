@@ -214,7 +214,7 @@
       "containers": [
         "db"
       ],
-      "cpu": 0.5,
+      "cpu": 0.4,
       "cpu_period_ms": 100,
       "memory": 1073741824,
       "port": 5432,

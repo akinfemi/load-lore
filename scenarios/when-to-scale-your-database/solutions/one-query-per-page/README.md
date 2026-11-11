@@ -16,7 +16,7 @@ Now it fetches all three by id in one statement (`SELECT … WHERE id = ANY($1)`
 - { target: db, op: read, query: batch, rows: 3 }
 ```
 
-Everything else is the same: the same 0.5-CPU Postgres, the same pools, the same ramp.
+Everything else is the same: the same 0.4-CPU Postgres, the same pools, the same ramp.
 
 ## Why it helps
 
