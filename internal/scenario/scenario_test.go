@@ -54,7 +54,7 @@ func TestBreakingPointIsTheSpecExample(t *testing.T) {
 		b, _ := yamlJSON(d)
 		return b
 	}
-	if a, b := load("../../examples/single-postgres.yaml"), load("../../scenarios/single-postgres-breaking-point/design.yaml"); a != b {
+	if a, b := load("../../examples/single-postgres.yaml"), load("../../scenarios/when-to-scale-your-database/design.yaml"); a != b {
 		t.Errorf("the scenario's design drifted from examples/single-postgres.yaml:\n%s\n%s", a, b)
 	}
 }

@@ -209,7 +209,7 @@ func TestReportAndCompare(t *testing.T) {
 
 func TestScenarios(t *testing.T) {
 	out, _, code := runCLI(t, "scenarios")
-	if code != exitOK || !strings.Contains(out, "single-postgres-breaking-point") || !strings.Contains(out, "When does one Postgres fall over?") {
+	if code != exitOK || !strings.Contains(out, "when-to-scale-your-database") || !strings.Contains(out, "When do you need to scale your database?") {
 		t.Errorf("list: code %d\n%s", code, out)
 	}
 	out, _, _ = runCLI(t, "scenarios", "QUEUEING knee", "--json")
@@ -237,7 +237,7 @@ func TestHint(t *testing.T) {
 		t.Errorf("no scenario: code %d %s", code, stderr)
 	}
 
-	out, _, code := runCLI(t, "hint", "single-postgres-breaking-point")
+	out, _, code := runCLI(t, "hint", "when-to-scale-your-database")
 	if code != exitOK || !strings.HasPrefix(out, "Hint 1 of 5 · Start with the verdict") || !strings.Contains(out, "Next: loadl hint (2 of 5)") {
 		t.Errorf("first: code %d\n%s", code, out)
 	}
@@ -246,13 +246,13 @@ func TestHint(t *testing.T) {
 	if err := os.MkdirAll(run, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	rec := `{"design":"whatever","design_path":"` + filepath.Join(repo, "scenarios/single-postgres-breaking-point/solutions/one-query-per-page/design.yaml") + `"}`
+	rec := `{"design":"whatever","design_path":"` + filepath.Join(repo, "scenarios/when-to-scale-your-database/solutions/one-query-per-page/design.yaml") + `"}`
 	if err := os.WriteFile(filepath.Join(run, "run.json"), []byte(rec), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out, _, _ = runCLI(t, "hint", "--json")
 	var h hintResult
-	if err := json.Unmarshal([]byte(out), &h); err != nil || h.Number != 2 || h.Scenario != "single-postgres-breaking-point" || h.Body == "" {
+	if err := json.Unmarshal([]byte(out), &h); err != nil || h.Number != 2 || h.Scenario != "when-to-scale-your-database" || h.Body == "" {
 		t.Errorf("second: %v %+v", err, h)
 	}
 	for range 3 {
@@ -274,12 +274,12 @@ func TestHint(t *testing.T) {
 }
 
 func TestScenarioCheckStatic(t *testing.T) {
-	out, _, code := runCLI(t, "scenario", "check", "../../scenarios/single-postgres-breaking-point", "--static")
+	out, _, code := runCLI(t, "scenario", "check", "../../scenarios/when-to-scale-your-database", "--static")
 	if code != exitOK || !strings.Contains(out, "ok (files only") {
 		t.Errorf("folder: code %d\n%s", code, out)
 	}
 	// A library name works too, from the built-in copy.
-	out, _, code = runCLI(t, "scenario", "check", "single-postgres-breaking-point", "--static", "--json")
+	out, _, code = runCLI(t, "scenario", "check", "when-to-scale-your-database", "--static", "--json")
 	var res struct {
 		OK     bool   `json:"ok"`
 		Status string `json:"status"`

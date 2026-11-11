@@ -229,7 +229,7 @@ func currentScenario(args []string, st hintState) (*scenario.Scenario, error) {
 	if st.Current != "" {
 		return scenario.Find(st.Current)
 	}
-	return nil, errors.New("no current scenario: the latest run isn't from one; name it, as in loadl hint single-postgres-breaking-point (loadl scenarios lists them)")
+	return nil, errors.New("no current scenario: the latest run isn't from one; name it, as in loadl hint when-to-scale-your-database (loadl scenarios lists them)")
 }
 
 // libraryByDesignName matches a design copied out of a scenario: its name

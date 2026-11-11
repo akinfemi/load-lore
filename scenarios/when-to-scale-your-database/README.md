@@ -1,4 +1,4 @@
-# When does one Postgres fall over?
+# When do you need to scale your database?
 
 Level 1 · about 45 minutes · teaches saturation, the queueing knee and connection pools
 
@@ -34,7 +34,7 @@ Put them in the `expect` block at the bottom of `design.yaml`. The report scores
 ## Run it
 
 ```sh
-loadl run scenarios/single-postgres-breaking-point/design.yaml
+loadl run scenarios/when-to-scale-your-database/design.yaml
 loadl report latest --print | less
 ```
 
@@ -53,5 +53,7 @@ loadl compare <first-run> latest -o compare.md
 ```
 
 Some directions: the database's resources, the work each request asks of it, the pool sizes, or keeping requests away from the database. They don't all help, and finding out which ones don't is part of the lesson.
+
+You may also see a connection storm early in the ramp. [The connection pool trap](../connection-pool-trap/) covers it.
 
 `solutions/` has one worked answer with its report. It gives the game away, so try your own first.

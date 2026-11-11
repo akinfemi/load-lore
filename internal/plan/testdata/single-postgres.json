@@ -1,6 +1,6 @@
 {
   "run_id": "test-run",
-  "name": "single-postgres-breaking-point",
+  "name": "when-to-scale-your-database",
   "scale": 1,
   "seed": 1,
   "duration": 420000000000,

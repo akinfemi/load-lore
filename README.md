@@ -4,7 +4,7 @@ Loadlore is an open-source, terminal-first lab for system design. You describe a
 
 The CLI is `loadl`.
 
-> **Status:** early development, pre-MVP. You can validate a design, run it on local Docker (Linux, or macOS with Colima), read its report and work through two scenarios, [When does one Postgres fall over?](scenarios/single-postgres-breaking-point/) and [The connection pool trap](scenarios/connection-pool-trap/). Not built yet: four of the spec's six diagnosis rules (a connection-storm rule is there besides), two of the four MVP scenarios, the live dashboard, `loadl init`, and the loss, partition and slow-disk faults. Docker Desktop and WSL2 aren't verified. The spec's "Build status" section has the details.
+> **Status:** early development, pre-MVP. You can validate a design, run it on local Docker (Linux, or macOS with Colima), read its report and work through two scenarios, [When do you need to scale your database?](scenarios/when-to-scale-your-database/) and [The connection pool trap](scenarios/connection-pool-trap/). Not built yet: four of the spec's six diagnosis rules (a connection-storm rule is there besides), two of the four MVP scenarios, the live dashboard, `loadl init`, and the loss, partition and slow-disk faults. Docker Desktop and WSL2 aren't verified. The spec's "Build status" section has the details.
 
 - **Spec:** [Loadlore — Product Spec](https://claude.ai/artifact/TEkM1GHG5mpmKXTcH3jJ6m) is the source of truth for scope and behavior.
 - **AI skill:** [`skills/loadlore-designer/`](skills/loadlore-designer/) turns plain-language descriptions into validated design files.
@@ -30,7 +30,7 @@ Every command accepts `--json`.
 
 A run folder holds the exact `design.yaml`, the generated `compose.yaml` and `load.js`, `plan.json` (resources after scaling, and why), `events.jsonl` (load, faults, container deaths), `metrics/` (every series, exported from Prometheus before teardown), `logs/`, `containers.json`, `k6-summary.json`, `run.json`, and the `report.md` and `analysis.json` that `loadl run` writes at the end. Reports are made from the folder alone, so `loadl report` can regenerate them at any time.
 
-Scenarios are guided experiments in [`scenarios/`](scenarios/): a starting design, a story, a question to predict, hints and worked solutions. Start with [When does one Postgres fall over?](scenarios/single-postgres-breaking-point/), then [The connection pool trap](scenarios/connection-pool-trap/).
+Scenarios are guided experiments in [`scenarios/`](scenarios/): a starting design, a story, a question to predict, hints and worked solutions. Start with [When do you need to scale your database?](scenarios/when-to-scale-your-database/), then [The connection pool trap](scenarios/connection-pool-trap/).
 
 Each run starts from a fresh copy of the seeded dataset. `--reuse-data` skips the copy for quick iteration; the report then says which earlier runs wrote to the data.
 

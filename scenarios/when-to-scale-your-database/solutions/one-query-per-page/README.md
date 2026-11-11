@@ -1,6 +1,6 @@
 # One query per page
 
-**Spoiler:** this is a worked answer to [When does one Postgres fall over?](../../README.md). Try your own first.
+**Spoiler:** this is a worked answer to [When do you need to scale your database?](../../README.md). Try your own first.
 
 ## What changed
 
@@ -43,6 +43,6 @@ Small CPU limits are bursty, so compare peak throughput and the shape of the cur
 [report.md](report.md) is this design's report from the run described above, and [compare.md](compare.md) puts it next to the starting design's reference run. Compare it with your own run of the starting design:
 
 ```sh
-loadl run scenarios/single-postgres-breaking-point/solutions/one-query-per-page/design.yaml
+loadl run scenarios/when-to-scale-your-database/solutions/one-query-per-page/design.yaml
 loadl compare <your-first-run> latest -o compare.md
 ```

@@ -1,6 +1,6 @@
 # Writing a scenario
 
-A scenario is a guided experiment: a starting design, a story, a question the learner must predict, and hints. The learner should discover the lesson by running it, not by reading it. `scenarios/single-postgres-breaking-point/` is the reference example.
+A scenario is a guided experiment: a starting design, a story, a question the learner must predict, and hints. The learner should discover the lesson by running it, not by reading it. `scenarios/when-to-scale-your-database/` is the reference example.
 
 ## Folder layout
 
@@ -25,7 +25,7 @@ scenarios/<scenario-name>/
 
 Keep it short. Sections, in this order:
 
-1. **Title.** The scenario's question, such as "When does one Postgres fall over?", then one line with the level, the minutes and the concepts.
+1. **Title.** The scenario's question, such as "When do you need to scale your database?", then one line with the level, the minutes and the concepts.
 2. **The story.** Two or three sentences in plain terms, then the diagram: the exact output of `loadl diagram design.yaml` in a ```mermaid block. `loadl scenario check` fails when the diagram doesn't match the design, so regenerate it after every design change.
 3. **The question.** What the learner must predict before running. Tell them to write it under `expect` in `design.yaml`, or to tell their AI assistant.
 4. **Run it.** The exact command, how long it takes, and the host it needs (from `meta.yaml`), with the `--scale` advice for smaller machines. Mention `loadl hint`.
@@ -48,7 +48,7 @@ Hints refer to the learner's own report, not to numbers from a reference run.
 ## meta.yaml
 
 ```yaml
-title: When does one Postgres fall over?
+title: When do you need to scale your database?
 level: 1                       # 1 beginner, 2 intermediate, 3 advanced
 concepts: [saturation, queueing knee, connection pools]
 minutes: 45                    # rough time to work through it

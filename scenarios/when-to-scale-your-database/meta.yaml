@@ -1,4 +1,4 @@
-title: When does one Postgres fall over?
+title: When do you need to scale your database?
 level: 1
 concepts: [saturation, queueing knee, connection pools]
 minutes: 45
