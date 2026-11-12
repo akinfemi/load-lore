@@ -583,13 +583,26 @@ func (v *validator) scenario() {
 			if f.Target != nil {
 				v.errorf(pathKey(p, "target"), CodeNotApplicable, "partition uses between: [a, b] instead of target")
 			}
-			if len(f.Between) == 2 && f.Between[0] == f.Between[1] {
-				v.errorf(pathKey(p, "between"), CodeInvalidValue, "a partition needs two different services")
-			}
-			for j, name := range f.Between {
-				if _, ok := v.d.Services[name]; !ok {
-					v.unknownService(pathIndex(pathKey(p, "between"), j), name)
+			var names []string
+			for j, side := range f.Between {
+				at := pathIndex(pathKey(p, "between"), j)
+				ref, err := ParseTargetRef(side)
+				if err != nil {
+					v.errorf(at, CodeInvalidValue, "%v", err)
+					continue
 				}
+				names = append(names, ref.Name)
+				t, ok := v.d.Services[ref.Name]
+				if !ok {
+					v.unknownService(at, ref.Name)
+					continue
+				}
+				if t != nil && ref.Index != nil && t.Replicas != nil && *ref.Index >= *t.Replicas {
+					v.errorf(at, CodeRange, "%s has %d replica%s, so the index must be below %d", ref.Name, *t.Replicas, plural(*t.Replicas, "", "s"), *t.Replicas)
+				}
+			}
+			if len(names) == 2 && names[0] == names[1] {
+				v.errorf(pathKey(p, "between"), CodeInvalidValue, "a partition needs two different services")
 			}
 		} else {
 			v.faultTarget(p, f)

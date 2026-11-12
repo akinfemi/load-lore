@@ -39,15 +39,8 @@ func Apply(sport int, percent float64) error {
 	}
 	for _, l := range ls {
 		idx := l.Attrs().Index
-		prio := netlink.NewPrio(netlink.QdiscAttrs{LinkIndex: idx, Handle: netlink.MakeHandle(1, 0), Parent: netlink.HANDLE_ROOT})
-		prio.Bands = Band
-		if err := netlink.QdiscAdd(prio); err != nil {
-			return fmt.Errorf("%s: prio qdisc: %w", l.Attrs().Name, err)
-		}
-		nq := netlink.NewNetem(netlink.QdiscAttrs{LinkIndex: idx, Handle: netlink.MakeHandle(40, 0), Parent: netlink.MakeHandle(1, Band)},
-			netlink.NetemQdiscAttrs{Loss: float32(percent)})
-		if err := netlink.QdiscAdd(nq); err != nil {
-			return fmt.Errorf("%s: netem qdisc: %w", l.Attrs().Name, err)
+		if err := rootPrio(l, percent); err != nil {
+			return err
 		}
 		// The TCP source port is the first 16 bits after a 20-byte IPv4
 		// header, as tc's "match ip sport" reads it; the flags byte is 13
@@ -69,6 +62,51 @@ func Apply(sport int, percent float64) error {
 		if err := netlink.FilterAdd(f); err != nil {
 			return fmt.Errorf("%s: u32 filter: %w", l.Attrs().Name, err)
 		}
+	}
+	return nil
+}
+
+// Cut drops every packet sent to the given TCP ports, handshakes
+// included: a partition, as a network that silently stopped carrying them.
+func Cut(dports []int) error {
+	ls, err := links()
+	if err != nil {
+		return err
+	}
+	for _, l := range ls {
+		idx := l.Attrs().Index
+		if err := rootPrio(l, 100); err != nil {
+			return err
+		}
+		for i, port := range dports {
+			// The destination port is the second 16 bits of the TCP header.
+			f := &netlink.U32{
+				FilterAttrs: netlink.FilterAttrs{LinkIndex: idx, Parent: netlink.MakeHandle(1, 0), Priority: uint16(1 + i), Protocol: unix.ETH_P_IP},
+				ClassId:     netlink.MakeHandle(1, Band),
+				Sel: &netlink.TcU32Sel{Flags: netlink.TC_U32_TERMINAL, Nkeys: 1, Keys: []netlink.TcU32Key{
+					{Mask: 0x0000ffff, Val: uint32(port), Off: 20},
+				}},
+			}
+			if err := netlink.FilterAdd(f); err != nil {
+				return fmt.Errorf("%s: u32 filter for port %d: %w", l.Attrs().Name, port, err)
+			}
+		}
+	}
+	return nil
+}
+
+// rootPrio adds the prio root qdisc and netem on band Band with the loss.
+func rootPrio(l netlink.Link, percent float64) error {
+	idx := l.Attrs().Index
+	prio := netlink.NewPrio(netlink.QdiscAttrs{LinkIndex: idx, Handle: netlink.MakeHandle(1, 0), Parent: netlink.HANDLE_ROOT})
+	prio.Bands = Band
+	if err := netlink.QdiscAdd(prio); err != nil {
+		return fmt.Errorf("%s: prio qdisc: %w", l.Attrs().Name, err)
+	}
+	nq := netlink.NewNetem(netlink.QdiscAttrs{LinkIndex: idx, Handle: netlink.MakeHandle(40, 0), Parent: netlink.MakeHandle(1, Band)},
+		netlink.NetemQdiscAttrs{Loss: float32(percent)})
+	if err := netlink.QdiscAdd(nq); err != nil {
+		return fmt.Errorf("%s: netem qdisc: %w", l.Attrs().Name, err)
 	}
 	return nil
 }

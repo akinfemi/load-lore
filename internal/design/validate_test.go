@@ -164,6 +164,8 @@ func TestValidationDiagnostics(t *testing.T) {
 		{"bad op value", map[string]string{"services.api.behavior.calls[1]": "{target: db, op: query}"}, []string{"error services.api.behavior.calls[1].op invalid-value"}},
 		{"op wrong for kind", map[string]string{"services.api.behavior.calls[1]": "{target: db, op: get}"}, []string{"error services.api.behavior.calls[1].op op-target"}},
 		{"calls itself", map[string]string{"services.api.behavior.calls[1]": "{target: api, op: http}"}, []string{"error services.api.behavior.calls[1].target cycle"}},
+		{"partition replica out of range", map[string]string{"scenario": "[{at: 10s, inject: partition, between: [\"api[9]\", db]}]"}, []string{"error scenario[0].between[0] range"}},
+		{"partition bad side", map[string]string{"scenario": "[{at: 10s, inject: partition, between: [\"API!\", db]}]"}, []string{"error scenario[0].between[0] invalid-value"}},
 		{"coalesce needs on_miss", map[string]string{"services.cache": "{kind: redis}", "services.api.behavior.calls[1]": "{target: cache, op: get, coalesce: true}"}, []string{"error services.api.behavior.calls[1].coalesce not-applicable"}},
 		{"coalesce on read", map[string]string{"services.api.behavior.calls[0]": "{target: db, op: read, coalesce: true}"}, []string{"error services.api.behavior.calls[0].coalesce not-applicable"}},
 		{"on_miss on read", map[string]string{"services.api.behavior.calls[0]": "{target: db, op: read, on_miss: [{target: db, op: read}]}"}, []string{"error services.api.behavior.calls[0].on_miss not-applicable"}},

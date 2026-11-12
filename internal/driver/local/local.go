@@ -418,10 +418,58 @@ func (d *Driver) Inject(ctx context.Context, f *plan.Fault) (func(context.Contex
 			return errors.Join(errs...)
 		}, errors.Join(errs...)
 	}
-	if f.Inject == "loss" {
+	switch f.Inject {
+	case "loss":
 		return d.loss(ctx, f)
+	case "partition":
+		return d.partition(ctx, f)
 	}
 	return nil, fmt.Errorf("%s isn't supported by local runs yet", f.Inject)
+}
+
+// partition drops every packet each cut container sends to the proxies
+// that lead to the other side, with the same netem helper as loss.
+func (d *Driver) partition(ctx context.Context, f *plan.Fault) (func(context.Context) error, error) {
+	type cut struct {
+		id    string
+		ports string
+	}
+	var cuts []cut
+	for _, c := range f.Cuts {
+		found, err := d.containerIDs(ctx, c.Container)
+		if err != nil {
+			return nil, err
+		}
+		ps := make([]string, len(c.Ports))
+		for i, p := range c.Ports {
+			ps[i] = strconv.Itoa(p)
+		}
+		for _, id := range found {
+			cuts = append(cuts, cut{id, strings.Join(ps, ",")})
+		}
+	}
+	clear := func(ctx context.Context) error {
+		var errs []error
+		for _, c := range cuts {
+			errs = append(errs, d.netem(ctx, c.id, "clear"))
+		}
+		return errors.Join(errs...)
+	}
+	for _, c := range cuts {
+		if err := d.netem(ctx, c.id, "cut", c.ports); err != nil {
+			return clear, err
+		}
+	}
+	return clear, nil
+}
+
+// netem runs the synthetic image's netem command in a helper container
+// that shares the container's network namespace, as root with NET_ADMIN.
+func (d *Driver) netem(ctx context.Context, id string, args ...string) error {
+	cmd := append([]string{"run", "--rm", "--network", "container:" + id, "--cap-add", "NET_ADMIN", "--user", "0:0",
+		"--label", LabelOwner + "=1", "--label", LabelRun + "=" + d.runID, d.plan.Infra.SyntheticImg, "netem"}, args...)
+	_, err := d.docker(ctx, cmd...)
+	return err
 }
 
 // loss drops f.Percent of the packets each target container sends from its
@@ -437,12 +485,7 @@ func (d *Driver) loss(ctx context.Context, f *plan.Fault) (func(context.Context)
 		}
 		ids = append(ids, found...)
 	}
-	netem := func(ctx context.Context, id string, args ...string) error {
-		cmd := append([]string{"run", "--rm", "--network", "container:" + id, "--cap-add", "NET_ADMIN", "--user", "0:0",
-			"--label", LabelOwner + "=1", "--label", LabelRun + "=" + d.runID, d.plan.Infra.SyntheticImg, "netem"}, args...)
-		_, err := d.docker(ctx, cmd...)
-		return err
-	}
+	netem := d.netem
 	clear := func(ctx context.Context) error {
 		var errs []error
 		for _, id := range ids {

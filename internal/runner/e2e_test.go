@@ -67,7 +67,7 @@ func TestE2ESmoke(t *testing.T) {
 
 	// Every fault applied and came off cleanly, packet loss included.
 	evs, _ := os.ReadFile(filepath.Join(res.Dir, "events.jsonl"))
-	if !strings.Contains(string(evs), `"inject":"loss"`) || strings.Contains(string(evs), `"kind":"fault_error"`) {
+	if !strings.Contains(string(evs), `"inject":"loss"`) || !strings.Contains(string(evs), `"inject":"partition"`) || strings.Contains(string(evs), `"kind":"fault_error"`) {
 		t.Errorf("faults in events.jsonl:\n%s", evs)
 	}
 

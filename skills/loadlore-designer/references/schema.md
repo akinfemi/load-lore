@@ -188,7 +188,7 @@ A list of fault injections, each with `at` and `inject`, and a `target` (except 
 | `kill` | | Container killed, not restarted |
 | `pause` | `for` required | Container frozen |
 | `restart` | | Container restarted (memory and caches cleared) |
-| `partition` | `between: [a, b]` instead of `target` | tc netem |
+| `partition` | `between: [a, b]` instead of `target`; each side a service or `name[i]` for one replica | tc netem in each side's network namespace: every packet it sends toward the other side is dropped, handshakes included, so calls hang until their timeouts. Health checks that don't touch the other side keep passing |
 | `disk_slow` | `add_ms` (required) | Device throttling; datastores only |
 
 `target` is a service name, or `name[i]` for one replica. Connection faults (`latency`, `loss`, `bandwidth`, `timeout`, `reset`) act on connections into the target, so something must call it (or it is the workload entry).

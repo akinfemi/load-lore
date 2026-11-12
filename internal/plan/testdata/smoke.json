@@ -317,6 +317,25 @@
     },
     {
       "index": 2,
+      "at": "50s",
+      "for": "5s",
+      "inject": "partition",
+      "target": "",
+      "between": [
+        "api[0]",
+        "cache"
+      ],
+      "cuts": [
+        {
+          "container": "api-0",
+          "ports": [
+            20000
+          ]
+        }
+      ]
+    },
+    {
+      "index": 3,
       "at": "45s",
       "inject": "kill",
       "target": "api",

@@ -202,7 +202,7 @@ type Fault struct {
 	JitterMs *int       `yaml:"jitter_ms,omitempty" json:"jitter_ms,omitempty" jsonschema:"minimum=0" jsonschema_description:"latency only."`
 	Percent  *float64   `yaml:"percent,omitempty" json:"percent,omitempty" jsonschema:"exclusiveMinimum=0,maximum=100" jsonschema_description:"loss only."`
 	Kbps     *int       `yaml:"kbps,omitempty" json:"kbps,omitempty" jsonschema:"minimum=1" jsonschema_description:"bandwidth only."`
-	Between  []string   `yaml:"between,omitempty" json:"between,omitempty" jsonschema:"minItems=2,maxItems=2" jsonschema_description:"partition only: the two services to cut apart."`
+	Between  []string   `yaml:"between,omitempty" json:"between,omitempty" jsonschema:"minItems=2,maxItems=2" jsonschema_description:"partition only: the two services to cut apart, each a name or name[i] for one replica."`
 }
 
 // Assumption records a value the user did not state, and why it was chosen.

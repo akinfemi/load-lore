@@ -37,8 +37,9 @@ func main() {
 		_ = json.NewEncoder(os.Stdout).Encode(r)
 		return
 	}
-	// netem applies or clears the loss fault in the network namespace it
-	// shares: netem <sport> <percent>, or netem clear.
+	// netem applies or clears the loss and partition faults in the network
+	// namespace it shares: netem <sport> <percent>, netem cut <dport,...>,
+	// or netem clear.
 	if len(os.Args) > 1 && os.Args[1] == "netem" {
 		if err := netemCmd(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "synthetic netem:", err)
@@ -56,8 +57,19 @@ func netemCmd(args []string) error {
 	if len(args) == 1 && args[0] == "clear" {
 		return netem.Clear()
 	}
+	if len(args) == 2 && args[0] == "cut" {
+		var ports []int
+		for _, f := range strings.Split(args[1], ",") {
+			port, err := strconv.Atoi(f)
+			if err != nil || port < 1 || port > 65535 {
+				return fmt.Errorf("bad port %q", f)
+			}
+			ports = append(ports, port)
+		}
+		return netem.Cut(ports)
+	}
 	if len(args) != 2 {
-		return errors.New("usage: netem <sport> <percent> | netem clear")
+		return errors.New("usage: netem <sport> <percent> | netem cut <dport,...> | netem clear")
 	}
 	sport, err := strconv.Atoi(args[0])
 	if err != nil || sport < 1 || sport > 65535 {

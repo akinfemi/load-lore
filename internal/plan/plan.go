@@ -187,6 +187,18 @@ type Fault struct {
 	// whose replies lose them.
 	Percent float64 `json:"percent,omitempty"`
 	Port    int     `json:"port,omitempty"`
+	// Partition: the two sides, and for each container on either side the
+	// proxy ports leading to the other, whose packets it drops.
+	Between []string `json:"between,omitempty"`
+	Cuts    []Cut    `json:"cuts,omitempty"`
+}
+
+// Cut is one container's share of a partition: every packet it sends to
+// these Toxiproxy ports is dropped, as on a network that silently stopped
+// carrying them.
+type Cut struct {
+	Container string `json:"container"`
+	Ports     []int  `json:"ports"`
 }
 
 // Infra is the budget for Loadlore's own containers. They get explicit
@@ -826,8 +838,14 @@ func (p *Plan) faults(d *design.Design, byName map[string]*Service) error {
 			pf.For = &v
 		}
 		switch f.Inject {
-		case "partition", "disk_slow":
+		case "disk_slow":
 			return fmt.Errorf("scenario[%d]: %s isn't supported by local runs yet", i, f.Inject)
+		case "partition":
+			if err := p.partition(pf, f, byName); err != nil {
+				return fmt.Errorf("scenario[%d]: %w", i, err)
+			}
+			p.Faults = append(p.Faults, pf)
+			continue
 		}
 		pf.Target = f.Target.Name
 		t := byName[f.Target.Name]
@@ -1155,4 +1173,44 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	slices.Sort(keys)
 	return keys
+}
+
+// partition cuts each side's containers off from the proxies that lead to
+// the other side's (or, for name[i], to that one replica).
+func (p *Plan) partition(pf *Fault, f *design.Fault, byName map[string]*Service) error {
+	var refs [2]design.TargetRef
+	for i, side := range f.Between {
+		ref, err := design.ParseTargetRef(side)
+		if err != nil {
+			return err
+		}
+		refs[i] = ref
+	}
+	pf.Between = f.Between
+	containers := func(r design.TargetRef) []string {
+		cs := byName[r.Name].Containers
+		if r.Index != nil {
+			return []string{cs[*r.Index]}
+		}
+		return cs
+	}
+	for _, pair := range [][2]design.TargetRef{{refs[0], refs[1]}, {refs[1], refs[0]}} {
+		from, to := pair[0], pair[1]
+		var ports []int
+		for _, x := range p.proxiesInto(from.Name, to.Name) {
+			if slices.ContainsFunc(containers(to), func(c string) bool { return strings.HasPrefix(x.Upstream, c+":") }) {
+				ports = append(ports, x.Listen)
+			}
+		}
+		if len(ports) == 0 {
+			continue
+		}
+		for _, c := range containers(from) {
+			pf.Cuts = append(pf.Cuts, Cut{Container: c, Ports: ports})
+		}
+	}
+	if len(pf.Cuts) == 0 {
+		return fmt.Errorf("partition: %s and %s don't call each other, so there is no connection to cut", f.Between[0], f.Between[1])
+	}
+	return nil
 }

@@ -118,8 +118,15 @@ func TestProxiesAndSyntheticTargets(t *testing.T) {
 	if got := p.Faults[0].Proxies; len(got) != 1 || got[0] != "api--db" {
 		t.Errorf("latency fault proxies: %v", got)
 	}
-	if got := p.Faults[2].Containers; p.Faults[2].Inject != "kill" || len(got) != 1 || got[0] != "api-1" {
+	byInject := map[string]*Fault{}
+	for _, f := range p.Faults {
+		byInject[f.Inject] = f
+	}
+	if got := byInject["kill"].Containers; len(got) != 1 || got[0] != "api-1" {
 		t.Errorf("kill fault containers: %v", got)
+	}
+	if c := byInject["partition"].Cuts; len(c) != 1 || c[0].Container != "api-0" {
+		t.Errorf("partition cuts: %+v", c)
 	}
 	if f := p.Faults[1]; f.Inject != "loss" || f.Port != RedisPort || len(f.Containers) != 1 || f.Containers[0] != "cache" {
 		t.Errorf("loss fault: %+v", f)
@@ -171,9 +178,9 @@ func TestStagesAndOfferedRate(t *testing.T) {
 func TestUnsupportedFaults(t *testing.T) {
 	src := strings.Replace(profileDesign, "workload:", `  db: { kind: postgres, dataset: { rows: 10 } }
 scenario:
-  - { at: 1s, inject: partition, between: [api, db] }
+  - { at: 1s, inject: disk_slow, target: db, add_ms: 5 }
 workload:`, 1)
-	if _, err := Build(load(t, src), Options{RunID: "r"}); err == nil || !strings.Contains(err.Error(), "partition isn't supported by local runs yet") {
+	if _, err := Build(load(t, src), Options{RunID: "r"}); err == nil || !strings.Contains(err.Error(), "disk_slow isn't supported by local runs yet") {
 		t.Errorf("got %v", err)
 	}
 }
@@ -471,5 +478,31 @@ func TestLossFault(t *testing.T) {
 	f := p.Faults[len(p.Faults)-1]
 	if f.Inject != "loss" || f.Percent != 2 || f.Port != PostgresPort || len(f.Containers) != 1 || len(f.Proxies) != 0 {
 		t.Errorf("loss fault %+v", f)
+	}
+}
+
+// A partition between one replica and a service cuts only that replica,
+// from the proxies that lead to the other side.
+func TestPartitionFault(t *testing.T) {
+	d := loadFile(t, "../../examples/smoke.yaml")
+	d.Scenario = append(d.Scenario, &design.Fault{At: d.Scenario[0].At, Inject: "partition", Between: []string{"api[1]", "db"}})
+	p, err := Build(d, Options{RunID: "r", Scale: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := p.Faults[len(p.Faults)-1]
+	var want []int
+	for _, x := range p.Proxies {
+		if x.From == "api" && x.To == "db" {
+			want = append(want, x.Listen)
+		}
+	}
+	if f.Inject != "partition" || len(f.Cuts) != 1 || f.Cuts[0].Container != "api-1" || !slices.Equal(f.Cuts[0].Ports, want) {
+		t.Errorf("partition cuts %+v, want api-1 to ports %v", f.Cuts, want)
+	}
+	// Two services that don't call each other can't be cut apart.
+	d.Scenario[len(d.Scenario)-1].Between = []string{"lb", "db"}
+	if _, err := Build(d, Options{RunID: "r", Scale: 1}); err == nil || !strings.Contains(err.Error(), "don't call each other") {
+		t.Errorf("lb and db: %v", err)
 	}
 }

@@ -467,6 +467,8 @@ func describeFault(f *plan.Fault) string {
 		}
 	case "loss":
 		s = fmt.Sprintf("loss %g%% of the packets %s sends from port %d (its replies)", f.Percent, f.Target, f.Port)
+	case "partition":
+		s = fmt.Sprintf("partition between %s and %s", f.Between[0], f.Between[1])
 	case "kill", "restart", "pause":
 		s = fmt.Sprintf("%s %s", f.Inject, strings.Join(f.Containers, ", "))
 	}
