@@ -1,0 +1,44 @@
+version: 1
+name: flaky-network-one-retry
+
+# Solution: keep the 150 ms timeout, retry a failed call once. A call
+# whose reply lost a packet times out and is sent again on a new
+# connection, where its reply is very likely not lost too.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: inventory, op: http, count: 10 }   # one per product on the page
+      resilience:
+        timeout_ms: 150
+        retries: { max: 1 }
+    pools:
+      inventory: 50
+
+  inventory:
+    image: loadlore/synthetic
+    resources: { cpu: 1, memory: 256m }
+    behavior:
+      cpu_ms: 0.1
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 50, to: 300, over: 30s }
+    - hold: { rps: 300, for: 3m30s }
+  mix: { read: 1.0 }
+
+# From 1:01, inventory's network loses 1% of the packets it sends, for two
+# minutes: a bad cable, a busy switch, a noisy neighbour on the host.
+scenario:
+  - { at: 1m1s, inject: loss, target: inventory, percent: 1, for: 2m }

@@ -33,7 +33,7 @@ Loadlore runs your design on real containers, so it needs Docker. There are no p
 
 ## 2. Work through a scenario
 
-Scenarios are guided experiments: a starting design that breaks, a story, questions to answer before you run it, hints, and worked solutions. Four are built:
+Scenarios are guided experiments: a starting design that breaks, a story, questions to answer before you run it, hints, and worked solutions. Five are built:
 
 | Scenario | Level | Teaches |
 | --- | --- | --- |
@@ -41,6 +41,7 @@ Scenarios are guided experiments: a starting design that breaks, a story, questi
 | [The connection pool trap](../scenarios/connection-pool-trap/) | 1 | pools per replica, `max_connections`, PgBouncer |
 | [The slow dependency](../scenarios/slow-dependency/) | 2 | timeouts, retry storms, circuit breakers |
 | [The cache restart](../scenarios/cache-restart/) | 2 | cold caches, the thundering herd, request coalescing |
+| [The flaky network](../scenarios/flaky-network/) | 2 | packet loss, TCP retransmits, fan-out, timeouts sized to the tail |
 
 `loadl scenarios` lists them; `loadl scenarios retry` searches names, titles and concepts.
 
