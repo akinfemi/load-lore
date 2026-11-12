@@ -187,6 +187,7 @@
       "containers": [
         "db"
       ],
+      "slow_disk": true,
       "cpu": 1,
       "cpu_period_ms": 100,
       "memory": 536870912,
@@ -336,6 +337,17 @@
     },
     {
       "index": 3,
+      "at": "10s",
+      "for": "8s",
+      "inject": "disk_slow",
+      "target": "db",
+      "containers": [
+        "db"
+      ],
+      "add_ms": 10
+    },
+    {
+      "index": 4,
       "at": "45s",
       "inject": "kill",
       "target": "api",

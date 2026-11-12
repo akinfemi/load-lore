@@ -189,7 +189,7 @@ A list of fault injections, each with `at` and `inject`, and a `target` (except 
 | `pause` | `for` required | Container frozen |
 | `restart` | | Container restarted (memory and caches cleared) |
 | `partition` | `between: [a, b]` instead of `target`; each side a service or `name[i]` for one replica | tc netem in each side's network namespace: every packet it sends toward the other side is dropped, handshakes included, so calls hang until their timeouts. Health checks that don't touch the other side keep passing |
-| `disk_slow` | `add_ms` (required) | Device throttling; datastores only |
+| `disk_slow` | `add_ms` (required) | The kernel's dm-delay under the datastore's data: every write and fsync waits `add_ms` longer; reads don't. Postgres only in local runs |
 
 `target` is a service name, or `name[i]` for one replica. Connection faults (`latency`, `loss`, `bandwidth`, `timeout`, `reset`) act on connections into the target, so something must call it (or it is the workload entry).
 

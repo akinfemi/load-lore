@@ -423,6 +423,9 @@ func (d *Driver) Inject(ctx context.Context, f *plan.Fault) (func(context.Contex
 		return d.loss(ctx, f)
 	case "partition":
 		return d.partition(ctx, f)
+	case "disk_slow":
+		clear := func(ctx context.Context) error { return d.slowDisk(ctx, f.Target, 0) }
+		return clear, d.slowDisk(ctx, f.Target, f.AddMs)
 	}
 	return nil, fmt.Errorf("%s isn't supported by local runs yet", f.Inject)
 }
@@ -646,6 +649,11 @@ func (d *Driver) Down(ctx context.Context) error {
 				}
 			}
 		}
+		// A dm-delay device holds its loop device and image file; it goes
+		// once compose has unmounted it, before the volumes.
+		if d.plan != nil && hasSlowDisk(d.plan) {
+			errs = append(errs, d.removeSlowDisks(ctx, false))
+		}
 		if d.runID != "" {
 			errs = append(errs, removeByLabel(ctx, d.api, LabelRun+"="+d.runID, true))
 		}
@@ -693,10 +701,13 @@ func ignoreNotFound(err error) error {
 // DownAll removes everything labeled as Loadlore's: every run's containers,
 // networks and volumes, and the dataset caches when withCaches is set.
 func DownAll(ctx context.Context, withCaches bool) (removed Counts, err error) {
-	api, _, err := NewClient(ctx)
+	api, host, err := NewClient(ctx)
 	if err != nil {
 		return removed, err
 	}
+	// dm-delay devices of slow-disk runs hold loop devices and their image
+	// files; they go before the volumes those live in.
+	slowErr := (&Driver{host: host}).removeSlowDisks(ctx, true)
 	f := client.Filters{}.Add("label", LabelOwner+"=1")
 	if cs, err := api.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f}); err == nil {
 		removed.Containers = len(cs.Items)
@@ -711,7 +722,7 @@ func DownAll(ctx context.Context, withCaches bool) (removed Counts, err error) {
 	if ns, err := api.NetworkList(ctx, client.NetworkListOptions{Filters: f}); err == nil {
 		removed.Networks = len(ns.Items)
 	}
-	return removed, removeByLabel(ctx, api, LabelOwner+"=1", withCaches)
+	return removed, errors.Join(slowErr, removeByLabel(ctx, api, LabelOwner+"=1", withCaches))
 }
 
 // Counts is what DownAll removed.

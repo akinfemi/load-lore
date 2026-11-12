@@ -76,11 +76,14 @@ type Service struct {
 	Name       string   `json:"name"`
 	Kind       string   `json:"kind"` // app, postgres, redis, pgbouncer, lb
 	Image      string   `json:"image"`
-	Containers []string `json:"containers"`    // one per replica: api-0, api-1; or db
-	CPU        float64  `json:"cpu"`           // per container, after scaling
-	CPUPeriod  int      `json:"cpu_period_ms"` // CFS period the CPU limit is enforced over
-	Memory     int64    `json:"memory"`        // bytes per container, after scaling
-	Port       int      `json:"port"`
+	Containers []string `json:"containers"` // one per replica: api-0, api-1; or db
+	// SlowDisk: a disk_slow fault targets this postgres, so its data lives
+	// on a dm-delay device that the fault slows.
+	SlowDisk  bool    `json:"slow_disk,omitempty"`
+	CPU       float64 `json:"cpu"`           // per container, after scaling
+	CPUPeriod int     `json:"cpu_period_ms"` // CFS period the CPU limit is enforced over
+	Memory    int64   `json:"memory"`        // bytes per container, after scaling
+	Port      int     `json:"port"`
 
 	// Application services: one config per replica (synthetic image only).
 	Synthetic []*synthetic.Config `json:"synthetic,omitempty"`
@@ -839,7 +842,14 @@ func (p *Plan) faults(d *design.Design, byName map[string]*Service) error {
 		}
 		switch f.Inject {
 		case "disk_slow":
-			return fmt.Errorf("scenario[%d]: %s isn't supported by local runs yet", i, f.Inject)
+			t := byName[f.Target.Name]
+			if t.Kind != "postgres" {
+				return fmt.Errorf("scenario[%d]: disk_slow on %s: local runs slow a postgres's disk only", i, f.Target.Name)
+			}
+			t.SlowDisk = true
+			pf.Target, pf.AddMs, pf.Containers = t.Name, *f.AddMs, t.Containers
+			p.Faults = append(p.Faults, pf)
+			continue
 		case "partition":
 			if err := p.partition(pf, f, byName); err != nil {
 				return fmt.Errorf("scenario[%d]: %w", i, err)

@@ -55,13 +55,17 @@ func (d *Driver) prepareData(ctx context.Context, s *plan.Service, progress func
 		d.event("seed_cache_hit", map[string]any{"service": s.Name, "volume": cache})
 	}
 
-	if d.plan.ReuseData {
+	if d.plan.ReuseData && !s.SlowDisk {
 		return d.reuseData(ctx, s, cache, progress)
 	}
 	run := fmt.Sprintf("loadlore-%s-%s-data", d.runID, s.Name)
 	progress(fmt.Sprintf("copying %s's cached data into a fresh volume", s.Name))
 	start := time.Now()
-	if _, err := d.docker(ctx, "volume", "create", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID, run); err != nil {
+	if s.SlowDisk {
+		if err := d.slowDiskVolume(ctx, s, run); err != nil {
+			return "", fmt.Errorf("%s's slow disk: %w", s.Name, err)
+		}
+	} else if _, err := d.docker(ctx, "volume", "create", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID, run); err != nil {
 		return "", err
 	}
 	if _, err := d.docker(ctx, "run", "--rm", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID,

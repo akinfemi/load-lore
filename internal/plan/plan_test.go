@@ -175,16 +175,6 @@ func TestStagesAndOfferedRate(t *testing.T) {
 	}
 }
 
-func TestUnsupportedFaults(t *testing.T) {
-	src := strings.Replace(profileDesign, "workload:", `  db: { kind: postgres, dataset: { rows: 10 } }
-scenario:
-  - { at: 1s, inject: disk_slow, target: db, add_ms: 5 }
-workload:`, 1)
-	if _, err := Build(load(t, src), Options{RunID: "r"}); err == nil || !strings.Contains(err.Error(), "disk_slow isn't supported by local runs yet") {
-		t.Errorf("got %v", err)
-	}
-}
-
 func TestScaleSetting(t *testing.T) {
 	for in, want := range map[string]string{
 		"256MB": "131072kB", "1GB": "524288kB", "64kB": "64kB", "200mb": "102400kb", "1g": "524288kb",
@@ -504,5 +494,24 @@ func TestPartitionFault(t *testing.T) {
 	d.Scenario[len(d.Scenario)-1].Between = []string{"lb", "db"}
 	if _, err := Build(d, Options{RunID: "r", Scale: 1}); err == nil || !strings.Contains(err.Error(), "don't call each other") {
 		t.Errorf("lb and db: %v", err)
+	}
+}
+
+// disk_slow puts its postgres's data on a slow-disk device, and only a
+// postgres's: redis here keeps nothing on disk.
+func TestDiskSlowFault(t *testing.T) {
+	d := loadFile(t, "../../examples/smoke.yaml")
+	ms := 20
+	d.Scenario = append(d.Scenario, &design.Fault{At: d.Scenario[0].At, Inject: "disk_slow", Target: &design.TargetRef{Name: "db"}, AddMs: &ms})
+	p, err := Build(d, Options{RunID: "r", Scale: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := p.Faults[len(p.Faults)-1]; f.Inject != "disk_slow" || f.Target != "db" || f.AddMs != 20 || !p.Service("db").SlowDisk || p.Service("cache").SlowDisk {
+		t.Errorf("disk_slow fault %+v, db slow disk %v", f, p.Service("db").SlowDisk)
+	}
+	d.Scenario[len(d.Scenario)-1].Target = &design.TargetRef{Name: "cache"}
+	if _, err := Build(d, Options{RunID: "r", Scale: 1}); err == nil || !strings.Contains(err.Error(), "slow a postgres's disk only") {
+		t.Errorf("disk_slow on redis: %v", err)
 	}
 }
