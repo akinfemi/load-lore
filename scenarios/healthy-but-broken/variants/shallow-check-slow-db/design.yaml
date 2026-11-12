@@ -1,0 +1,44 @@
+version: 1
+name: healthy-but-broken-shallow-check-slow-db
+
+# Variant: the starting design's shallow health check, with no partition:
+# instead, from 1:01, the database is slow for a minute, every query 200 ms
+# longer. The counterpart of deep-check-slow-db.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { path: /healthz, interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 3
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: db, op: read }
+      resilience:
+        timeout_ms: 1000
+    pools:
+      db: { size: 30, min: 30 }   # 3 replicas x 30 = 90 connections, all opened at start
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 1, memory: 1g }
+    dataset: { rows: 100000, row_bytes: 256 }
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 50, to: 300, over: 30s }
+    - hold: { rps: 300, for: 4m30s }
+  mix: { read: 1.0 }
+
+# From 1:01, the database is slow for a minute: a vacuum, a noisy
+# neighbour, a failover in progress.
+scenario:
+  - { at: 1m1s, inject: latency, target: db, add_ms: 200, for: 1m }
+

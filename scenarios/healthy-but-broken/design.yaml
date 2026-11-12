@@ -1,0 +1,50 @@
+version: 1
+name: healthy-but-broken
+
+# An account page behind a load balancer: three api replicas, each reading
+# the account from Postgres. The load balancer checks each replica's
+# /healthz every 2 seconds, and takes one out after 3 failed checks.
+# /healthz answers as long as the replica's process is up.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { path: /healthz, interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 3
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: db, op: read }
+      resilience:
+        timeout_ms: 1000
+    pools:
+      db: { size: 30, min: 30 }   # 3 replicas x 30 = 90 connections, all opened at start
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 1, memory: 1g }
+    dataset: { rows: 100000, row_bytes: 256 }
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 50, to: 300, over: 30s }
+    - hold: { rps: 300, for: 4m30s }
+  mix: { read: 1.0 }
+
+# From 1:01, the third replica can't reach the database, for two minutes:
+# a security group change, a broken route on its node, a full connection
+# table on its host. Its process is fine.
+scenario:
+  - { at: 1m1s, inject: partition, between: ["api[2]", db], for: 2m }
+
+# Your predictions, scored in the report. Replace these with your own
+# before you run it.
+expect:
+  - error_rate < 1%

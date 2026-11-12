@@ -1,0 +1,55 @@
+title: Healthy but broken
+level: 2
+concepts: [health checks, shallow and deep checks, load balancers, partial failure]
+minutes: 40
+
+# Available to Docker at --scale 1, Loadlore's own containers included.
+# reference and speed: the machine its numbers come from and its host speed
+# index; loadl run warns below 75% of this. The faults' timings come from
+# timeouts and health-check intervals, not the host's speed.
+host:
+  cpus: 6
+  memory: 4g
+  reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
+  speed: 1000
+
+# Load generator VUs started before the load, at --scale 1: 1.5 x the most
+# busy at once before a break in the check's runs (125, the shallow check's
+# run while the database was 200 ms slower).
+load:
+  prealloc_vus: 188
+  peak_vus: 125
+  from: healthy-but-broken-shallow-check-slow-db-20261112-133506
+
+# What `loadl scenario check` verifies, at --scale 1.
+check:
+  problem:
+    verdict: broke
+    signals: [errors]
+  solutions:
+    # helps: holds; the deep check takes the cut-off replica out within the
+    # window the partition starts in.
+    deep-health-check: { verdict: held }
+  variants:
+    # A deep check with a timeout tighter than the database's slow moments
+    # takes every replica out when the database is slow but working.
+    deep-check-slow-db: { verdict: broke, signals: [errors] }
+    # The same slow database behind the starting design's shallow check:
+    # slower, every request served.
+    shallow-check-slow-db: { verdict: held }
+
+# What `loadl predict` asks before a run; each answer becomes an expect
+# line in design.yaml.
+predict:
+  - ask: What share of requests fail while the third replica can't reach the database?
+    answer: text
+    expect: 'note: "failing during the partition: {answer}"'
+  - ask: Does the load balancer take the third replica out, and after how long?
+    answer: text
+    expect: 'note: "the load balancer: {answer}"'
+  - ask: Which component do the failed requests wait on?
+    answer: service
+    expect: 'note: "failed requests wait on {answer}"'
+  - ask: If the health check pinged the database, what could go wrong when the database is slow?
+    answer: text
+    expect: 'note: "a deep check on a slow database: {answer}"'
