@@ -1197,3 +1197,35 @@ func TestRecoveredAfterBreak(t *testing.T) {
 		t.Errorf("not recovered: %v %q", a.Verdict.RecoveredAt, a.Verdict.Summary)
 	}
 }
+
+// Cold cache must not fire on caches that are only filling or slowly
+// outgrowing their memory, which aren't the herd a restart causes.
+func TestColdCacheQuietCases(t *testing.T) {
+	cold := func(a *Analysis) bool {
+		return slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "cold-cache" })
+	}
+	// A cold start that warms slowly: misses fall the whole run.
+	w := analysistest.Healthy()
+	w.CacheHit = func(t float64) float64 { return math.Min(0.99, t/100) }
+	if cold(analyze(t, analysistest.WriteRun(t, w, 1))) {
+		t.Error("fired on a cache warming up")
+	}
+	// A working set slowly outgrowing the cache: misses rise from 2% to 8%
+	// over the run, 4x, never a jump.
+	w = analysistest.Healthy()
+	w.CacheHit = func(t float64) float64 { return 0.98 - 0.06*t/100 }
+	if cold(analyze(t, analysistest.WriteRun(t, w, 1))) {
+		t.Error("fired on a slowly growing miss rate")
+	}
+	// Misses rise 5x, but stay under 5% of lookups.
+	w = analysistest.Healthy()
+	w.CacheHit = func(t float64) float64 {
+		if t > 60 && t <= 70 {
+			return 0.96
+		}
+		return 0.992
+	}
+	if cold(analyze(t, analysistest.WriteRun(t, w, 1))) {
+		t.Error("fired on misses still under 5% of lookups")
+	}
+}
