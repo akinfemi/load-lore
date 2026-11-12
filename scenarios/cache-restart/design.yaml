@@ -1,0 +1,61 @@
+version: 1
+name: cache-restart
+
+# A product page: each request looks the product's review summary up in
+# Redis, and on a miss computes it in Postgres (a count over the reviews
+# table, which has no index for it) and stores it for ten minutes. The shop
+# has 200 products, a few of them popular, so once the cache is warm every
+# lookup hits.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 3
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - target: cache
+          op: get
+          on_miss:
+            - { target: db, op: read, query: scan }
+            - { target: cache, op: set, ttl_s: 600 }
+      resilience:
+        timeout_ms: 1000
+    pools:
+      cache: 20
+      db: 10   # 3 replicas x 10 = 30 connections
+
+  cache:
+    kind: redis
+    resources: { cpu: 0.5, memory: 256m }
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 1, memory: 1g }
+    config: { max_connections: 100, shared_buffers: 256MB }
+    dataset: { rows: 140000, row_bytes: 512 }
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 10, to: 1500, over: 2m }
+    - hold: { rps: 1500, for: 3m }
+  mix: { read: 1.0 }
+  keys: { distribution: zipf, skew: 1.1, count: 200 }
+
+# Redis restarts at 3:01, as a deploy or a node replacement would restart
+# it. It keeps nothing on disk, so it comes back empty.
+scenario:
+  - { at: 3m1s, inject: restart, target: cache }
+
+# Your predictions, scored in the report. Replace these with your own
+# before you run it.
+expect:
+  - error_rate < 1% after 3m20s

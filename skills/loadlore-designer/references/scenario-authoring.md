@@ -78,6 +78,7 @@ check:
     verdict: broke             # broke or held: what the starting design must do
     diagnoses: [queueing-knee] # rules that must fire
     # signals: [latency]       # break signals that must show at the break
+    # recovers: false          # healthy again by the end of the load (true), or still broken (false)
   solutions:
     one-query-per-page: {}     # helps: holds, or serves min_gain x the peak throughput or more
     # bigger-db: { min_gain: 1.5, diagnoses: [queueing-knee] }
@@ -102,7 +103,7 @@ predict:
 
 Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Breaking points move with core speed, so state the claims as relative results (broke or held, which rule fired, the gain from a fix), never as request rates. Rule ids are `pool-exhausted`, `queueing-knee`, `connection-storm`, `retry-storm`, `cold-cache`, `working-set` and `hot-rows` in this version. Break signals are `latency`, `errors` and `throughput`; a claim with `signals` needs `verdict: broke`.
 
-A scenario whose problem is a fault under steady load (a pause, a kill, a slow dependency) needs solutions that hold: the load is flat, so a fix can't serve more at its peak than the starting design did before the fault, and `helps` falls back to the verdict. A short episode of errors or slow responses, one 10-second window, is a stall in the timeline, not a break, so a fix that absorbs the fault within one window holds. Put the fault inside a window (at 2m1s rather than 2m) and keep it short, and remember that the synthetic service has no fallback: requests that need a failing dependency fail during the fault whatever the fix. `scenarios/slow-dependency` is the worked example.
+A scenario whose problem is a fault under steady load (a pause, a kill, a slow dependency) needs solutions that hold: the load is flat, so a fix can't serve more at its peak than the starting design did before the fault, and `helps` falls back to the verdict. A short episode of errors or slow responses, one 10-second window, is a stall in the timeline, not a break, so a fix that absorbs the fault within one window holds. Put the fault inside a window (at 2m1s rather than 2m) and keep it short, and remember that the synthetic service has no fallback: requests that need a failing dependency fail during the fault whatever the fix. `scenarios/slow-dependency` is the worked example. When even a good fix can't absorb the fault in one window, claim recovery instead: the starting design `recovers: false`, each solution `recovers: true`. A solution then helps when it recovers and the starting design doesn't; a run recovers when every window from some point after its break to the end of the load, at least three of them, is healthy. `scenarios/cache-restart` works this way.
 
 ## Solutions
 

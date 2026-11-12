@@ -1,0 +1,54 @@
+title: The cache restart
+level: 2
+concepts: [cold cache, thundering herd, request coalescing]
+minutes: 40
+
+# Available to Docker at --scale 1, Loadlore's own containers included.
+# reference and speed: the machine its numbers come from and its host speed
+# index; loadl run warns below 75% of this. The herd's length depends on
+# how long the database's scan takes, which moves with core speed.
+host:
+  cpus: 8
+  memory: 8g
+  reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
+  speed: 1000
+
+# Load generator VUs started before the load, at --scale 1: 1.5 x the most
+# busy at once in a whole run, capped at the load generator's 4,000, since
+# the check judges recovery after the break, where dropped arrivals would
+# lighten the herd. The starting design kept up to 2,671 busy while its herd
+# went on (requests take a second or more).
+load:
+  prealloc_vus: 4000
+  peak_vus: 2671
+  from: cache-restart-20261112-103110
+
+# What `loadl scenario check` verifies, at --scale 1. The restart's herd
+# can't be avoided: every design here breaks when Redis comes back empty.
+# The claims are about whether it ends.
+check:
+  problem:
+    verdict: broke
+    diagnoses: [cold-cache]
+    signals: [errors]
+    recovers: false
+  solutions:
+    # helps: recovers where the starting design never did.
+    coalesce: { recovers: true }
+    smaller-pool: { recovers: true }
+
+# What `loadl predict` asks before a run; each answer becomes an expect
+# line in design.yaml.
+predict:
+  - ask: Redis restarts empty at 3:01. What do users see in the seconds after it comes back?
+    answer: text
+    expect: 'note: "after the restart: {answer}"'
+  - ask: How long after the restart do the errors stop?
+    answer: text
+    expect: 'note: "errors stop: {answer}"'
+  - ask: Which component is the busiest a minute after the restart?
+    answer: service
+    expect: 'note: "{answer} is the busiest a minute after the restart"'
+  - ask: If you gave the api half as many database connections, what would happen?
+    answer: text
+    expect: 'note: "half the connections: {answer}"'

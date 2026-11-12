@@ -33,13 +33,14 @@ Loadlore runs your design on real containers, so it needs Docker. There are no p
 
 ## 2. Work through a scenario
 
-Scenarios are guided experiments: a starting design that breaks, a story, questions to answer before you run it, hints, and worked solutions. Three are built:
+Scenarios are guided experiments: a starting design that breaks, a story, questions to answer before you run it, hints, and worked solutions. Four are built:
 
 | Scenario | Level | Teaches |
 | --- | --- | --- |
 | [When do you need to scale your database?](../scenarios/when-to-scale-your-database/) | 1 | saturation, the queueing knee, connection pools |
 | [The connection pool trap](../scenarios/connection-pool-trap/) | 1 | pools per replica, `max_connections`, PgBouncer |
 | [The slow dependency](../scenarios/slow-dependency/) | 2 | timeouts, retry storms, circuit breakers |
+| [The cache restart](../scenarios/cache-restart/) | 2 | cold caches, the thundering herd, request coalescing |
 
 `loadl scenarios` lists them; `loadl scenarios retry` searches names, titles and concepts.
 
@@ -205,7 +206,7 @@ The [reference](../skills/loadlore-designer/references/schema.md#expect) has the
 The report is made from the run folder alone, so `loadl report <run>` can rewrite it any time. Its parts, top to bottom:
 
 - **Verdict.** One of:
-  - **Broke**, at a time and offered load, with the signals that crossed the line and what was most saturated then. A break is a shortfall (under 90% of the offered rate served) or errors (1% or more of requests) for two 10-second windows in a row, or p99 at least 10× its low-load value and over the design's latency target (`workload.slo.p99_ms`, default 500 ms) for three. A single bad window is a stall: it shows in the timeline, but the run still held.
+  - **Broke**, at a time and offered load, with the signals that crossed the line and what was most saturated then, and whether it recovered afterwards (healthy from some point to the end of the load, at least three windows). A break is a shortfall (under 90% of the offered rate served) or errors (1% or more of requests) for two 10-second windows in a row, or p99 at least 10× its low-load value and over the design's latency target (`workload.slo.p99_ms`, default 500 ms) for three. A single bad window is a stall: it shows in the timeline, but the run still held.
   - **Held** the whole profile.
   - **Inconclusive**: the run can't be judged, and the report says why. Usually Loadlore's own tooling was short of CPU (the load generator or Toxiproxy), the load generator couldn't start requests fast enough before anything strained, or the host slept or stalled during the load. It still shows what the run looks like taken at face value. Quiet the machine and run again.
 - **Diagram** of the system at the moment that matters (the break, or the busiest window), colored by saturation.
@@ -218,7 +219,7 @@ The report is made from the run folder alone, so `loadl report <run>` can rewrit
   | Queueing knee | A component neared saturation and latency grew much faster than load. |
   | Connection storm | Pools to Postgres opened many connections at once as latency jumped; each new connection costs the database a process and a login just when it's short of CPU. |
   | Retry storm | Retries multiplied the calls to a failing or slow dependency, keeping it overloaded. |
-  | Cold cache | A cache's hit rate dropped and its misses all went to the database at once. |
+  | Cold cache | A cache's misses multiplied, as after a restart, and they all went to the database at once. |
   | Working set doesn't fit | Postgres read from outside its memory while latency climbed. |
   | Hot rows | Writes queued on row locks while reads stayed fast. |
 
