@@ -274,6 +274,9 @@ func (v *validator) call(caller, p string, c *Call) {
 	if len(c.OnMiss) > 0 && c.Op != "get" {
 		v.errorf(pathKey(p, "on_miss"), CodeNotApplicable, "on_miss only applies to op get")
 	}
+	if c.Coalesce && (c.Op != "get" || len(c.OnMiss) == 0) {
+		v.errorf(pathKey(p, "coalesce"), CodeNotApplicable, "coalesce only applies to op get with on_miss calls")
+	}
 	if c.TTLS != nil && c.Op != "set" {
 		v.errorf(pathKey(p, "ttl_s"), CodeNotApplicable, "ttl_s only applies to op set")
 	}

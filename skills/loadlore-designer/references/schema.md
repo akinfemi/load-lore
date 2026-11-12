@@ -80,6 +80,7 @@ Call fields:
 | `when` | `always` | `always`, `read`, `write` (from the workload mix) |
 | `mode` | `sync` | `sync` waits for the result; `async` fires and continues |
 | `on_miss` | none | Calls to run on a cache miss (`get` only) |
+| `coalesce` | `false` | `get` with `on_miss`: concurrent misses for the same key in one replica wait for one run of `on_miss` (request coalescing, single-flight). Each waiter still gives up at its own deadline |
 | `ttl_s` | none | For `set` only |
 | `query` | `point` | `point` (one row by key), `range` (`rows` rows in key order from the key: `id >= key ORDER BY id LIMIT rows`), `batch` (the key and the `rows - 1` keys after it in one statement: `id = ANY(keys)`), `scan` (filter on `user_id`: a full table scan unless `user_id` is indexed); `read` only |
 | `rows` | `10` | Rows per `range` read, or keys per `batch` read |

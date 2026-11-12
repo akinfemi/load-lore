@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -116,6 +117,75 @@ func TestCallsRunInOrderWithWhenAndCount(t *testing.T) {
 	}
 	if got := len(f["cache"].calls()); got != 1 {
 		t.Errorf("cache del ran on a write: %d calls", got)
+	}
+}
+
+// Ten requests miss the same key at once: with coalesce, one runs the
+// on_miss calls and the others wait for it; without, each runs them.
+func TestCoalescedMisses(t *testing.T) {
+	for _, coalesce := range []bool{true, false} {
+		cfg := baseConfig()
+		cfg.Calls = []Call{call("cache", "get", func(c *Call) {
+			c.OnMiss = []Call{call("db", "read")}
+			c.Coalesce = coalesce
+		})}
+		s, f := newTestService(t, cfg)
+		release := make(chan struct{})
+		var started sync.WaitGroup
+		started.Add(1)
+		var once sync.Once
+		f["db"].fn = func(context.Context, *Call, request) (bool, error) {
+			once.Do(started.Done)
+			<-release
+			return false, nil
+		}
+		const n = 10
+		errs := make(chan error, n)
+		for range n {
+			go func() { errs <- s.handle(context.Background(), request{typ: "read", key: 7}) }()
+		}
+		started.Wait()
+		time.Sleep(50 * time.Millisecond) // let the others reach the cache miss
+		close(release)
+		for range n {
+			if err := <-errs; err != nil {
+				t.Fatal(err)
+			}
+		}
+		want := int64(1)
+		if !coalesce {
+			want = n
+		}
+		if got := f["db"].count.Load(); got != want {
+			t.Errorf("coalesce %v: %d db reads, want %d", coalesce, got, want)
+		}
+		if got := testutil.ToFloat64(s.m.coalesced.WithLabelValues("cache")); got != float64(n-want) {
+			t.Errorf("coalesce %v: %v coalesced, want %d", coalesce, got, n-want)
+		}
+	}
+}
+
+// A request that gives up while waiting doesn't fail the run it waits on.
+func TestCoalescedWaiterCancels(t *testing.T) {
+	cfg := baseConfig()
+	cfg.Calls = []Call{call("cache", "get", func(c *Call) {
+		c.OnMiss = []Call{call("db", "read")}
+		c.Coalesce = true
+	})}
+	s, f := newTestService(t, cfg)
+	release := make(chan struct{})
+	f["db"].fn = func(context.Context, *Call, request) (bool, error) { <-release; return false, nil }
+	leader := make(chan error, 1)
+	go func() { leader <- s.handle(context.Background(), request{typ: "read", key: 3}) }()
+	time.Sleep(20 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := s.handle(ctx, request{typ: "read", key: 3}); Cause(err) != CauseCanceled {
+		t.Errorf("waiter: %v", err)
+	}
+	close(release)
+	if err := <-leader; err != nil {
+		t.Errorf("leader: %v", err)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/sync/singleflight"
 )
 
 // Service is one running replica of the synthetic service.
@@ -27,6 +28,7 @@ type Service struct {
 	bulkheads map[string]bulkhead
 	rnd       func() float64
 	async     sync.WaitGroup
+	flight    singleflight.Group // coalesced misses, by call and key
 }
 
 // New builds a service from its config. Connections are opened lazily, on
@@ -263,6 +265,9 @@ func (s *Service) call(ctx context.Context, c *Call, req request) error {
 		hit, err := s.attempt(ctx, c, req)
 		if err == nil {
 			if c.Op == "get" && !hit && len(c.OnMiss) > 0 {
+				if c.Coalesce {
+					return s.coalesced(ctx, c, req)
+				}
 				return s.runCalls(ctx, c.OnMiss, req)
 			}
 			return nil
@@ -274,6 +279,28 @@ func (s *Service) call(ctx context.Context, c *Call, req request) error {
 		if werr := sleepCtx(ctx, backoff(r, n, s.rnd)); werr != nil {
 			return err
 		}
+	}
+}
+
+// coalesced runs a get's on_miss calls once for all the requests that
+// miss the same key at the same time: the first runs them, the others wait
+// for its result, each until its own deadline. The run is detached from
+// the first request, so its caller giving up doesn't fail the others; the
+// calls' own timeouts still bound it.
+func (s *Service) coalesced(ctx context.Context, c *Call, req request) error {
+	led := false
+	ch := s.flight.DoChan(fmt.Sprintf("%p:%d", c, req.key), func() (any, error) {
+		led = true
+		return nil, s.runCalls(withoutSession(context.WithoutCancel(ctx)), c.OnMiss, req)
+	})
+	select {
+	case r := <-ch:
+		if !led {
+			s.m.coalesced.WithLabelValues(c.Target).Inc()
+		}
+		return r.Err
+	case <-ctx.Done():
+		return withCause(CauseCanceled, ctx.Err())
 	}
 }
 

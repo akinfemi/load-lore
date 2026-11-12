@@ -20,6 +20,7 @@
 | Pagination / list endpoints | `{ target: db, op: read, query: range, rows: 50 }` |
 | Insert or update inside a transaction | `{ target: db, op: write }` per statement |
 | Cache lookup, then DB on miss, then cache fill | `{ target: cache, op: get, on_miss: [ {target: db, op: read}, {target: cache, op: set, ttl_s: ...} ] }` |
+| The same, with concurrent misses for a key sharing one DB read (singleflight, a cache library's loader) | add `coalesce: true` to the `get` |
 | Write to DB, then delete cache key | `{ target: db, op: write, when: write }`, `{ target: cache, op: del, when: write }` |
 | HTTP or gRPC call to another internal service | `{ target: <service>, op: http }` plus a synthetic service for the target |
 | Third-party API (payments, email) | A synthetic service with `cpu_ms: 0` standing in for it; latency faults model its behavior. Record as an assumption. |

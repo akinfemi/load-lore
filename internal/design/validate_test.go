@@ -164,6 +164,8 @@ func TestValidationDiagnostics(t *testing.T) {
 		{"bad op value", map[string]string{"services.api.behavior.calls[1]": "{target: db, op: query}"}, []string{"error services.api.behavior.calls[1].op invalid-value"}},
 		{"op wrong for kind", map[string]string{"services.api.behavior.calls[1]": "{target: db, op: get}"}, []string{"error services.api.behavior.calls[1].op op-target"}},
 		{"calls itself", map[string]string{"services.api.behavior.calls[1]": "{target: api, op: http}"}, []string{"error services.api.behavior.calls[1].target cycle"}},
+		{"coalesce needs on_miss", map[string]string{"services.cache": "{kind: redis}", "services.api.behavior.calls[1]": "{target: cache, op: get, coalesce: true}"}, []string{"error services.api.behavior.calls[1].coalesce not-applicable"}},
+		{"coalesce on read", map[string]string{"services.api.behavior.calls[0]": "{target: db, op: read, coalesce: true}"}, []string{"error services.api.behavior.calls[0].coalesce not-applicable"}},
 		{"on_miss on read", map[string]string{"services.api.behavior.calls[0]": "{target: db, op: read, on_miss: [{target: db, op: read}]}"}, []string{"error services.api.behavior.calls[0].on_miss not-applicable"}},
 		{"ttl on get", map[string]string{"services.cache": "{kind: redis}", "services.api.behavior.calls[1]": "{target: cache, op: get, ttl_s: 5}"}, []string{"error services.api.behavior.calls[1].ttl_s not-applicable"}},
 		{"query on write", map[string]string{"services.api.behavior.calls[1]": "{target: db, op: write, query: scan}"}, []string{"error services.api.behavior.calls[1].query not-applicable"}},

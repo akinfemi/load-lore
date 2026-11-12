@@ -52,7 +52,9 @@ type Call struct {
 	When   string `json:"when"` // always | read | write
 	Mode   string `json:"mode"` // sync | async
 	OnMiss []Call `json:"on_miss,omitempty"`
-	TTLS   int    `json:"ttl_s,omitempty"`
+	// Coalesce: concurrent misses for the same key wait for one on_miss run.
+	Coalesce bool `json:"coalesce,omitempty"`
+	TTLS     int  `json:"ttl_s,omitempty"`
 	Query  string `json:"query,omitempty"` // point | range | scan
 	Rows   int    `json:"rows,omitempty"`
 }
@@ -228,6 +230,9 @@ func (c *Config) Validate() error {
 			}
 			if (call.Query == "range" || call.Query == "batch") && call.Rows < 1 {
 				bad("%s: %s needs rows", p, call.Query)
+			}
+			if call.Coalesce && (call.Op != "get" || len(call.OnMiss) == 0) {
+				bad("%s: coalesce needs a get with on_miss", p)
 			}
 			checkCalls(p+".on_miss", call.OnMiss)
 		}

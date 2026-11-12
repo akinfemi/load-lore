@@ -85,6 +85,9 @@ type Call struct {
 	When   string  `yaml:"when,omitempty" json:"when,omitempty" jsonschema:"enum=always,enum=read,enum=write,default=always" jsonschema_description:"Run only for read or write requests from the workload mix."`
 	Mode   string  `yaml:"mode,omitempty" json:"mode,omitempty" jsonschema:"enum=sync,enum=async,default=sync" jsonschema_description:"sync waits for the result; async fires and continues."`
 	OnMiss []*Call `yaml:"on_miss,omitempty" json:"on_miss,omitempty" jsonschema_description:"Calls run on a cache miss. get only."`
+	// Coalesce: concurrent misses for the same key in one replica wait for
+	// a single run of on_miss (single-flight), instead of each running it.
+	Coalesce bool `yaml:"coalesce,omitempty" json:"coalesce,omitempty" jsonschema:"default=false" jsonschema_description:"Concurrent misses for the same key in one replica wait for one run of on_miss (request coalescing, single-flight) instead of each running it. get with on_miss only."`
 	TTLS   *int    `yaml:"ttl_s,omitempty" json:"ttl_s,omitempty" jsonschema:"minimum=0" jsonschema_description:"Key TTL in seconds. set only."`
 	Query  string  `yaml:"query,omitempty" json:"query,omitempty" jsonschema:"enum=point,enum=range,enum=batch,enum=scan,default=point" jsonschema_description:"Shape of a read: point (one row by key), range (rows in key order), batch (rows by key in one statement), scan (full table)."`
 	Rows   *int    `yaml:"rows,omitempty" json:"rows,omitempty" jsonschema:"minimum=1,default=10" jsonschema_description:"Rows returned by a range read, or keys fetched by a batch read."`

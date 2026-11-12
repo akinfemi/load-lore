@@ -37,6 +37,7 @@ type metrics struct {
 	connects     *prometheus.HistogramVec // target, outcome
 	poolHold     *prometheus.HistogramVec // target
 	asyncDropped prometheus.Counter
+	coalesced    *prometheus.CounterVec // target
 }
 
 func newMetrics(cfg *Config, pools func() []poolSnapshot) *metrics {
@@ -82,6 +83,7 @@ func newMetrics(cfg *Config, pools func() []poolSnapshot) *metrics {
 	m.poolHold = hist("pool_hold_seconds", "How long a caller held each connection from a target's pool, from acquiring it to releasing it: one call, or a whole request with hold request (postgres targets).", latencyBuckets, "target")
 	m.connects = hist("pool_connect_seconds", "New connections a target's pool opened, by outcome (ok or error), and how long each took to open: TCP, startup and authentication (postgres targets).", latencyBuckets, "target", "outcome")
 	m.asyncDropped = counter("async_calls_failed_total", "Async calls that failed; they never fail the request.").WithLabelValues()
+	m.coalesced = counter("cache_coalesced_total", "Cache misses that waited for another request's on_miss calls for the same key instead of running their own (coalesce).", "target")
 
 	f(&poolCollector{labels: labels, snapshots: pools})
 	return m
