@@ -5,7 +5,7 @@
 //
 // Only packets the target sends from one port are dropped: the replies on
 // connections into it. Its own outbound calls, which leave from other
-// ports, are untouched. TCP retransmits what is lost, so the loss shows as
+// ports, are untouched, and so are its SYN-ACKs (see Apply). TCP retransmits what is lost, so the loss shows as
 // slower calls, from about 200 ms per lost segment, not as errors.
 package netem
 

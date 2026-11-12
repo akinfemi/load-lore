@@ -50,12 +50,20 @@ func Apply(sport int, percent float64) error {
 			return fmt.Errorf("%s: netem qdisc: %w", l.Attrs().Name, err)
 		}
 		// The TCP source port is the first 16 bits after a 20-byte IPv4
-		// header, as tc's "match ip sport" reads it.
+		// header, as tc's "match ip sport" reads it; the flags byte is 13
+		// bytes into the TCP header. Packets with SYN set (the SYN-ACKs of
+		// new connections) aren't dropped: every service-to-service
+		// connection runs through Toxiproxy, which appears to dial
+		// upstream in the loop that accepts its clients, so one lost
+		// SYN-ACK held every new connection behind it for a second retry,
+		// and a 150 ms timeout's reconnects piled up into 30-second waits.
+		// A direct client wouldn't wait behind other clients' handshakes.
 		f := &netlink.U32{
 			FilterAttrs: netlink.FilterAttrs{LinkIndex: idx, Parent: netlink.MakeHandle(1, 0), Priority: 1, Protocol: unix.ETH_P_IP},
 			ClassId:     netlink.MakeHandle(1, Band),
-			Sel: &netlink.TcU32Sel{Flags: netlink.TC_U32_TERMINAL, Nkeys: 1, Keys: []netlink.TcU32Key{
+			Sel: &netlink.TcU32Sel{Flags: netlink.TC_U32_TERMINAL, Nkeys: 2, Keys: []netlink.TcU32Key{
 				{Mask: 0xffff0000, Val: uint32(sport) << 16, Off: 20},
+				{Mask: 0x00020000, Val: 0, Off: 32}, // SYN clear
 			}},
 		}
 		if err := netlink.FilterAdd(f); err != nil {
