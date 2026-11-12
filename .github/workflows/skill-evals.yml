@@ -1,0 +1,65 @@
+name: skill-evals
+
+# Runs the loadlore-designer skill's eval set (skills/loadlore-designer/evals)
+# with Claude Code, headless, whenever the skill, the design schema or the
+# harness changes. Every case and every judged check is a paid model call,
+# capped per call; the job skips itself until an ANTHROPIC_API_KEY secret is
+# set, and on pull requests from forks, which don't get secrets.
+
+on:
+  pull_request:
+    paths:
+      - skills/loadlore-designer/**
+      - internal/design/**
+      - internal/skilleval/**
+      - cmd/skilleval/**
+      - .github/workflows/skill-evals.yml
+  workflow_dispatch:
+    inputs:
+      only:
+        description: comma-separated case ids to run (empty for all)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Check for an API key
+        id: key
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "No ANTHROPIC_API_KEY secret: skipping the skill evals, which make paid model calls." >> "$GITHUB_STEP_SUMMARY"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.key.outputs.run == 'true'
+      - uses: actions/setup-go@v7
+        if: steps.key.outputs.run == 'true'
+        with:
+          go-version-file: go.mod
+      - name: Build loadl
+        if: steps.key.outputs.run == 'true'
+        run: go build -o "$RUNNER_TEMP/bin/loadl" ./cmd/loadl && echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Install Claude Code
+        if: steps.key.outputs.run == 'true'
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Run the evals
+        if: steps.key.outputs.run == 'true'
+        run: go run ./cmd/skilleval -out skilleval-out -only "${{ github.event.inputs.only }}"
+      - name: Report
+        if: always() && steps.key.outputs.run == 'true'
+        run: cat skilleval-out/report.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v5
+        if: always() && steps.key.outputs.run == 'true'
+        with:
+          name: skilleval-out
+          path: skilleval-out

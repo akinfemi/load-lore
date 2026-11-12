@@ -1,11 +1,15 @@
 # Eval set for the loadlore-designer skill. Run in CI whenever the schema or the skill changes.
 # Each case: a user prompt, and checks on what the agent must and must not produce.
 # `validates` means `loadl validate --json` passes on the resulting design.
-# Fixture repos (fixtures/...) are still to be written alongside the MVP.
+# Fixture repos are in fixtures/. Run with: go run ./cmd/skilleval (see
+# cmd/skilleval; each case and judged check is a paid model call).
+# continues: a follow-up that resumes an earlier case's session and workspace.
+# user_replicas: how many replicas the prompt asked for (replicas_beyond_user).
 
 cases:
   - id: basic-api-postgres
     prompt: "I have a REST API with 2 instances in front of one Postgres. Mostly reads. I want to see when it falls over."
+    user_replicas: 2
     checks:
       validates: true
       services_include: [api, db]
@@ -15,6 +19,7 @@ cases:
 
   - id: no-unrequested-cache
     prompt: "Same as before but traffic is 10x. Build it."
+    continues: basic-api-postgres
     checks:
       validates: true
       must_not_add: [cache, queue]

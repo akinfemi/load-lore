@@ -25,6 +25,8 @@ make e2e          # runs examples/smoke.yaml end to end on Docker
 make golden       # regenerate golden files after an intended output change
 ```
 
+The designer skill has an eval set, `skills/loadlore-designer/evals/prompts.yaml`: each case is a user prompt given to Claude Code, headless, in a scratch workspace with the skill installed. Code decides the checks it can (the design validates, which services it has, nothing unrequested added, files present, no cloud run), and a judge model answers the rest yes or no. `go run ./cmd/skilleval` runs it with `claude` and `loadl` on `PATH`, and writes `skilleval-out/report.md`. **Every case and judged check is a paid model call**, capped by `--agent-usd` and `--judge-usd`; `-only id,id` runs a few. The agent may only use `loadl`'s commands that don't start containers, and the scenario case's check is `--static`. The `skill-evals` workflow runs it on pull requests that touch the skill, the design schema or the harness, once an `ANTHROPIC_API_KEY` secret is set; until then it skips itself.
+
 ## Docker behaviors the local driver depends on
 
 These were found while building the local driver. Keep them in mind when changing it.
