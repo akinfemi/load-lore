@@ -65,6 +65,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&g.json, "json", false, "write machine-readable JSON to stdout")
 
 	root.AddCommand(
+		newInitCmd(g),
 		newValidateCmd(g),
 		newSchemaCmd(g),
 		newDiagramCmd(g),
