@@ -26,6 +26,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/driver"
 	"github.com/akinfemi/load-lore/internal/hoststat"
 	"github.com/akinfemi/load-lore/internal/plan"
+	"github.com/akinfemi/load-lore/internal/power"
 	"github.com/akinfemi/load-lore/internal/report"
 	"github.com/akinfemi/load-lore/internal/rundir"
 	"github.com/akinfemi/load-lore/internal/scenario"
@@ -164,6 +165,11 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 	d, diags := design.Load(raw)
 	if diags.HasErrors() {
 		return nil, &InvalidDesignError{Diagnostics: diags}
+	}
+
+	// A laptop that idle-sleeps mid-run freezes the stack; keep it awake.
+	if stop, ok := power.KeepAwake(); ok {
+		defer stop()
 	}
 
 	started := time.Now()

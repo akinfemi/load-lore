@@ -21,6 +21,10 @@ type Diagnosis struct {
 	Next     string     `json:"next"`
 
 	pool string // "svc → target" for pool-exhausted, and for a knee named after a pool
+	// comp is the component a knee saturated, or a retry storm's target;
+	// amp is a retry storm's calls per request against the low-load value.
+	comp, caller string
+	amp          float64
 }
 
 // Evidence is one fact behind a diagnosis and the metric it came from.
@@ -67,13 +71,22 @@ func diagnose(a *Analysis) []*Diagnosis {
 	exhausted := poolExhausted(a)
 	out = append(out, exhausted...)
 	out = append(out, connectionStorm(a)...)
-	out = append(out, retryStorm(a)...)
 	out = append(out, coldCache(a)...)
 	out = append(out, workingSet(a)...)
 	out = append(out, hotRows(a)...)
 	// A knee named after a pool whose target kept up is pool-exhausted's
 	// case; when that rule fired for the pool, the knee would only repeat it.
+	storms := retryStorm(a)
+	out = append(out, storms...)
 	if d := queueingKnee(a); d != nil && (d.pool == "" || !slices.ContainsFunc(exhausted, func(x *Diagnosis) bool { return x.pool == d.pool })) {
+		// A knee on a retry storm's target: much of the load it queued was
+		// retries, so capacity is the costly way out.
+		for _, st := range storms {
+			if st.comp == d.comp && st.From < d.To && d.From < st.To {
+				d.Next = fmt.Sprintf("Much of %s's load was %s's retries (see the retry storm): stop the storm first. Capacity alone would have to cover every retry, %.1fx the calls %s's requests make at low load.", d.comp, st.caller, st.amp, st.caller)
+				break
+			}
+		}
 		out = append(out, d)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].From < out[j].From })
@@ -514,6 +527,7 @@ func kneeDiagnosis(a *Analysis, k int, r Saturation, symptom *Evidence, why []Ev
 		Summary: fmt.Sprintf("From %s, p99 stayed above %s (%s at low load) with %s at %s. Near saturation requests wait behind each other, so latency grows non-linearly, not in proportion to load.",
 			Clock(w.Start), Ms(math.Max(KneeLatencyFactor*base, base+KneeLatencyMinMs)), Ms(base), name, Pct(r.Value)),
 		Next: "Add capacity or cut per-request work on " + r.Component + ", then re-run the ramp.",
+		comp: r.Component,
 	}
 	if t, ok := strings.CutPrefix(r.What, "pool to "); ok {
 		d.pool = r.Component + " → " + t

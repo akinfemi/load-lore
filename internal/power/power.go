@@ -5,8 +5,10 @@ package power
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -49,4 +51,23 @@ func Parse(batt, settings string) State {
 		}
 	}
 	return s
+}
+
+// KeepAwake stops macOS from idle-sleeping until stop is called or this
+// process exits: caffeinate -i, waiting on this process. A sleeping host
+// freezes the VM mid-run, and the run can't be judged. It can't stop the
+// sleep a closed lid causes on battery. ok is false when it couldn't start
+// (not macOS, or no caffeinate).
+func KeepAwake() (stop func(), ok bool) {
+	if runtime.GOOS != "darwin" {
+		return func() {}, false
+	}
+	cmd := exec.Command("caffeinate", "-i", "-w", strconv.Itoa(os.Getpid()))
+	if err := cmd.Start(); err != nil {
+		return func() {}, false
+	}
+	return func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}, true
 }

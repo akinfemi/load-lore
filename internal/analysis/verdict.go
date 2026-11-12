@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/driver"
@@ -131,6 +132,9 @@ func verdict(a *Analysis) Verdict {
 	v.Cause = shortCause(a.Environment.Host, short)
 	if a.Cutoff != "" && breakAt < 0 {
 		v.Inconclusive = append([]string{"before the system broke, " + a.Cutoff}, v.Inconclusive...)
+	}
+	if why := suspended(a); why != "" {
+		v.Inconclusive = append([]string{why}, v.Inconclusive...)
 	}
 	hardBreak := breakAt >= 0 && breakAt+1 < len(hard) && len(hard[breakAt]) > 0 && len(hard[breakAt+1]) > 0
 	if breakAt >= 0 && !hardBreak { // made by latency alone
@@ -496,7 +500,7 @@ func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string, short [
 	if breakAt >= 0 {
 		end = breakAt + 1
 	}
-	var drop, load, proxy *Window
+	var drop, load, proxy, failingDrop *Window
 	tools := []struct {
 		name  string
 		get   func(*Window) *float64
@@ -510,8 +514,16 @@ func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string, short [
 			continue
 		}
 		if i < end-1 || breakAt < 0 {
-			if w.Dropped != nil && w.Offered > 0 && *w.Dropped/(w.Offered*WindowSeconds) > DroppedShareLimit && drop == nil {
-				drop = w
+			if w.Dropped != nil && w.Offered > 0 && *w.Dropped/(w.Offered*WindowSeconds) > DroppedShareLimit {
+				// In a window where the system itself failed requests, as in
+				// a stall a fault causes, slow failing responses held the
+				// VUs the arrivals needed, as at a break.
+				switch failing := w.ErrorRate != nil && *w.ErrorRate >= BreakErrorRate; {
+				case failing && failingDrop == nil:
+					failingDrop = w
+				case !failing && drop == nil:
+					drop = w
+				}
 			}
 		}
 		if w.LoadCPU != nil && *w.LoadCPU >= ToolCPULimit && load == nil {
@@ -535,6 +547,10 @@ func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string, short [
 	if drop != nil {
 		reasons = append(reasons, fmt.Sprintf("at %s the load generator dropped %s arrivals, %s of what the profile offered in that window (%s), before the system showed strain: it couldn't start requests fast enough, so the offered load was lower than the profile",
 			Clock(drop.Start), Count(*drop.Dropped), Pct(*drop.Dropped/(drop.Offered*WindowSeconds)), SrcDropped))
+	}
+	if failingDrop != nil {
+		caveats = append(caveats, fmt.Sprintf("at %s the load generator dropped %s arrivals, %s of what the profile offered in that window (%s), while %s of requests failed: slow responses held the VUs new arrivals needed",
+			Clock(failingDrop.Start), Count(*failingDrop.Dropped), Pct(*failingDrop.Dropped/(failingDrop.Offered*WindowSeconds)), SrcDropped, Pct(*failingDrop.ErrorRate)))
 	}
 	if load != nil {
 		reasons = append(reasons, fmt.Sprintf("at %s the load generator used %s of its CPU budget (%s), so it may have been slowing requests down itself", Clock(load.Start), Pct(*load.LoadCPU), SrcLoadCPU))
@@ -738,3 +754,29 @@ func Pct(f float64) string {
 	}
 	return strconv.FormatFloat(f*100, 'f', 0, 64) + "%"
 }
+
+// SuspendSlack is how much longer than its profile the load may take on
+// the wall clock, at least SuspendMinSeconds: k6 ends a little late, but
+// minutes more mean the host stopped during it.
+const (
+	SuspendSlack      = 0.1
+	SuspendMinSeconds = 30.0
+)
+
+// suspended says why a run whose load took far longer on the wall clock
+// than its profile can't be judged: a host that sleeps (a laptop's idle
+// sleep, a closed lid) or stalls freezes the VM, and the windows no longer
+// hold the load the profile describes.
+func suspended(a *Analysis) string {
+	if a.Started == nil || a.Ended == nil || a.Plan == nil || a.Plan.Duration <= 0 {
+		return ""
+	}
+	wall, planned := a.Ended.Sub(*a.Started), a.Plan.Duration
+	if wall.Seconds() <= planned.Seconds()+math.Max(SuspendMinSeconds, SuspendSlack*planned.Seconds()) {
+		return ""
+	}
+	return fmt.Sprintf("the %s load took %s on the wall clock: the host slept or stalled during it (on a laptop, idle sleep or a closed lid), so its windows don't hold the load the profile describes", durText(planned), durText(wall))
+}
+
+// durText is a duration in whole seconds, as 4m30s or 2h7m3s.
+func durText(d time.Duration) string { return d.Round(time.Second).String() }

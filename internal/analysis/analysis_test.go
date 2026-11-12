@@ -135,6 +135,19 @@ func TestInconclusiveWhenTheLoadGeneratorDrops(t *testing.T) {
 	if a.Verdict.Kind != VerdictInconclusive || !strings.Contains(a.Verdict.Summary, "load generator dropped") {
 		t.Errorf("verdict %s: %s", a.Verdict.Kind, a.Verdict.Summary)
 	}
+	// Drops in a stall, where requests were failing: the failing responses
+	// held the VUs, so it's a caveat, not a reason to doubt the run.
+	w = analysistest.Healthy()
+	stall := func(t float64) bool { return t > 50 && t <= 60 }
+	w.Failed = func(t float64) float64 { return 0.3 * boolF(stall(t)) }
+	w.Dropped = func(t float64) float64 { return 0.05 * boolF(stall(t)) }
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.Verdict.Kind != VerdictHeld || !slices.ContainsFunc(a.Verdict.Caveats, func(c string) bool {
+		return strings.Contains(c, "while 30% of requests failed: slow responses held the VUs")
+	}) {
+		t.Errorf("drops in a stall: %s %v, caveats %q", a.Verdict.Kind, a.Verdict.Inconclusive, a.Verdict.Caveats)
+	}
+
 	w = analysistest.Healthy()
 	w.K6CPU = func(t float64) float64 { return 0.95 * boolF(t > 70) }
 	a = analyze(t, analysistest.WriteRun(t, w, 1))
@@ -1100,5 +1113,22 @@ func TestKneeThroughPgBouncer(t *testing.T) {
 	d = byRule(t, diagnose(pgbWindows(false, false)), "queueing-knee")
 	if d.Title != "Queueing knee (pgb pool to db)" || !strings.Contains(d.Next, "default_pool_size 20") {
 		t.Errorf("%s: %s", d.Title, d.Next)
+	}
+}
+
+// A load that took far longer on the wall clock than its profile: the host
+// slept, so the run is inconclusive whatever the windows show.
+func TestSuspendedHostInconclusive(t *testing.T) {
+	w := analysistest.Healthy()
+	dir := analysistest.WriteRun(t, w, 1)
+	a := analyze(t, dir)
+	if a.Verdict.Kind != VerdictHeld {
+		t.Fatalf("baseline verdict %s", a.Verdict.Kind)
+	}
+	end := a.Started.Add(2 * time.Hour)
+	w.RunJSON = map[string]any{"load_started": *a.Started, "load_ended": end}
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.Verdict.Kind != VerdictInconclusive || len(a.Verdict.Inconclusive) == 0 || !strings.Contains(a.Verdict.Inconclusive[0], "took 2h0m0s on the wall clock: the host slept or stalled") {
+		t.Errorf("verdict %s, inconclusive %q", a.Verdict.Kind, a.Verdict.Inconclusive)
 	}
 }

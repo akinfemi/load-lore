@@ -144,6 +144,7 @@ func retryStorm(a *Analysis) []*Diagnosis {
 		e := edgeAt(w, k.svc, k.target)
 		r := a.Plan.Service(k.svc).Synthetic[0].Resilience.Retries
 		d := &Diagnosis{
+			comp: k.target, caller: k.svc, amp: *perReq[peak] / b,
 			Rule:  "retry-storm",
 			Title: fmt.Sprintf("Retry storm (%s → %s)", k.svc, k.target),
 			From:  ws[from].Start,
