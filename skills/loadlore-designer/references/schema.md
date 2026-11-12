@@ -181,7 +181,7 @@ A list of fault injections, each with `at` and `inject`, and a `target` (except 
 | `inject` | Fields | Mechanism |
 | --- | --- | --- |
 | `latency` | `add_ms` (required), `jitter_ms` | Toxiproxy |
-| `loss` | `percent` (required) | tc netem |
+| `loss` | `percent` (required) | tc netem in the target's network namespace: drops that share of the packets it sends from its service port, so the replies on connections into it. TCP retransmits them, so loss shows as slow calls (about 200 ms per lost segment), not errors |
 | `bandwidth` | `kbps` (required) | Toxiproxy |
 | `timeout` | | Toxiproxy (connections hang) |
 | `reset` | | Toxiproxy (connections reset) |

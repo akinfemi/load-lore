@@ -418,7 +418,44 @@ func (d *Driver) Inject(ctx context.Context, f *plan.Fault) (func(context.Contex
 			return errors.Join(errs...)
 		}, errors.Join(errs...)
 	}
+	if f.Inject == "loss" {
+		return d.loss(ctx, f)
+	}
 	return nil, fmt.Errorf("%s isn't supported by local runs yet", f.Inject)
+}
+
+// loss drops f.Percent of the packets each target container sends from its
+// service port, with netem, from a helper container that shares the
+// target's network namespace: the synthetic image's netem command, as
+// root with NET_ADMIN. Toxiproxy can't lose packets.
+func (d *Driver) loss(ctx context.Context, f *plan.Fault) (func(context.Context) error, error) {
+	var ids []string
+	for _, c := range f.Containers {
+		found, err := d.containerIDs(ctx, c)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, found...)
+	}
+	netem := func(ctx context.Context, id string, args ...string) error {
+		cmd := append([]string{"run", "--rm", "--network", "container:" + id, "--cap-add", "NET_ADMIN", "--user", "0:0",
+			"--label", LabelOwner + "=1", "--label", LabelRun + "=" + d.runID, d.plan.Infra.SyntheticImg, "netem"}, args...)
+		_, err := d.docker(ctx, cmd...)
+		return err
+	}
+	clear := func(ctx context.Context) error {
+		var errs []error
+		for _, id := range ids {
+			errs = append(errs, netem(ctx, id, "clear"))
+		}
+		return errors.Join(errs...)
+	}
+	for _, id := range ids {
+		if err := netem(ctx, id, strconv.Itoa(f.Port), strconv.FormatFloat(f.Percent, 'g', -1, 64)); err != nil {
+			return clear, err
+		}
+	}
+	return clear, nil
 }
 
 func (d *Driver) removeToxics(proxies []string, name string) func(context.Context) error {

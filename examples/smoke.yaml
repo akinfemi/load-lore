@@ -1,5 +1,6 @@
 # A one-minute design that exercises the local driver end to end: a seeded
-# Postgres, a cache, a load balancer, a latency fault and a replica kill.
+# Postgres, a cache, a load balancer, a latency fault, packet loss and a
+# replica kill.
 version: 1
 name: smoke
 services:
@@ -34,6 +35,7 @@ workload:
   keys: { distribution: zipf, skew: 1.1 }
 scenario:
   - { at: 20s, inject: latency, target: db, add_ms: 50, for: 10s }
+  - { at: 32s, inject: loss, target: cache, percent: 2, for: 8s }
   - { at: 45s, inject: kill, target: "api[1]" }
 expect:
   - p99_ms < 200 until load_rps >= 250

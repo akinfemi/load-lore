@@ -13,11 +13,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/akinfemi/load-lore/internal/bench"
+	"github.com/akinfemi/load-lore/internal/netem"
 	"github.com/akinfemi/load-lore/internal/synthetic"
 )
 
@@ -35,10 +37,37 @@ func main() {
 		_ = json.NewEncoder(os.Stdout).Encode(r)
 		return
 	}
+	// netem applies or clears the loss fault in the network namespace it
+	// shares: netem <sport> <percent>, or netem clear.
+	if len(os.Args) > 1 && os.Args[1] == "netem" {
+		if err := netemCmd(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synthetic netem:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "synthetic:", err)
 		os.Exit(1)
 	}
+}
+
+func netemCmd(args []string) error {
+	if len(args) == 1 && args[0] == "clear" {
+		return netem.Clear()
+	}
+	if len(args) != 2 {
+		return errors.New("usage: netem <sport> <percent> | netem clear")
+	}
+	sport, err := strconv.Atoi(args[0])
+	if err != nil || sport < 1 || sport > 65535 {
+		return fmt.Errorf("bad port %q", args[0])
+	}
+	pct, err := strconv.ParseFloat(args[1], 64)
+	if err != nil || pct <= 0 || pct > 100 {
+		return fmt.Errorf("bad percent %q", args[1])
+	}
+	return netem.Apply(sport, pct)
 }
 
 func run() error {

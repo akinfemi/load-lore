@@ -465,6 +465,8 @@ func describeFault(f *plan.Fault) string {
 		if f.JitterMs > 0 {
 			s += fmt.Sprintf(" (±%d ms)", f.JitterMs)
 		}
+	case "loss":
+		s = fmt.Sprintf("loss %g%% of the packets %s sends from port %d (its replies)", f.Percent, f.Target, f.Port)
 	case "kill", "restart", "pause":
 		s = fmt.Sprintf("%s %s", f.Inject, strings.Join(f.Containers, ", "))
 	}

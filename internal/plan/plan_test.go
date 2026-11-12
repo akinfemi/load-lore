@@ -118,8 +118,11 @@ func TestProxiesAndSyntheticTargets(t *testing.T) {
 	if got := p.Faults[0].Proxies; len(got) != 1 || got[0] != "api--db" {
 		t.Errorf("latency fault proxies: %v", got)
 	}
-	if got := p.Faults[1].Containers; len(got) != 1 || got[0] != "api-1" {
+	if got := p.Faults[2].Containers; p.Faults[2].Inject != "kill" || len(got) != 1 || got[0] != "api-1" {
 		t.Errorf("kill fault containers: %v", got)
+	}
+	if f := p.Faults[1]; f.Inject != "loss" || f.Port != RedisPort || len(f.Containers) != 1 || f.Containers[0] != "cache" {
+		t.Errorf("loss fault: %+v", f)
 	}
 	if got := strings.Join(p.Workload.URLs, " "); got != "http://lb:8080" {
 		t.Errorf("load urls: %s", got)
@@ -452,5 +455,21 @@ func TestMeasuredPreallocVUs(t *testing.T) {
 		if p.Workload.PreVUs != tc.pre || p.Workload.MaxVUs != tc.max {
 			t.Errorf("prealloc %d at scale %g: %d up front, max %d; want %d, %d", tc.prealloc, tc.scale, p.Workload.PreVUs, p.Workload.MaxVUs, tc.pre, tc.max)
 		}
+	}
+}
+
+// A loss fault acts on the target's containers, on replies from its
+// service port.
+func TestLossFault(t *testing.T) {
+	d := loadFile(t, "../../examples/smoke.yaml")
+	pct := 2.0
+	d.Scenario = append(d.Scenario, &design.Fault{At: d.Scenario[0].At, Inject: "loss", Target: &design.TargetRef{Name: "db"}, Percent: &pct})
+	p, err := Build(d, Options{RunID: "r", Scale: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := p.Faults[len(p.Faults)-1]
+	if f.Inject != "loss" || f.Percent != 2 || f.Port != PostgresPort || len(f.Containers) != 1 || len(f.Proxies) != 0 {
+		t.Errorf("loss fault %+v", f)
 	}
 }

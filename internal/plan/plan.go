@@ -183,6 +183,10 @@ type Fault struct {
 	AddMs      int      `json:"add_ms,omitempty"`
 	JitterMs   int      `json:"jitter_ms,omitempty"`
 	Kbps       int      `json:"kbps,omitempty"`
+	// Loss: the share of packets dropped, and the target's service port,
+	// whose replies lose them.
+	Percent float64 `json:"percent,omitempty"`
+	Port    int     `json:"port,omitempty"`
 }
 
 // Infra is the budget for Loadlore's own containers. They get explicit
@@ -822,7 +826,7 @@ func (p *Plan) faults(d *design.Design, byName map[string]*Service) error {
 			pf.For = &v
 		}
 		switch f.Inject {
-		case "loss", "partition", "disk_slow":
+		case "partition", "disk_slow":
 			return fmt.Errorf("scenario[%d]: %s isn't supported by local runs yet", i, f.Inject)
 		}
 		pf.Target = f.Target.Name
@@ -848,6 +852,9 @@ func (p *Plan) faults(d *design.Design, byName map[string]*Service) error {
 		}
 		if f.Kbps != nil {
 			pf.Kbps = *f.Kbps
+		}
+		if f.Inject == "loss" {
+			pf.Percent, pf.Port = *f.Percent, t.Port
 		}
 		p.Faults = append(p.Faults, pf)
 	}

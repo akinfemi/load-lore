@@ -305,6 +305,18 @@
     },
     {
       "index": 1,
+      "at": "32s",
+      "for": "8s",
+      "inject": "loss",
+      "target": "cache",
+      "containers": [
+        "cache"
+      ],
+      "percent": 2,
+      "port": 6379
+    },
+    {
+      "index": 2,
       "at": "45s",
       "inject": "kill",
       "target": "api",

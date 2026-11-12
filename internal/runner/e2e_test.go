@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/moby/moby/client"
@@ -62,6 +63,12 @@ func TestE2ESmoke(t *testing.T) {
 		if e.Status != "held" && e.Status != "broken" {
 			t.Errorf("expect[%d] not scored: %s", i, e.Status)
 		}
+	}
+
+	// Every fault applied and came off cleanly, packet loss included.
+	evs, _ := os.ReadFile(filepath.Join(res.Dir, "events.jsonl"))
+	if !strings.Contains(string(evs), `"inject":"loss"`) || strings.Contains(string(evs), `"kind":"fault_error"`) {
+		t.Errorf("faults in events.jsonl:\n%s", evs)
 	}
 
 	// The killed replica shows in container state.
