@@ -1,0 +1,52 @@
+title: The slow disk
+level: 3
+concepts: [fsync, commit latency, connection pools, group commit, synchronous_commit]
+minutes: 45
+
+# Available to Docker at --scale 1, Loadlore's own containers included.
+# reference and speed: the machine its numbers come from and its host speed
+# index; loadl run warns below 75% of this. The disk's delay is fixed by the
+# fault, not the host's speed.
+host:
+  cpus: 6
+  memory: 4g
+  reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
+  speed: 1000
+
+# Load generator VUs started before the load, at --scale 1: the peak rate x
+# slo.p99_ms (400 x 0.5 s), above 1.5 x the most busy at once before a break
+# in the check's runs (85, the more-connections solution's slow commits).
+load:
+  prealloc_vus: 200
+  peak_vus: 85
+  from: slow-disk-more-connections-20261112-140159
+
+# What `loadl scenario check` verifies, at --scale 1.
+check:
+  problem:
+    verdict: broke
+    diagnoses: [pool-exhausted]
+    signals: [errors]
+  solutions:
+    # helps: holds through the slow disk.
+    async-commit: { verdict: held }
+    more-connections: { verdict: held }
+  variants:
+    # The database's CPU isn't what its commits wait on.
+    more-db-cpu: { verdict: broke, diagnoses: [pool-exhausted] }
+
+# What `loadl predict` asks before a run; each answer becomes an expect
+# line in design.yaml.
+predict:
+  - ask: The disk gets 30 ms slower per write. What happens to the reads, which never touch the disk?
+    answer: text
+    expect: 'note: "the reads: {answer}"'
+  - ask: Which component gives out first?
+    answer: service
+    expect: 'note: "{answer} gives out first"'
+  - ask: How busy is the database's CPU while the disk is slow?
+    answer: text
+    expect: 'note: "database CPU during the slow disk: {answer}"'
+  - ask: If you gave the database twice the CPU, what would happen?
+    answer: text
+    expect: 'note: "twice the CPU: {answer}"'

@@ -33,7 +33,7 @@ Loadlore runs your design on real containers, so it needs Docker. There are no p
 
 ## 2. Work through a scenario
 
-Scenarios are guided experiments: a starting design that breaks, a story, questions to answer before you run it, hints, and worked solutions. Six are built:
+Scenarios are guided experiments: a starting design that breaks, a story, questions to answer before you run it, hints, and worked solutions. Seven are built:
 
 | Scenario | Level | Teaches |
 | --- | --- | --- |
@@ -43,6 +43,7 @@ Scenarios are guided experiments: a starting design that breaks, a story, questi
 | [The cache restart](../scenarios/cache-restart/) | 2 | cold caches, the thundering herd, request coalescing |
 | [The flaky network](../scenarios/flaky-network/) | 2 | packet loss, TCP retransmits, fan-out, timeouts sized to the tail |
 | [Healthy but broken](../scenarios/healthy-but-broken/) | 2 | shallow and deep health checks, partial failure |
+| [The slow disk](../scenarios/slow-disk/) | 3 | fsync and commit latency, connection pools, group commit, `synchronous_commit` |
 
 `loadl scenarios` lists them; `loadl scenarios retry` searches names, titles and concepts.
 
@@ -96,6 +97,8 @@ The loop for each one:
 7. **Check the worked answers.** Each scenario's `solutions/` folder has fixes with their reasoning, costs and reference reports; `variants/` has fixes that look right and aren't. They give the game away, so try your own first.
 
 ## 3. Write your own design
+
+The quickest start is `loadl init`: it asks for a name, an api's replicas and CPU, its datastore (Postgres, Redis in front of Postgres, or none), the peak load, how long to ramp to it, and an optional fault, then writes a commented `design.yaml` that validates. The answers can be flags instead (`loadl init --name checkout --replicas 3 --store cache --rps 800`), and `loadl init <scenario>` copies a library scenario into a folder of its own, to work through outside a checkout.
 
 A design is one YAML file: the services, the load, the faults, and your predictions. The [design file reference](../skills/loadlore-designer/references/schema.md) has every field. A small one:
 

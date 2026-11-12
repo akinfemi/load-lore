@@ -1,0 +1,48 @@
+version: 1
+name: slow-disk-async-commit
+
+# Solution: synchronous_commit off. A commit returns as soon as its
+# changes are in the write-ahead log's memory buffer; the WAL writer flushes
+# them to disk shortly after. Commits stop waiting on the disk, at the cost
+# of losing the last few hundred milliseconds of commits if the server
+# crashes.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: db, op: read }                   # the recent orders
+        - { target: db, op: write, when: write }     # the new order
+      resilience:
+        timeout_ms: 1000
+    pools:
+      db: { size: 8, min: 8 }   # 2 replicas x 8 = 16 connections
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 1, memory: 1g }
+    config: { synchronous_commit: "off" }
+    dataset: { rows: 100000, row_bytes: 256 }
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 50, to: 400, over: 30s }
+    - hold: { rps: 400, for: 3m30s }
+  mix: { read: 0.5, write: 0.5 }
+
+# From 1:01, the database's disk is slow for two minutes: every write and
+# every fsync takes 30 ms longer. A noisy neighbour on shared storage, a
+# cloud volume out of burst credits, a failing drive.
+scenario:
+  - { at: 1m1s, inject: disk_slow, target: db, add_ms: 30, for: 2m }
