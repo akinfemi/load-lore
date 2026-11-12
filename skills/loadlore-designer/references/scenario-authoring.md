@@ -91,6 +91,8 @@ predict:
 
 Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Breaking points move with core speed, so state the claims as relative results (broke or held, which rule fired, the gain from a fix), never as request rates. Rule ids are `pool-exhausted`, `queueing-knee`, `connection-storm`, `retry-storm`, `cold-cache`, `working-set` and `hot-rows` in this version. Break signals are `latency`, `errors` and `throughput`; a claim with `signals` needs `verdict: broke`.
 
+A scenario whose problem is a fault under steady load (a pause, a kill, a slow dependency) needs solutions that hold: the load is flat, so a fix can't serve more at its peak than the starting design did before the fault, and `helps` falls back to the verdict. A short episode of errors or slow responses, one 10-second window, is a stall in the timeline, not a break, so a fix that absorbs the fault within one window holds. Put the fault inside a window (at 2m1s rather than 2m) and keep it short, and remember that the synthetic service has no fallback: requests that need a failing dependency fail during the fault whatever the fix. `scenarios/slow-dependency` is the worked example.
+
 ## Solutions
 
 At least one. Each is a folder with a full `design.yaml` (named `<scenario>-<solution>`), a `README.md` explaining what changed, why it helps and what it costs, and the `report.md` of a reference run. Where there are several reasonable fixes, include more than one; showing trade-offs is part of the lesson. A solution must not need more host than `meta.yaml` states.

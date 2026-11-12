@@ -1,0 +1,44 @@
+version: 1
+name: slow-dependency-fewer-retries
+
+# Solution: one retry, after a random wait of up to 50 ms. At worst pricing
+# now sees twice its users' calls, 300 a second, which still fits in the
+# about 400 it can serve, so a backlog drains instead of feeding itself.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 3
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: pricing, op: http }
+      resilience:
+        timeout_ms: 250
+        retries: { max: 1, backoff: exponential, base_ms: 50, jitter: true }
+    pools:
+      pricing: 100
+
+  pricing:
+    image: loadlore/synthetic
+    resources: { cpu: 1, memory: 256m }
+    behavior:
+      cpu_ms: 2.5   # about 400 requests a second on its one CPU
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 20, to: 150, over: 1m }
+    - hold: { rps: 150, for: 3m30s }
+  mix: { read: 1.0 }
+
+# pricing stops for two seconds, as a garbage-collection pause or a node
+# hiccup would stop it.
+scenario:
+  - { at: 2m1s, inject: pause, target: pricing, for: 2s }

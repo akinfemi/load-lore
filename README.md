@@ -4,7 +4,7 @@ Loadlore is an open-source, terminal-first lab for system design. You describe a
 
 The CLI is `loadl`.
 
-> **Status:** early development, pre-MVP. You can validate a design, run it on local Docker (Linux, or macOS with Colima), read its report and work through two scenarios, [When do you need to scale your database?](scenarios/when-to-scale-your-database/) and [The connection pool trap](scenarios/connection-pool-trap/). Not built yet: four of the spec's six diagnosis rules (a connection-storm rule is there besides), two of the four MVP scenarios, the live dashboard, `loadl init`, and the loss, partition and slow-disk faults. Docker Desktop and WSL2 aren't verified. The spec's "Build status" section has the details.
+> **Status:** early development, pre-MVP. You can validate a design, run it on local Docker (Linux, or macOS with Colima) with a live dashboard, read its report and work through three scenarios: [When do you need to scale your database?](scenarios/when-to-scale-your-database/), [The connection pool trap](scenarios/connection-pool-trap/) and [The slow dependency](scenarios/slow-dependency/). All seven diagnosis rules are built: pool exhausted, queueing knee, connection storm, retry storm, cold cache, working set doesn't fit, and hot rows. Not built yet: the cache restart scenario, `loadl init`, `run --quick`, the loss, partition and slow-disk faults, and releases (build from source for now). Docker Desktop and WSL2 aren't verified. The spec's "Build status" section has the details.
 
 - **Spec:** [Loadlore — Product Spec](https://claude.ai/artifact/TEkM1GHG5mpmKXTcH3jJ6m) is the source of truth for scope and behavior.
 - **AI skill:** [`skills/loadlore-designer/`](skills/loadlore-designer/) turns plain-language descriptions into validated design files.
@@ -34,13 +34,17 @@ Every command accepts `--json`.
 
 A run folder holds the exact `design.yaml`, the generated `compose.yaml` and `load.js`, `plan.json` (resources after scaling, and why), `events.jsonl` (load, faults, container deaths), `metrics/` (every series, exported from Prometheus before teardown), `logs/`, `containers.json`, `k6-summary.json`, `run.json`, and the `report.md` and `analysis.json` that `loadl run` writes at the end. Reports are made from the folder alone, so `loadl report` can regenerate them at any time.
 
-Scenarios are guided experiments in [`scenarios/`](scenarios/): a starting design, a story, a question to predict, hints and worked solutions. Start with [When do you need to scale your database?](scenarios/when-to-scale-your-database/), then [The connection pool trap](scenarios/connection-pool-trap/).
+Scenarios are guided experiments in [`scenarios/`](scenarios/): a starting design, a story, a question to predict, hints and worked solutions. Start with [When do you need to scale your database?](scenarios/when-to-scale-your-database/), then [The connection pool trap](scenarios/connection-pool-trap/). [The slow dependency](scenarios/slow-dependency/) (level 2) is about timeouts, retry storms and circuit breakers: a two-second pause that turns into an outage that never ends.
+
+The report's diagnosis rules are deterministic and offline, and every report lists their thresholds. Hot rows needs lock-wait data from Postgres, which Loadlore adds to `postgres_exporter` with a custom query; a run where that metric is missing says so instead of skipping the rule silently.
 
 In a terminal, `loadl run` shows a live dashboard: the topology colored by saturation, load, latency and errors over the profile with faults and the break marked, and each component's numbers. Ctrl-C on it stops the run, with teardown; `--watch=false` gives plain progress lines.
 
 A run stops its load 60 s after it sees the design break, by the same rule as the report's verdict, so a broken design costs minutes less; `--full` runs the whole profile.
 
 Each run starts from a fresh copy of the seeded dataset. `--reuse-data` skips the copy for quick iteration; the report then says which earlier runs wrote to the data.
+
+On macOS, `loadl run` keeps the Mac from idle-sleeping while it runs (`caffeinate`). It can't stop the sleep a closed lid causes, so keep the lid open for unattended runs. A run whose load took far longer on the wall clock than its profile, as when the host slept, is reported as inconclusive.
 
 Results vary from run to run, and a laptop slows as it heats up. `loadl run --repeat 3` runs a design three times with the same seed and writes the spread of break time, peak served and p99 at the break to `.loadlore/series/<id>/series.md`. Runs after the first wait until the host speed index is back within 5% of the first run's. `loadl compare` says when a difference is within a series' spread, and flags runs whose speed index differs by more than 10%.
 

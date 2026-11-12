@@ -50,6 +50,7 @@ Pick the low end unless the code suggests otherwise, and tell the user that this
 - Copy real values when you find them: HTTP client timeouts, retry middleware, circuit breakers, pool sizes, database statement timeouts.
 - If none are set in code, use the library defaults the real service would get (for example, many HTTP clients have no timeout at all; record `timeout_ms: 0` meaning none) rather than Loadlore's defaults, and record the basis. Missing timeouts are a common real-world failure, and the user should see it happen.
 - Never add retries, breakers or bulkheads the user didn't ask for (ground rule 1).
+- How they behave, so you can predict a run: a failed sync call fails the whole request (there is no fallback; only `mode: async` calls fail without failing it). Each retry is a full new attempt, after the backoff wait. A call the circuit breaker or the bulkhead rejects fails at once and isn't retried. A call the caller has given up on (its timeout passed) is cancelled in the target only while it still waits for a concurrency slot; once it runs, the target spends its CPU on it anyway, as real servers do. So at the worst moment a dependency gets its callers' request rate times the attempts per request; when that exceeds what it can serve, the retries alone can keep it overloaded after the trigger is gone.
 
 ## When the user has their own image
 
