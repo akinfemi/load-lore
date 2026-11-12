@@ -142,6 +142,11 @@ type Claim struct {
 	// window). Default 1.2. Peak throughput is steadier from run to run
 	// than where p99 first crosses the break threshold.
 	MinGain *float64 `yaml:"min_gain,omitempty" json:"min_gain,omitempty"`
+	// Recovers: after a break, the run must be healthy again by the end of
+	// the load (true), or still broken (false); a run that held counts as
+	// recovered. A solution also helps when it recovers and the starting
+	// design didn't: the lesson of a fault that turns into an outage.
+	Recovers *bool `yaml:"recovers,omitempty" json:"recovers,omitempty"`
 }
 
 // Hint is one "## " section of hints.md.

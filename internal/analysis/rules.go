@@ -64,7 +64,7 @@ const (
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
-const RuleVersion = "7"
+const RuleVersion = "8"
 
 func diagnose(a *Analysis) []*Diagnosis {
 	out := []*Diagnosis{}

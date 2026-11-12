@@ -56,21 +56,26 @@ const (
 
 // Verdict says whether and where the system broke.
 type Verdict struct {
-	Kind         VerdictKind `json:"kind"`
-	Summary      string      `json:"summary"`
-	Break        *Break      `json:"break,omitempty"`
-	Inconclusive []string    `json:"inconclusive,omitempty"`
-	Caveats      []string    `json:"caveats,omitempty"`            // tooling strain too small to make the run inconclusive
-	Cause        string      `json:"inconclusive_cause,omitempty"` // what took CPU from the tooling, when there's evidence
-	Doubt        string      `json:"doubt,omitempty"`              // why a latency break may be partly the load generator's own
-	BaselineP99  *float64    `json:"baseline_p99_ms,omitempty"`
-	SLOP99Ms     float64     `json:"slo_p99_ms"`
-	LatencyLimit *float64    `json:"latency_limit_ms,omitempty"` // p99 at or above this is a latency signal
-	MaxRPS       *float64    `json:"max_rps,omitempty"`
-	MaxRPSAt     float64     `json:"max_rps_at_s"`
-	WorstP99     *float64    `json:"worst_p99_ms,omitempty"`
-	WorstErrors  *float64    `json:"worst_error_rate,omitempty"`
-	Moment       int         `json:"moment_window"` // the window the annotated diagram shows
+	Kind    VerdictKind `json:"kind"`
+	Summary string      `json:"summary"`
+	Break   *Break      `json:"break,omitempty"`
+	// RecoveredAt is when the system was healthy again after a break, for
+	// good: the start of the first window from which every window to the
+	// end of the load, at least RecoverWindows of them, showed no break
+	// signal. Nil when it broke and didn't recover, or didn't break.
+	RecoveredAt  *float64 `json:"recovered_at_s,omitempty"`
+	Inconclusive []string `json:"inconclusive,omitempty"`
+	Caveats      []string `json:"caveats,omitempty"`            // tooling strain too small to make the run inconclusive
+	Cause        string   `json:"inconclusive_cause,omitempty"` // what took CPU from the tooling, when there's evidence
+	Doubt        string   `json:"doubt,omitempty"`              // why a latency break may be partly the load generator's own
+	BaselineP99  *float64 `json:"baseline_p99_ms,omitempty"`
+	SLOP99Ms     float64  `json:"slo_p99_ms"`
+	LatencyLimit *float64 `json:"latency_limit_ms,omitempty"` // p99 at or above this is a latency signal
+	MaxRPS       *float64 `json:"max_rps,omitempty"`
+	MaxRPSAt     float64  `json:"max_rps_at_s"`
+	WorstP99     *float64 `json:"worst_p99_ms,omitempty"`
+	WorstErrors  *float64 `json:"worst_error_rate,omitempty"`
+	Moment       int      `json:"moment_window"` // the window the annotated diagram shows
 }
 
 // Break is the first sustained sign the system couldn't keep up.
@@ -151,6 +156,13 @@ func verdict(a *Analysis) Verdict {
 	}
 	if breakAt >= 0 {
 		v.Summary += afterBreak(a, ws[breakAt+1:])
+		v.RecoveredAt = recoveredAt(ws, hard, sig, breakAt)
+		switch {
+		case v.RecoveredAt != nil:
+			v.Summary += fmt.Sprintf(" It recovered at %s, %s after the break, and stayed healthy to the end.", Clock(*v.RecoveredAt), Clock(*v.RecoveredAt-ws[breakAt].Start))
+		case a.StoppedEarly == nil:
+			v.Summary += " It hadn't recovered when the load ended."
+		}
 	}
 	if a.Cutoff != "" && breakAt >= 0 {
 		v.Summary += " After that, " + a.Cutoff + "."
@@ -766,6 +778,26 @@ func Pct(f float64) string {
 		return strconv.FormatFloat(f*100, 'f', 1, 64) + "%"
 	}
 	return strconv.FormatFloat(f*100, 'f', 0, 64) + "%"
+}
+
+// RecoverWindows is how many healthy windows in a row, to the end of the
+// load, count as recovered after a break.
+const RecoverWindows = 3
+
+// recoveredAt is the start of the first window after the break from which
+// every window to the end shows no break signal, if there are at least
+// RecoverWindows of them.
+func recoveredAt(ws []*Window, hard, sig [][]string, breakAt int) *float64 {
+	healthy := func(i int) bool { return len(hard[i]) == 0 && len(sig[i]) == 0 && ws[i].RPS != nil }
+	from := len(ws)
+	for i := len(ws) - 1; i > breakAt && healthy(i); i-- {
+		from = i
+	}
+	if from <= breakAt || len(ws)-from < RecoverWindows {
+		return nil
+	}
+	at := ws[from].Start
+	return &at
 }
 
 // SuspendSlack is how much longer than its profile the load may take on

@@ -49,6 +49,9 @@ type Analysis struct {
 	// or in the whole run if it held: what a scenario's prealloc_vus is
 	// measured from.
 	PeakVUs *float64 `json:"peak_vus,omitempty"`
+	// PeakVUsAll is the most busy at once in the whole run, break included:
+	// what a scenario that judges recovery after a break needs.
+	PeakVUsAll *float64 `json:"peak_vus_all,omitempty"`
 
 	WindowSeconds int       `json:"window_seconds"`
 	PeakOffered   float64   `json:"peak_offered_rps"`
@@ -338,6 +341,9 @@ func Analyze(dir string) (*Analysis, error) {
 	a.Windows = all[:a.Analyzed]
 	a.Verdict = verdict(a)
 	a.PeakVUs = peakVUs(a)
+	for _, w := range a.Windows {
+		a.PeakVUsAll = maxPtr(a.PeakVUsAll, w.VUs)
+	}
 	a.Diagnoses = diagnose(a)
 	a.Expect = scoreAll(a, a.Windows)
 	a.Windows = all

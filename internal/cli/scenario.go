@@ -365,7 +365,11 @@ func printCheck(w io.Writer, r *scenario.CheckResult, static bool) {
 		printRunCheck(w, "variant "+rc.Name, rc)
 	}
 	if l := r.Load; l != nil {
-		fmt.Fprintf(w, "  load: at most %d VUs busy at once before a break (run %s), so load.prealloc_vus %d", l.PeakVUs, l.From, l.PreallocVUs)
+		when := "before a break"
+		if l.WholeRun {
+			when = "in a whole run (recovery claims judge the windows after a break)"
+		}
+		fmt.Fprintf(w, "  load: at most %d VUs busy at once %s (run %s), so load.prealloc_vus %d", l.PeakVUs, when, l.From, l.PreallocVUs)
 		switch m := l.Meta; {
 		case m == nil:
 			fmt.Fprintln(w, "; warning: meta.yaml has no load block, so runs start only peak rate x SLO VUs up front")

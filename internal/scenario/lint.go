@@ -2,8 +2,11 @@ package scenario
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strings"
+
+	"github.com/akinfemi/load-lore/internal/plan"
 
 	"github.com/akinfemi/load-lore/internal/analysis"
 	"github.com/akinfemi/load-lore/internal/design"
@@ -117,8 +120,10 @@ func (s *Scenario) Lint() []Problem {
 		switch {
 		case l.PreallocVUs < 1 || l.PeakVUs < 0:
 			bad(MetaFile, "load.prealloc_vus must be at least 1 and load.peak_vus at least 0")
-		case float64(l.PreallocVUs) < LoadMargin*float64(l.PeakVUs):
-			bad(MetaFile, "load.prealloc_vus %d is under %g x load.peak_vus %d", l.PreallocVUs, LoadMargin, l.PeakVUs)
+		case float64(l.PreallocVUs) < math.Min(LoadMargin*float64(l.PeakVUs), plan.MaxVUsCap):
+			bad(MetaFile, "load.prealloc_vus %d is under %g x load.peak_vus %d (or the load generator's cap of %d)", l.PreallocVUs, LoadMargin, l.PeakVUs, plan.MaxVUsCap)
+		case l.PreallocVUs > plan.MaxVUsCap:
+			bad(MetaFile, "load.prealloc_vus %d is over the load generator's cap of %d", l.PreallocVUs, plan.MaxVUsCap)
 		case l.From == "":
 			bad(MetaFile, "load.from: name the run load.peak_vus was measured in")
 		}

@@ -26,7 +26,7 @@ _A: run `fixture-run` · B: run `fixture-run`_
 
 **A.** Held the whole profile: up to 1,000 rps offered, 950 rps served at best, worst 10-second p99 5.0 ms, at most 0% errors.
 
-**B.** Broke 0:40 into the load, at 450 rps offered: p99 reached 120 ms (5.0 ms at low load). Most saturated then: api → db pool 10 of 10 connections in use. Around then: latency +20 ms on connections into db for 10s at 0:30.
+**B.** Broke 0:40 into the load, at 450 rps offered: p99 reached 120 ms (5.0 ms at low load). Most saturated then: api → db pool 10 of 10 connections in use. Around then: latency +20 ms on connections into db for 10s at 0:30. It hadn't recovered when the load ended.
 
 ## Charts
 

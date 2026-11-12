@@ -2,18 +2,27 @@ package analysis
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
 
-// A cold cache: a cache's hit rate falls to ColdHitShare of its level
-// before or lower, and at the same time the reads that miss it reach the
-// database at ColdReadFactor times their earlier rate or more. After a
-// cache restart every key misses at once, so the database takes the reads
-// the cache used to answer, all together: a thundering herd.
+// A cold cache: a cache's share of lookups that miss rises to ColdMissFactor
+// times its level before or more, and to ColdMissMin of lookups at least,
+// and at the same time the reads that miss it reach the database at
+// ColdReadFactor times their earlier rate or more. After a cache restart
+// every key misses at once, so the database takes the reads the cache used
+// to answer, all together: a thundering herd. The misses are counted, not
+// the hit rate halved: a warm cache refills its hot keys in seconds, so
+// over a 10-second window the hit rate can stay high while the misses
+// multiply.
 const (
-	ColdHitShare   = 0.5
+	ColdMissFactor = 5.0
+	ColdMissMin    = 0.05
 	ColdReadFactor = 2.0
+	// A warm cache can send the database no reads at all; its reads then
+	// count as this many a second, so a herd still has a level to beat.
+	ColdReadFloor = 1.0
 	// The level before is the median of up to this many windows before the
 	// drop, past the warm-up, with the hit rate at ColdWarmHitMin or more.
 	ColdBaseWindows = 6
@@ -91,7 +100,7 @@ func coldCacheEdge(a *Analysis, ws []*Window, svc, cache, db string) *Diagnosis 
 		sort.Float64s(rs)
 		hb, rb := median(hits), median(rs)
 		h, r := hit(i), reads(i)
-		if h == nil || r == nil || rb <= 0 || *h > ColdHitShare*hb || *r < ColdReadFactor*rb {
+		if h == nil || r == nil || 1-*h < ColdMissMin || 1-*h < ColdMissFactor*(1-hb) || *r < ColdReadFactor*math.Max(rb, ColdReadFloor) {
 			continue
 		}
 		w := ws[i]
@@ -100,12 +109,12 @@ func coldCacheEdge(a *Analysis, ws []*Window, svc, cache, db string) *Diagnosis 
 			Title: fmt.Sprintf("Cold cache (%s, %s → %s)", cache, svc, db),
 			From:  w.Start,
 			To:    w.Start + WindowSeconds,
-			Summary: fmt.Sprintf("At %s, %s's hit rate fell to %s from %s, and %s's reads from %s reached %s rps, %.1fx the %s rps before. The keys the cache used to answer now miss together, so their reads all go to the database at once: a thundering herd.",
-				Clock(w.Start), cache, Pct(*h), Pct(hb), svc, db, Rate(*r), *r/rb, Rate(rb)),
+			Summary: fmt.Sprintf("At %s, %s's hit rate fell to %s from %s, %s of lookups missing, and %s's reads from %s reached %s rps, %s. The keys the cache used to answer now miss together, so their reads all go to the database at once: a thundering herd.",
+				Clock(w.Start), cache, Pct(*h), Pct(hb), missText(1-*h, 1-hb), svc, db, Rate(*r), readsBefore(*r, rb)),
 		}
 		d.Evidence = append(d.Evidence,
 			Evidence{Text: fmt.Sprintf("%s hit rate %s at %s, against %s before", cache, Pct(*h), Clock(w.Start), Pct(hb)), Source: SrcHitRate},
-			Evidence{Text: fmt.Sprintf("%s rps from %s to %s at %s, against %s before", Rate(*r), svc, db, Clock(w.Start), Rate(rb)), Source: SrcDBReads},
+			Evidence{Text: fmt.Sprintf("%s rps from %s to %s at %s, %s", Rate(*r), svc, db, Clock(w.Start), readsBefore(*r, rb)), Source: SrcDBReads},
 		)
 		if c := cpuOf(w, db); c != nil {
 			d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf("%s CPU at %s of its limit at %s", db, Pct(*c), Clock(w.Start)), Source: SrcCPU})
@@ -121,4 +130,20 @@ func coldCacheEdge(a *Analysis, ws []*Window, svc, cache, db string) *Diagnosis 
 		return d
 	}
 	return nil
+}
+
+// missText is the share of lookups missing, against before.
+func missText(m, before float64) string {
+	if before <= 0 {
+		return Pct(m)
+	}
+	return fmt.Sprintf("%s (%.0fx the %s before)", Pct(m), m/before, Pct(before))
+}
+
+// readsBefore compares a read rate with the rate before.
+func readsBefore(r, before float64) string {
+	if before <= 0 {
+		return "against none before"
+	}
+	return fmt.Sprintf("%.1fx the %s rps before", r/before, Rate(before))
 }

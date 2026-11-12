@@ -278,7 +278,7 @@ const (
 	promCPU        = 0.1
 	cadvisorCPU    = 0.1
 	exporterCPU    = 0.1
-	maxVUsCap      = 4000
+	MaxVUsCap      = 4000 // the most VUs the load generator gets
 	minMemoryApp   = 32 << 20
 	minMemoryPG    = 128 << 20
 	minMemoryRedis = 32 << 20
@@ -803,7 +803,7 @@ func (p *Plan) workload(d *design.Design, byName map[string]*Service, scale floa
 	// scenario.LoadMeta); in-flight requests scale with the rate.
 	pre := math.Max(20, math.Ceil(pw.PeakRate*pw.SLOP99Ms/1000))
 	measured := math.Ceil(float64(opt.PreallocVUs) * scale)
-	pw.MaxVUs = int(math.Min(maxVUsCap, math.Max(math.Max(100, math.Ceil(pw.PeakRate*2)), measured)))
+	pw.MaxVUs = int(math.Min(MaxVUsCap, math.Max(math.Max(100, math.Ceil(pw.PeakRate*2)), measured)))
 	pw.PreVUs = int(math.Min(float64(pw.MaxVUs), math.Max(pre, measured)))
 	if measured > pre {
 		p.note("load generator: %d VUs started before the load, the scenario's measured prealloc_vus %d at --scale 1, more than %s rps × the SLO's %g ms", pw.PreVUs, opt.PreallocVUs, fmtF(math.Round(pw.PeakRate)), pw.SLOP99Ms)

@@ -472,6 +472,49 @@ func TestColdCache(t *testing.T) {
 		t.Errorf("evidence %+v", d.Evidence)
 	}
 
+	// A warm cache restarted: its hot keys refill in seconds, so over the
+	// window the hit rate only falls from 99.8% to 85%, but the misses
+	// multiply, and so do the database's reads.
+	w.CacheHit = func(t float64) float64 {
+		if t > 60 && t <= 70 {
+			return 0.85
+		}
+		return 0.998
+	}
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if !slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool {
+		return d.Rule == "cold-cache" && strings.Contains(d.Summary, "15% (75x the 0.2% before) of lookups missing")
+	}) {
+		t.Errorf("a restarted warm cache: %+v", a.Diagnoses)
+	}
+
+	// A cache so warm the database got no reads before the restart.
+	w.CacheHit = func(t float64) float64 {
+		if t > 60 && t <= 70 {
+			return 0.74
+		}
+		return 1
+	}
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if !slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool {
+		return d.Rule == "cold-cache" && strings.Contains(d.Summary, "against none before")
+	}) {
+		t.Errorf("a cache that sent no reads before: %+v", a.Diagnoses)
+	}
+
+	// A cache whose misses double, from 10% to 20%: not cold.
+	w.CacheHit = func(t float64) float64 {
+		if t > 60 && t <= 80 {
+			return 0.8
+		}
+		return 0.9
+	}
+	w.Events = nil
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "cold-cache" }) {
+		t.Error("doubled misses called a cold cache")
+	}
+
 	// A steady cache: nothing to say.
 	w.CacheHit = func(float64) float64 { return 0.9 }
 	w.Events = nil
@@ -1136,5 +1179,21 @@ func TestSuspendedHostInconclusive(t *testing.T) {
 	a = analyze(t, analysistest.WriteRun(t, w, 1))
 	if a.Verdict.Kind != VerdictInconclusive || len(a.Verdict.Inconclusive) == 0 || !strings.Contains(a.Verdict.Inconclusive[0], "took 2h0m0s on the wall clock: the host slept or stalled") {
 		t.Errorf("verdict %s, inconclusive %q", a.Verdict.Kind, a.Verdict.Inconclusive)
+	}
+}
+
+// After a break, the verdict says when the system was healthy again for
+// good, or that it wasn't by the end of the load.
+func TestRecoveredAfterBreak(t *testing.T) {
+	w := analysistest.Healthy()
+	w.Failed = func(t float64) float64 { return 0.3 * boolF(t > 40 && t <= 70) }
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.Verdict.Kind != VerdictBroke || a.Verdict.RecoveredAt == nil || *a.Verdict.RecoveredAt != 70 || !strings.Contains(a.Verdict.Summary, "It recovered at 1:10, 0:30 after the break") {
+		t.Errorf("recovered: %s %v %q", a.Verdict.Kind, a.Verdict.RecoveredAt, a.Verdict.Summary)
+	}
+	w.Failed = func(t float64) float64 { return 0.3 * boolF(t > 40) }
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.Verdict.RecoveredAt != nil || !strings.Contains(a.Verdict.Summary, "It hadn't recovered when the load ended") {
+		t.Errorf("not recovered: %v %q", a.Verdict.RecoveredAt, a.Verdict.Summary)
 	}
 }

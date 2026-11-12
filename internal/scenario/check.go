@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/akinfemi/load-lore/internal/plan"
+
 	"github.com/akinfemi/load-lore/internal/analysis"
 	"github.com/akinfemi/load-lore/internal/bench"
 )
@@ -50,6 +52,25 @@ type LoadCheck struct {
 	From        string    `json:"from"` // the run with that peak
 	PreallocVUs int       `json:"prealloc_vus"`
 	Meta        *LoadMeta `json:"meta,omitempty"` // what meta.yaml says now
+	// WholeRun: measured over whole runs, not only before the break,
+	// because a claim judges recovery after it.
+	WholeRun bool `json:"whole_run,omitempty"`
+}
+
+func judgesRecovery(c Claims) bool {
+	all := []Claim{c.Problem}
+	for _, x := range c.Solutions {
+		all = append(all, x)
+	}
+	for _, x := range c.Variants {
+		all = append(all, x)
+	}
+	for _, x := range all {
+		if x.Recovers != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // LoadMargin is how far above the most VUs measured busy at once a
@@ -70,8 +91,12 @@ type RunCheck struct {
 	PeakRPS      *float64 `json:"peak_rps,omitempty"`      // most successful responses/s in any window
 	// PeakVUs is the most VUs busy at once before the break, at --scale 1;
 	// SLOVUs the peak rate times slo.p99_ms there.
-	PeakVUs      *float64      `json:"peak_vus,omitempty"`
-	SLOVUs       float64       `json:"slo_vus,omitempty"`
+	PeakVUs *float64 `json:"peak_vus,omitempty"`
+	SLOVUs  float64  `json:"slo_vus,omitempty"`
+	// RecoveredAt is when it was healthy again after its break, for good.
+	RecoveredAt *float64 `json:"recovered_at_s,omitempty"`
+	// PeakVUsAll is the most VUs busy at once in the whole run, at --scale 1.
+	PeakVUsAll   *float64      `json:"peak_vus_all,omitempty"`
 	Diagnoses    []string      `json:"diagnoses"`
 	Claims       []ClaimResult `json:"claims"`
 	OK           bool          `json:"ok"`                     // Status is ok
@@ -164,21 +189,27 @@ func Check(ctx context.Context, s *Scenario, dir string, run RunFunc) *CheckResu
 }
 
 func loadCheck(s *Scenario, res *CheckResult) *LoadCheck {
-	lc := &LoadCheck{Meta: s.Meta.Load}
+	lc := &LoadCheck{Meta: s.Meta.Load, WholeRun: judgesRecovery(s.Meta.Check)}
 	found := false
 	for _, rc := range append(append([]*RunCheck{res.Problem}, res.Solutions...), res.Variants...) {
 		if rc == nil {
 			continue
 		}
 		lc.PreallocVUs = max(lc.PreallocVUs, int(math.Ceil(rc.SLOVUs)))
-		if rc.PeakVUs != nil && (!found || int(math.Ceil(*rc.PeakVUs)) > lc.PeakVUs) {
-			lc.PeakVUs, lc.From, found = int(math.Ceil(*rc.PeakVUs)), filepath.Base(rc.RunDir), true
+		// A recovery claim judges the windows after a break too, where
+		// dropped arrivals would lighten the load it recovers from.
+		peak := rc.PeakVUs
+		if lc.WholeRun {
+			peak = rc.PeakVUsAll
+		}
+		if peak != nil && (!found || int(math.Ceil(*peak)) > lc.PeakVUs) {
+			lc.PeakVUs, lc.From, found = int(math.Ceil(*peak)), filepath.Base(rc.RunDir), true
 		}
 	}
 	if !found {
 		return nil
 	}
-	lc.PreallocVUs = max(lc.PreallocVUs, int(math.Ceil(LoadMargin*float64(lc.PeakVUs))))
+	lc.PreallocVUs = min(plan.MaxVUsCap, max(lc.PreallocVUs, int(math.Ceil(LoadMargin*float64(lc.PeakVUs)))))
 	return lc
 }
 
@@ -245,8 +276,13 @@ func runOne(ctx context.Context, run RunFunc, name, designPath string, coolTo in
 			v := *a.PeakVUs / scale
 			rc.PeakVUs = &v
 		}
+		if a.PeakVUsAll != nil {
+			v := *a.PeakVUsAll / scale
+			rc.PeakVUsAll = &v
+		}
 		rc.SLOVUs = a.PeakOffered / scale * a.Verdict.SLOP99Ms / 1000
 	}
+	rc.RecoveredAt = a.Verdict.RecoveredAt
 	if b := a.Verdict.Break; b != nil {
 		at, load := b.At, b.Offered
 		rc.BreakAt, rc.BreakLoad = &at, &load
@@ -288,6 +324,31 @@ func ownClaims(rc *RunCheck, c Claim) {
 	rc.claim("verdict "+c.Verdict, rc.Verdict == c.Verdict, rc.Summary)
 	rc.diagnosisClaims(c)
 	rc.signalClaims(c)
+	rc.recoveryClaim(c)
+}
+
+// recovered is whether the run was healthy at the end: it held, or it
+// recovered from its break.
+func (rc *RunCheck) recovered() bool {
+	return rc.Verdict == string(analysis.VerdictHeld) || rc.RecoveredAt != nil
+}
+
+func (rc *RunCheck) recoveryClaim(c Claim) {
+	if c.Recovers == nil {
+		return
+	}
+	detail := "it hadn't recovered when the load ended"
+	switch {
+	case rc.Verdict == string(analysis.VerdictHeld):
+		detail = "it held"
+	case rc.RecoveredAt != nil:
+		detail = "it recovered at " + analysis.Clock(*rc.RecoveredAt)
+	}
+	name := "recovers"
+	if !*c.Recovers {
+		name = "doesn't recover"
+	}
+	rc.claim(name, rc.recovered() == *c.Recovers, detail)
 }
 
 func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck) {
@@ -310,6 +371,7 @@ func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck) {
 	}
 	rc.diagnosisClaims(c)
 	rc.signalClaims(c)
+	rc.recoveryClaim(c)
 
 	gain := DefaultMinGain
 	if c.MinGain != nil {
@@ -321,6 +383,8 @@ func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck) {
 		rc.claim("helps", false, "the starting design didn't break in its own run, so there's nothing to improve on")
 	case held:
 		rc.claim("helps", true, fmt.Sprintf("held through the profile; the starting design broke at %s rps offered", analysis.Rate(*problem.BreakLoad)))
+	case c.Recovers != nil && *c.Recovers && rc.RecoveredAt != nil && rc.BreakAt != nil && !problem.recovered():
+		rc.claim("helps (recovers where the starting design didn't)", true, fmt.Sprintf("recovered at %s, %s after its break; the starting design hadn't recovered when the load ended", analysis.Clock(*rc.RecoveredAt), analysis.Clock(*rc.RecoveredAt-*rc.BreakAt)))
 	case rc.PeakRPS == nil:
 		rc.claim("helps", false, "no throughput data")
 	default:
