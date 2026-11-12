@@ -8,6 +8,7 @@ The CLI is `loadl`.
 
 - **Spec:** [Loadlore — Product Spec](https://claude.ai/artifact/TEkM1GHG5mpmKXTcH3jJ6m) is the source of truth for scope and behavior.
 - **AI skill:** [`skills/loadlore-designer/`](skills/loadlore-designer/) turns plain-language descriptions into validated design files.
+- **Using it on your own:** [`docs/how-to.md`](docs/how-to.md) walks through setup, a scenario, writing your own design, and reading the report, with `loadl` alone.
 
 ## Commands so far
 
