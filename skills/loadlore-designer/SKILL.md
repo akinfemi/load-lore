@@ -91,6 +91,7 @@ Then offer the command to run it: `loadl run design.yaml` (local mode).
 
 | Command | Used for |
 | --- | --- |
+| `loadl init [scenario] --json` | Starting point for a user without a design: `loadl init <scenario>` copies a library scenario into a folder of its own; with flags (`--name`, `--replicas`, `--cpu`, `--store postgres\|cache\|none`, `--rps`, `--minutes`, `--fault`) it writes a commented design that validates, which you then edit to what the user described |
 | `loadl schema --json` | Exact schema for the installed version |
 | `loadl validate <file> --json` | The validate loop |
 | `loadl diagram <file> [--ascii]` | Showing the design |
@@ -104,7 +105,7 @@ Then offer the command to run it: `loadl run design.yaml` (local mode).
 | `loadl watch <run-id>` | Not for the agent: tell the learner to run it in their own terminal to see the live dashboard while a detached run goes on |
 | `loadl report <run-id> --json` | Explaining a run: verdict, diagnoses with evidence, scored predictions, per-window numbers. `latest` names the newest run |
 | `loadl compare <run-a> <run-b>` | Before and after a design change, side by side |
-| `loadl profile <service>` | Measuring a real service to replace guessed numbers |
+| `loadl profile <service>` | Planned for phase 2, not in this version: measuring a real service to replace guessed numbers. Until then, record guessed numbers as assumptions |
 
 ## References
 
