@@ -17,6 +17,16 @@ host:
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
   speed: 1000
 
+# Load generator VUs started before the load, at --scale 1: the peak rate x
+# slo.p99_ms (3,500 x 0.5 s), more than 1.5 x the most busy at once before a
+# break in the check's runs (956, the one-query-per-page solution near the
+# top of the ramp). k6 peaked at 1.4 GB in the starting design's run, after
+# its break.
+load:
+  prealloc_vus: 1750
+  peak_vus: 956
+  from: when-to-scale-your-database-one-query-per-page-20261111-161415
+
 # What `loadl scenario check` verifies, at --scale 1. At small scales the
 # 0.25-CPU-or-less Postgres stalls under CPU throttling and breaks early.
 check:

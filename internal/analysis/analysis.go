@@ -45,6 +45,11 @@ type Analysis struct {
 	Started   *time.Time `json:"load_started,omitempty"`
 	Ended     *time.Time `json:"load_ended,omitempty"`
 
+	// PeakVUs is the most load generator VUs busy at once before the break,
+	// or in the whole run if it held: what a scenario's prealloc_vus is
+	// measured from.
+	PeakVUs *float64 `json:"peak_vus,omitempty"`
+
 	WindowSeconds int       `json:"window_seconds"`
 	PeakOffered   float64   `json:"peak_offered_rps"`
 	Windows       []*Window `json:"windows"`
@@ -88,6 +93,8 @@ type Window struct {
 	RPS       *float64 `json:"rps"`           // successful responses per second
 	Completed *float64 `json:"completed_rps"` // all responses, failed included
 	Dropped   *float64 `json:"dropped"`       // arrivals the load generator couldn't start
+	// VUs is the most load generator VUs busy with a request at once.
+	VUs       *float64 `json:"vus,omitempty"`
 	ErrorRate *float64 `json:"error_rate"`
 	P50       *float64 `json:"p50_ms"`
 	P95       *float64 `json:"p95_ms"`
@@ -330,6 +337,7 @@ func Analyze(dir string) (*Analysis, error) {
 	all := a.Windows
 	a.Windows = all[:a.Analyzed]
 	a.Verdict = verdict(a)
+	a.PeakVUs = peakVUs(a)
 	a.Diagnoses = diagnose(a)
 	a.Expect = scoreAll(a, a.Windows)
 	a.Windows = all
@@ -492,6 +500,9 @@ func (b *builder) window(i int) *Window {
 		w.ErrorRate = num((total-good)/total, total > 0)
 		dropped, _ := st.increase("k6_dropped_iterations_total", nil, wa, wb)
 		w.Dropped = num(dropped, true)
+		if mx, _, ok := st.gaugeSum("k6_vus", nil, wa, wb); ok {
+			w.VUs = num(mx, true)
+		}
 	}
 	bs, sum, count := st.nativeBuckets("k6_http_req_duration_seconds", nil, wa, wb)
 	w.P50, w.P95, w.P99 = ms(quantile(bs, 0.5)), ms(quantile(bs, 0.95)), ms(quantile(bs, 0.99))
@@ -909,4 +920,19 @@ type EarlyStop struct {
 	BreakAt     float64 `json:"break_at_s"`
 	ConfirmedAt float64 `json:"confirmed_at_s"`
 	At          float64 `json:"at_s"`
+}
+
+// peakVUs is the most VUs busy at once in the windows before the break
+// (all of them if it held): past the break slow responses pile VUs up,
+// and the run is already judged.
+func peakVUs(a *Analysis) *float64 {
+	ws := a.Windows
+	if b := a.Verdict.Break; b != nil {
+		ws = ws[:b.Window]
+	}
+	var peak *float64
+	for _, w := range ws {
+		peak = maxPtr(peak, w.VUs)
+	}
+	return peak
 }

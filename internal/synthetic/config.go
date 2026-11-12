@@ -53,10 +53,10 @@ type Call struct {
 	Mode   string `json:"mode"` // sync | async
 	OnMiss []Call `json:"on_miss,omitempty"`
 	// Coalesce: concurrent misses for the same key wait for one on_miss run.
-	Coalesce bool `json:"coalesce,omitempty"`
-	TTLS     int  `json:"ttl_s,omitempty"`
-	Query  string `json:"query,omitempty"` // point | range | scan
-	Rows   int    `json:"rows,omitempty"`
+	Coalesce bool   `json:"coalesce,omitempty"`
+	TTLS     int    `json:"ttl_s,omitempty"`
+	Query    string `json:"query,omitempty"` // point | range | scan
+	Rows     int    `json:"rows,omitempty"`
 }
 
 // Resilience settings for every outbound call.

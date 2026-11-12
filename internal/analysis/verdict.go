@@ -37,6 +37,11 @@ const (
 	BreakLatencyWindows = 3
 	BaselineShare       = 0.25
 	DroppedShareLimit   = 0.01 // the load generator dropped >1% of a window's arrivals
+	// In a window where the system itself failed BreakErrorRate or more of
+	// requests, slow failing responses hold VUs, so some drops are expected:
+	// up to this share they're a caveat; above it the missing load could
+	// flatter whatever absorbed the trouble, and the run is inconclusive.
+	DroppedFailingLimit = 0.05
 	ToolCPULimit        = 0.9  // a tool used >=90% of its CPU budget
 	ToolThrottleLimit   = 0.05 // a tool was stalled by CFS in >=5% of its periods
 	ToolThrottleNote    = 0.01 // ... or in >=1%: noted, since it can still move p99
@@ -500,7 +505,7 @@ func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string, short [
 	if breakAt >= 0 {
 		end = breakAt + 1
 	}
-	var drop, load, proxy, failingDrop *Window
+	var drop, failingDrop, failingNote, load, proxy *Window
 	tools := []struct {
 		name  string
 		get   func(*Window) *float64
@@ -514,15 +519,19 @@ func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string, short [
 			continue
 		}
 		if i < end-1 || breakAt < 0 {
-			if w.Dropped != nil && w.Offered > 0 && *w.Dropped/(w.Offered*WindowSeconds) > DroppedShareLimit {
-				// In a window where the system itself failed requests, as in
-				// a stall a fault causes, slow failing responses held the
-				// VUs the arrivals needed, as at a break.
-				switch failing := w.ErrorRate != nil && *w.ErrorRate >= BreakErrorRate; {
-				case failing && failingDrop == nil:
-					failingDrop = w
-				case !failing && drop == nil:
+			if w.Dropped != nil && *w.Dropped > 0 && w.Offered > 0 {
+				// Arrivals k6 couldn't start lighten the load. Judged by
+				// size: where the system was failing requests itself, slow
+				// failing responses hold VUs, so a few are a caveat.
+				share := *w.Dropped / (w.Offered * WindowSeconds)
+				failing := w.ErrorRate != nil && *w.ErrorRate >= BreakErrorRate
+				switch {
+				case !failing && share > DroppedShareLimit && drop == nil:
 					drop = w
+				case failing && share > DroppedFailingLimit && failingDrop == nil:
+					failingDrop = w
+				case failing && share <= DroppedFailingLimit && (failingNote == nil || share > *failingNote.Dropped/(failingNote.Offered*WindowSeconds)):
+					failingNote = w
 				}
 			}
 		}
@@ -539,7 +548,7 @@ func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string, short [
 			}
 		}
 	}
-	for _, w := range []*Window{drop, load, proxy} {
+	for _, w := range []*Window{drop, failingDrop, load, proxy} {
 		if w != nil {
 			short = append(short, w)
 		}
@@ -549,8 +558,12 @@ func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string, short [
 			Clock(drop.Start), Count(*drop.Dropped), Pct(*drop.Dropped/(drop.Offered*WindowSeconds)), SrcDropped))
 	}
 	if failingDrop != nil {
-		caveats = append(caveats, fmt.Sprintf("at %s the load generator dropped %s arrivals, %s of what the profile offered in that window (%s), while %s of requests failed: slow responses held the VUs new arrivals needed",
-			Clock(failingDrop.Start), Count(*failingDrop.Dropped), Pct(*failingDrop.Dropped/(failingDrop.Offered*WindowSeconds)), SrcDropped, Pct(*failingDrop.ErrorRate)))
+		reasons = append(reasons, fmt.Sprintf("at %s the load generator dropped %s arrivals, %s of what the profile offered in that window (%s), while %s of requests failed: more than %s, so the missing load could flatter whatever absorbed the trouble",
+			Clock(failingDrop.Start), Count(*failingDrop.Dropped), Pct(*failingDrop.Dropped/(failingDrop.Offered*WindowSeconds)), SrcDropped, Pct(*failingDrop.ErrorRate), Pct(DroppedFailingLimit)))
+	}
+	if failingNote != nil && failingDrop == nil {
+		caveats = append(caveats, fmt.Sprintf("at %s the load generator dropped %s arrivals, %s of what the profile offered in that window (%s), while %s of requests failed: slow responses held the VUs new arrivals needed, so that window's load was lighter than the profile by that share",
+			Clock(failingNote.Start), Count(*failingNote.Dropped), Pct(*failingNote.Dropped/(failingNote.Offered*WindowSeconds)), SrcDropped, Pct(*failingNote.ErrorRate)))
 	}
 	if load != nil {
 		reasons = append(reasons, fmt.Sprintf("at %s the load generator used %s of its CPU budget (%s), so it may have been slowing requests down itself", Clock(load.Start), Pct(*load.LoadCPU), SrcLoadCPU))

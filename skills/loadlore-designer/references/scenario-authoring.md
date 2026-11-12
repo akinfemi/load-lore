@@ -63,6 +63,15 @@ host:
   reference: MacBook Air M4, Colima VM with 8 vCPUs
   speed: 1000
 
+# Load generator VUs started before the load, at --scale 1, measured: the
+# larger of the peak rate x slo.p99_ms and 1.5 x the most VUs busy at once
+# before a break in any of the check's runs. loadl scenario check prints
+# what its runs call for; copy it here with the run it came from.
+load:
+  prealloc_vus: 1750
+  peak_vus: 956
+  from: when-to-scale-your-database-one-query-per-page-20261111-161415
+
 # What `loadl scenario check` verifies, at --scale 1.
 check:
   problem:
@@ -75,6 +84,8 @@ check:
   variants:                    # one claim per variants/ folder; verdict required
     # bigger-pools: { verdict: broke, signals: [errors] }
 ```
+
+Arrivals are open, and each needs a free VU. VUs started mid-run take time to start and drop arrivals meanwhile, which in a stall lightens the load just when it matters, so `load` sizes them from measurement. Leave it out until the first check has run, then copy the numbers the check prints. Designs outside a scenario get the peak rate × `slo.p99_ms`.
 
 `predict` lists the README's questions for `loadl predict`. Each takes an answer of a kind, `rps` (an offered load, or `never`), `service` (one of the design's services) or `text`, and becomes the `expect` line in `expect`, with `{answer}` where the answer goes; an `rps` question also gives the `never` line. A question the grammar can't score becomes a quoted `note`:
 

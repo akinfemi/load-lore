@@ -70,6 +70,21 @@ type Meta struct {
 	// Predict is what loadl predict asks before a run, each answer
 	// becoming an expect line.
 	Predict []Question `yaml:"predict" json:"predict"`
+	// Load sizes the load generator for the scenario's designs, from
+	// measurement.
+	Load *LoadMeta `yaml:"load,omitempty" json:"load,omitempty"`
+}
+
+// LoadMeta is the load generator sizing measured for a scenario. Arrivals
+// are open, and each needs a free VU: VUs started mid-run take time to
+// initialize and drop arrivals meanwhile. PreallocVUs, at --scale 1, are
+// started before the load: the larger of the peak rate times slo.p99_ms
+// and 1.5 times PeakVUs, the most VUs busy at once before the break in
+// any of the check's runs (loadl scenario check reports it).
+type LoadMeta struct {
+	PreallocVUs int    `yaml:"prealloc_vus" json:"prealloc_vus"`
+	PeakVUs     int    `yaml:"peak_vus" json:"peak_vus"`
+	From        string `yaml:"from" json:"from"` // the run PeakVUs was measured in
 }
 
 // Question is one prediction loadl predict asks for.

@@ -113,6 +113,17 @@ func (s *Scenario) Lint() []Problem {
 		}
 	}
 
+	if l := s.Meta.Load; l != nil {
+		switch {
+		case l.PreallocVUs < 1 || l.PeakVUs < 0:
+			bad(MetaFile, "load.prealloc_vus must be at least 1 and load.peak_vus at least 0")
+		case float64(l.PreallocVUs) < LoadMargin*float64(l.PeakVUs):
+			bad(MetaFile, "load.prealloc_vus %d is under %g x load.peak_vus %d", l.PreallocVUs, LoadMargin, l.PeakVUs)
+		case l.From == "":
+			bad(MetaFile, "load.from: name the run load.peak_vus was measured in")
+		}
+	}
+
 	d := s.lintDesign(DesignFile, s.Name, "a scenario's design is named after its folder", &ps)
 	readme, err := s.ReadFile(ReadmeFile)
 	switch {

@@ -364,6 +364,17 @@ func printCheck(w io.Writer, r *scenario.CheckResult, static bool) {
 	for _, rc := range r.Variants {
 		printRunCheck(w, "variant "+rc.Name, rc)
 	}
+	if l := r.Load; l != nil {
+		fmt.Fprintf(w, "  load: at most %d VUs busy at once before a break (run %s), so load.prealloc_vus %d", l.PeakVUs, l.From, l.PreallocVUs)
+		switch m := l.Meta; {
+		case m == nil:
+			fmt.Fprintln(w, "; warning: meta.yaml has no load block, so runs start only peak rate x SLO VUs up front")
+		case m.PreallocVUs < l.PreallocVUs:
+			fmt.Fprintf(w, "; warning: meta.yaml says %d, from %d busy in run %s\n", m.PreallocVUs, m.PeakVUs, m.From)
+		default:
+			fmt.Fprintf(w, "; meta.yaml says %d\n", m.PreallocVUs)
+		}
+	}
 	switch {
 	case r.Status == scenario.StatusInconclusive:
 		fmt.Fprintln(w, "INCONCLUSIVE")

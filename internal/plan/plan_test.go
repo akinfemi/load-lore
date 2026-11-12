@@ -430,3 +430,27 @@ func TestPgBouncerPlan(t *testing.T) {
 		t.Errorf("notes %v", p.Notes)
 	}
 }
+
+// A scenario's measured prealloc_vus raises the VUs started up front when
+// it's more than peak rate x SLO, scaled with the load.
+func TestMeasuredPreallocVUs(t *testing.T) {
+	d := loadFile(t, "../../examples/smoke.yaml") // peak 300 rps, SLO 500 ms: 150
+	for _, tc := range []struct {
+		prealloc int
+		scale    float64
+		pre, max int
+	}{
+		{0, 1, 150, 600},
+		{100, 1, 150, 600},   // under peak x SLO: no change
+		{900, 1, 900, 900},   // measured, and max follows
+		{900, 0.5, 450, 450}, // scaled with the load
+	} {
+		p, err := Build(d, Options{RunID: "r", Scale: tc.scale, PreallocVUs: tc.prealloc})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Workload.PreVUs != tc.pre || p.Workload.MaxVUs != tc.max {
+			t.Errorf("prealloc %d at scale %g: %d up front, max %d; want %d, %d", tc.prealloc, tc.scale, p.Workload.PreVUs, p.Workload.MaxVUs, tc.pre, tc.max)
+		}
+	}
+}

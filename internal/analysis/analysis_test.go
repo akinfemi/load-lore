@@ -135,17 +135,23 @@ func TestInconclusiveWhenTheLoadGeneratorDrops(t *testing.T) {
 	if a.Verdict.Kind != VerdictInconclusive || !strings.Contains(a.Verdict.Summary, "load generator dropped") {
 		t.Errorf("verdict %s: %s", a.Verdict.Kind, a.Verdict.Summary)
 	}
-	// Drops in a stall, where requests were failing: the failing responses
-	// held the VUs, so it's a caveat, not a reason to doubt the run.
+	// Drops in a stall, where requests were failing: up to 5% of the
+	// window's arrivals they're a caveat giving the share; above it the
+	// missing load could flatter what absorbed the stall.
 	w = analysistest.Healthy()
 	stall := func(t float64) bool { return t > 50 && t <= 60 }
 	w.Failed = func(t float64) float64 { return 0.3 * boolF(stall(t)) }
-	w.Dropped = func(t float64) float64 { return 0.05 * boolF(stall(t)) }
+	w.Dropped = func(t float64) float64 { return 0.08 * boolF(stall(t)) }
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	if a.Verdict.Kind != VerdictInconclusive || !strings.Contains(a.Verdict.Inconclusive[0], "more than 5.0%, so the missing load could flatter") {
+		t.Errorf("8%% drops in a stall: %s %q", a.Verdict.Kind, a.Verdict.Inconclusive)
+	}
+	w.Dropped = func(t float64) float64 { return 0.03 * boolF(stall(t)) }
 	a = analyze(t, analysistest.WriteRun(t, w, 1))
 	if a.Verdict.Kind != VerdictHeld || !slices.ContainsFunc(a.Verdict.Caveats, func(c string) bool {
-		return strings.Contains(c, "while 30% of requests failed: slow responses held the VUs")
+		return strings.Contains(c, "3.0% of what the profile offered in that window") && strings.Contains(c, "while 30% of requests failed")
 	}) {
-		t.Errorf("drops in a stall: %s %v, caveats %q", a.Verdict.Kind, a.Verdict.Inconclusive, a.Verdict.Caveats)
+		t.Errorf("3%% drops in a stall: %s %v, caveats %q", a.Verdict.Kind, a.Verdict.Inconclusive, a.Verdict.Caveats)
 	}
 
 	w = analysistest.Healthy()

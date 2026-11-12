@@ -239,6 +239,9 @@ type Options struct {
 	Seed           int64
 	SyntheticImage string
 	ReuseData      bool
+	// PreallocVUs, at scale 1, are started before the load, when more
+	// than the peak rate times the SLO: a scenario's measured sizing.
+	PreallocVUs int
 }
 
 // Measured budgets for Loadlore's own containers. Early checks: k6 at 1 CPU
@@ -338,7 +341,7 @@ func Build(d *design.Design, opt Options) (*Plan, error) {
 		}
 	}
 	p.lbs(d, byName)
-	p.workload(d, byName, scale)
+	p.workload(d, byName, scale, opt)
 	if scale < 1 {
 		p.connectionMemory(d)
 	}
@@ -725,7 +728,7 @@ func convertCalls(calls []*design.Call) []synthetic.Call {
 	return out
 }
 
-func (p *Plan) workload(d *design.Design, byName map[string]*Service, scale float64) {
+func (p *Plan) workload(d *design.Design, byName map[string]*Service, scale float64, opt Options) {
 	w := d.Workload
 	entry := byName[w.Entry]
 	pw := Workload{Entry: w.Entry, ReadShare: *w.Mix.Read, PayloadBytes: int(*w.PayloadKB * 1024), Timeout: Dur(time.Duration(*w.TimeoutMs) * time.Millisecond), SLOP99Ms: *w.SLO.P99Ms}
@@ -796,8 +799,15 @@ func (p *Plan) workload(d *design.Design, byName map[string]*Service, scale floa
 	// which during a stall lightens the load just as the system struggles,
 	// so enough to ride out latency up to the SLO at peak are allocated up
 	// front.
-	pw.MaxVUs = int(math.Min(maxVUsCap, math.Max(100, math.Ceil(pw.PeakRate*2))))
-	pw.PreVUs = int(math.Min(float64(pw.MaxVUs), math.Max(20, math.Ceil(pw.PeakRate*pw.SLOP99Ms/1000))))
+	// A scenario's measured sizing raises the VUs up front (see
+	// scenario.LoadMeta); in-flight requests scale with the rate.
+	pre := math.Max(20, math.Ceil(pw.PeakRate*pw.SLOP99Ms/1000))
+	measured := math.Ceil(float64(opt.PreallocVUs) * scale)
+	pw.MaxVUs = int(math.Min(maxVUsCap, math.Max(math.Max(100, math.Ceil(pw.PeakRate*2)), measured)))
+	pw.PreVUs = int(math.Min(float64(pw.MaxVUs), math.Max(pre, measured)))
+	if measured > pre {
+		p.note("load generator: %d VUs started before the load, the scenario's measured prealloc_vus %d at --scale 1, more than %s rps × the SLO's %g ms", pw.PreVUs, opt.PreallocVUs, fmtF(math.Round(pw.PeakRate)), pw.SLOP99Ms)
+	}
 	p.Workload = pw
 }
 

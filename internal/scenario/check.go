@@ -3,6 +3,7 @@ package scenario
 import (
 	"context"
 	"fmt"
+	"math"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -36,20 +37,41 @@ type CheckResult struct {
 	Problem   *RunCheck   `json:"problem,omitempty"`
 	Solutions []*RunCheck `json:"solutions"`
 	Variants  []*RunCheck `json:"variants"`
+	// Load is the load generator sizing these runs measured, against
+	// meta.yaml's load block.
+	Load *LoadCheck `json:"load,omitempty"`
 }
+
+// LoadCheck is the prealloc_vus the check's runs call for: the larger of
+// the peak rate times slo.p99_ms and 1.5 times the most VUs busy at once
+// before the break in any run, at --scale 1.
+type LoadCheck struct {
+	PeakVUs     int       `json:"peak_vus"`
+	From        string    `json:"from"` // the run with that peak
+	PreallocVUs int       `json:"prealloc_vus"`
+	Meta        *LoadMeta `json:"meta,omitempty"` // what meta.yaml says now
+}
+
+// LoadMargin is how far above the most VUs measured busy at once a
+// scenario's prealloc_vus goes.
+const LoadMargin = 1.5
 
 // RunCheck is one design's run and its claims.
 type RunCheck struct {
-	Name         string        `json:"name"` // "problem", or the solution's or variant's name
-	Design       string        `json:"design"`
-	RunDir       string        `json:"run_dir,omitempty"`
-	Error        string        `json:"error,omitempty"`
-	Verdict      string        `json:"verdict,omitempty"`
-	Summary      string        `json:"summary,omitempty"`
-	BreakAt      *float64      `json:"break_at_s,omitempty"`
-	BreakLoad    *float64      `json:"break_offered_rps,omitempty"`
-	BreakSignals []string      `json:"break_signals,omitempty"` // latency, errors, throughput at the break
-	PeakRPS      *float64      `json:"peak_rps,omitempty"`      // most successful responses/s in any window
+	Name         string   `json:"name"` // "problem", or the solution's or variant's name
+	Design       string   `json:"design"`
+	RunDir       string   `json:"run_dir,omitempty"`
+	Error        string   `json:"error,omitempty"`
+	Verdict      string   `json:"verdict,omitempty"`
+	Summary      string   `json:"summary,omitempty"`
+	BreakAt      *float64 `json:"break_at_s,omitempty"`
+	BreakLoad    *float64 `json:"break_offered_rps,omitempty"`
+	BreakSignals []string `json:"break_signals,omitempty"` // latency, errors, throughput at the break
+	PeakRPS      *float64 `json:"peak_rps,omitempty"`      // most successful responses/s in any window
+	// PeakVUs is the most VUs busy at once before the break, at --scale 1;
+	// SLOVUs the peak rate times slo.p99_ms there.
+	PeakVUs      *float64      `json:"peak_vus,omitempty"`
+	SLOVUs       float64       `json:"slo_vus,omitempty"`
 	Diagnoses    []string      `json:"diagnoses"`
 	Claims       []ClaimResult `json:"claims"`
 	OK           bool          `json:"ok"`                     // Status is ok
@@ -137,7 +159,27 @@ func Check(ctx context.Context, s *Scenario, dir string, run RunFunc) *CheckResu
 		res.Status = StatusInconclusive
 	}
 	res.OK = res.Status == StatusOK
+	res.Load = loadCheck(s, res)
 	return res
+}
+
+func loadCheck(s *Scenario, res *CheckResult) *LoadCheck {
+	lc := &LoadCheck{Meta: s.Meta.Load}
+	found := false
+	for _, rc := range append(append([]*RunCheck{res.Problem}, res.Solutions...), res.Variants...) {
+		if rc == nil {
+			continue
+		}
+		lc.PreallocVUs = max(lc.PreallocVUs, int(math.Ceil(rc.SLOVUs)))
+		if rc.PeakVUs != nil && (!found || int(math.Ceil(*rc.PeakVUs)) > lc.PeakVUs) {
+			lc.PeakVUs, lc.From, found = int(math.Ceil(*rc.PeakVUs)), filepath.Base(rc.RunDir), true
+		}
+	}
+	if !found {
+		return nil
+	}
+	lc.PreallocVUs = max(lc.PreallocVUs, int(math.Ceil(LoadMargin*float64(lc.PeakVUs))))
+	return lc
 }
 
 // rerunSlower re-runs the slower of the starting design's run and a
@@ -198,6 +240,13 @@ func runOne(ctx context.Context, run RunFunc, name, designPath string, coolTo in
 		rc.SpeedIndex = h.Speed.Index
 	}
 	rc.PeakRPS = a.Verdict.MaxRPS
+	if scale := a.Scale; scale > 0 {
+		if a.PeakVUs != nil {
+			v := *a.PeakVUs / scale
+			rc.PeakVUs = &v
+		}
+		rc.SLOVUs = a.PeakOffered / scale * a.Verdict.SLOP99Ms / 1000
+	}
 	if b := a.Verdict.Break; b != nil {
 		at, load := b.At, b.Offered
 		rc.BreakAt, rc.BreakLoad = &at, &load

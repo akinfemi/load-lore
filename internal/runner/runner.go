@@ -189,7 +189,12 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 		return nil, err
 	}
 
-	p, err := plan.Build(d, plan.Options{RunID: id, Scale: opt.Scale, Seed: opt.Seed, SyntheticImage: opt.SyntheticImage, ReuseData: opt.ReuseData})
+	sc, inScenario := scenario.ForDesign(opt.DesignPath)
+	popt := plan.Options{RunID: id, Scale: opt.Scale, Seed: opt.Seed, SyntheticImage: opt.SyntheticImage, ReuseData: opt.ReuseData}
+	if inScenario && sc.Meta.Load != nil {
+		popt.PreallocVUs = sc.Meta.Load.PreallocVUs
+	}
+	p, err := plan.Build(d, popt)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +253,7 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 			res.Warnings = append(res.Warnings, fmt.Sprintf("--scale %s fits this host's %d CPUs", fmtF(s), pf.Host.CPUs))
 		}
 	}
-	if sc, ok := scenario.ForDesign(opt.DesignPath); ok {
+	if inScenario {
 		res.Warnings = append(res.Warnings, scenarioHostWarnings(sc, p.Scale, pf.Host)...)
 	}
 	for _, w := range res.Warnings {

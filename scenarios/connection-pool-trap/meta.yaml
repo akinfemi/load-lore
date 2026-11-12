@@ -12,6 +12,15 @@ host:
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
   speed: 1000
 
+# Load generator VUs started before the load, at --scale 1: the peak rate x
+# slo.p99_ms (1,400 x 0.5 s), more than 1.5 x the most busy at once before a
+# break in the check's runs (178, the starting design). k6 peaked at 940 MB
+# in the starting design's run, after its break.
+load:
+  prealloc_vus: 700
+  peak_vus: 178
+  from: connection-pool-trap-20261111-120625
+
 # What `loadl scenario check` verifies, at --scale 1.
 check:
   problem:
