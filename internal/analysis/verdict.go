@@ -76,6 +76,10 @@ type Verdict struct {
 	WorstP99     *float64 `json:"worst_p99_ms,omitempty"`
 	WorstErrors  *float64 `json:"worst_error_rate,omitempty"`
 	Moment       int      `json:"moment_window"` // the window the annotated diagram shows
+	// RecoveryDoubt is why a run that broke and didn't recover may have
+	// stayed down partly because of the lab: Toxiproxy stalled after the
+	// break. Claims that it doesn't recover can't rest on such a run.
+	RecoveryDoubt string `json:"recovery_doubt,omitempty"`
 }
 
 // Break is the first sustained sign the system couldn't keep up.
@@ -140,6 +144,11 @@ func verdict(a *Analysis) Verdict {
 	var short []*Window
 	v.Inconclusive, v.Caveats, short = inconclusive(ws, breakAt)
 	v.Cause = shortCause(a.Environment.Host, short)
+	stallsBefore, stallsAfter := splitStalls(a, breakAt)
+	if breakAt >= 0 && len(stallsBefore) > 0 {
+		v.Inconclusive = append(v.Inconclusive, stallText(stallsBefore)+
+			", by the end of the break's first window: a connection queue on one edge that a real network doesn't have, which may have made the break")
+	}
 	if a.Cutoff != "" && breakAt < 0 {
 		v.Inconclusive = append([]string{"before the system broke, " + a.Cutoff}, v.Inconclusive...)
 	}
@@ -163,6 +172,15 @@ func verdict(a *Analysis) Verdict {
 		case a.StoppedEarly == nil:
 			v.Summary += " It hadn't recovered when the load ended."
 		}
+	}
+	switch {
+	case breakAt < 0 && len(stallsBefore) > 0:
+		v.Caveats = append(v.Caveats, stallText(stallsBefore)+"; it held anyway, and the stall only made things harder")
+	case len(stallsAfter) > 0 && v.RecoveredAt != nil:
+		v.Caveats = append(v.Caveats, stallText(stallsAfter)+", after the break; it recovered anyway")
+	case len(stallsAfter) > 0:
+		v.RecoveryDoubt = stallText(stallsAfter) + ", after the break: a connection queue on one edge that a real network doesn't have, so the failure after the break may be deeper and longer than the system's own"
+		v.Caveats = append(v.Caveats, v.RecoveryDoubt)
 	}
 	if a.Cutoff != "" && breakAt >= 0 {
 		v.Summary += " After that, " + a.Cutoff + "."
@@ -798,6 +816,28 @@ func recoveredAt(ws []*Window, hard, sig [][]string, breakAt int) *float64 {
 	}
 	at := ws[from].Start
 	return &at
+}
+
+// splitStalls divides the analyzed windows' accept stalls at the end of
+// the break's first window (all are before when nothing broke). A stall
+// only adds failure, so one after the break began deepens a failure
+// already under way.
+func splitStalls(a *Analysis, breakAt int) (before, after []AcceptStall) {
+	end := float64(len(a.Windows) * WindowSeconds)
+	cut := end
+	if breakAt >= 0 {
+		cut = a.Windows[breakAt].Start + WindowSeconds
+	}
+	for _, s := range a.AcceptStalls {
+		switch {
+		case s.At < 0 || s.At >= end:
+		case s.At < cut:
+			before = append(before, s)
+		default:
+			after = append(after, s)
+		}
+	}
+	return before, after
 }
 
 // SuspendSlack is how much longer than its profile the load may take on

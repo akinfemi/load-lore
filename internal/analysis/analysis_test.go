@@ -1229,3 +1229,100 @@ func TestColdCacheQuietCases(t *testing.T) {
 		t.Error("fired on misses still under 5% of lookups")
 	}
 }
+
+// proxyLog writes a Toxiproxy log into a run folder with steady accepts on
+// one edge at rate a second, a gap at each stall, and the connections that
+// queued in it accepted back to back after.
+func proxyLog(t *testing.T, dir string, t0 time.Time, rate float64, stalls ...float64) {
+	t.Helper()
+	var b strings.Builder
+	line := func(at float64) {
+		ts := t0.Add(time.Duration(at * float64(time.Second))).UTC().Format(time.RFC3339Nano)
+		b.WriteString(ts + ` {"level":"info","name":"api--pricing-0","client":"172.18.0.6:45032","message":"Accepted client"}` + "\n")
+	}
+	for at := 1.0; at < 100; at += 1 / rate {
+		in := false
+		for _, s := range stalls {
+			if at >= s && at < s+1.5 {
+				in = true
+			}
+		}
+		if in {
+			continue
+		}
+		line(at)
+		for _, s := range stalls {
+			if at >= s+1.5 && at < s+1.5+1/rate { // the queue drains
+				for j := range 40 {
+					line(at + float64(j)*0.0002)
+				}
+			}
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "logs", "loadlore-x-lore-toxiproxy-1.log"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Toxiproxy holding up an edge's new connections: before the break it
+// makes the run inconclusive, after a break the system didn't recover
+// from it puts the recovery in doubt, and in a run that held it's a
+// caveat.
+func TestAcceptStalls(t *testing.T) {
+	broken := analysistest.Healthy()
+	broken.Failed = func(t float64) float64 { return 0.3 * boolF(t > 40) }
+	dir := analysistest.WriteRun(t, broken, 1)
+	t0 := *analyze(t, dir).Started
+
+	proxyLog(t, dir, t0, 50, 44)
+	a := analyze(t, dir)
+	if len(a.AcceptStalls) != 1 || a.AcceptStalls[0].Edge != "api--pricing-0" || math.Abs(a.AcceptStalls[0].Seconds-1.5) > 0.05 || a.AcceptStalls[0].Queued < 10 {
+		t.Fatalf("stalls %+v", a.AcceptStalls)
+	}
+	if a.Verdict.Kind != VerdictInconclusive || !strings.Contains(a.Verdict.Summary, "Toxiproxy accepted no new connections on api → pricing-0 for 1.5 s") {
+		t.Errorf("stall in the break's window: %s %q", a.Verdict.Kind, a.Verdict.Summary)
+	}
+
+	proxyLog(t, dir, t0, 50, 64, 80)
+	a = analyze(t, dir)
+	if a.Verdict.Kind != VerdictBroke || !strings.Contains(a.Verdict.RecoveryDoubt, "at 1:04") || !strings.Contains(a.Verdict.RecoveryDoubt, "stalled 1 more time") {
+		t.Errorf("stall after the break: %s %q", a.Verdict.Kind, a.Verdict.RecoveryDoubt)
+	}
+
+	dir = analysistest.WriteRun(t, analysistest.Healthy(), 1)
+	proxyLog(t, dir, t0, 50, 30)
+	a = analyze(t, dir)
+	if a.Verdict.Kind != VerdictHeld || len(a.Verdict.Caveats) != 1 || !strings.Contains(a.Verdict.Caveats[0], "it held anyway") {
+		t.Errorf("held: %s %q", a.Verdict.Kind, a.Verdict.Caveats)
+	}
+}
+
+// Gaps that aren't a queue draining aren't stalls: a quiet edge, and a
+// caller that paused and then opened connections a millisecond apart.
+func TestStallsOnQuietCases(t *testing.T) {
+	var quiet, paused []float64
+	for at := 0.0; at < 60; at += 0.5 { // 2 a second
+		quiet = append(quiet, at)
+	}
+	for at := 0.0; at < 60; at += 0.02 { // 50 a second
+		if at >= 30 && at < 31.5 {
+			continue
+		}
+		paused = append(paused, at)
+		if at >= 31.5 && at < 31.52 {
+			for j := range 40 {
+				paused = append(paused, at+float64(j)*0.0015)
+			}
+		}
+	}
+	slices.Sort(paused)
+	if s := stallsOn("e", quiet); len(s) != 0 {
+		t.Errorf("quiet edge: %+v", s)
+	}
+	if s := stallsOn("e", paused); len(s) != 0 {
+		t.Errorf("paused caller: %+v", s)
+	}
+}

@@ -22,7 +22,8 @@ type RunFunc func(ctx context.Context, designPath string, coolTo int) (runDir st
 // Check statuses. A check is inconclusive when no claim failed but a
 // solution's run and the starting design's were still more than
 // bench.Tolerance apart in host speed index after a re-run: the host's
-// speed, not the design, could explain the difference.
+// speed, not the design, could explain the difference. Or when a claim
+// rests on a run not recovering and Toxiproxy stalled after its break.
 const (
 	StatusOK           = "ok"
 	StatusFailed       = "failed"
@@ -95,6 +96,9 @@ type RunCheck struct {
 	SLOVUs  float64  `json:"slo_vus,omitempty"`
 	// RecoveredAt is when it was healthy again after its break, for good.
 	RecoveredAt *float64 `json:"recovered_at_s,omitempty"`
+	// RecoveryDoubt is why not recovering may be partly the lab's doing:
+	// Toxiproxy stalled after the break (analysis.Verdict.RecoveryDoubt).
+	RecoveryDoubt string `json:"recovery_doubt,omitempty"`
 	// PeakVUsAll is the most VUs busy at once in the whole run, at --scale 1.
 	PeakVUsAll   *float64      `json:"peak_vus_all,omitempty"`
 	Diagnoses    []string      `json:"diagnoses"`
@@ -283,6 +287,7 @@ func runOne(ctx context.Context, run RunFunc, name, designPath string, coolTo in
 		rc.SLOVUs = a.PeakOffered / scale * a.Verdict.SLOP99Ms / 1000
 	}
 	rc.RecoveredAt = a.Verdict.RecoveredAt
+	rc.RecoveryDoubt = a.Verdict.RecoveryDoubt
 	if b := a.Verdict.Break; b != nil {
 		at, load := b.At, b.Offered
 		rc.BreakAt, rc.BreakLoad = &at, &load
@@ -348,6 +353,12 @@ func (rc *RunCheck) recoveryClaim(c Claim) {
 	if !*c.Recovers {
 		name = "doesn't recover"
 	}
+	if !rc.recovered() && rc.RecoveryDoubt != "" {
+		if rc.Inconclusive == "" {
+			rc.Inconclusive = "whether it recovers can't be judged: " + rc.RecoveryDoubt
+		}
+		return
+	}
 	rc.claim(name, rc.recovered() == *c.Recovers, detail)
 }
 
@@ -383,6 +394,10 @@ func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck) {
 		rc.claim("helps", false, "the starting design didn't break in its own run, so there's nothing to improve on")
 	case held:
 		rc.claim("helps", true, fmt.Sprintf("held through the profile; the starting design broke at %s rps offered", analysis.Rate(*problem.BreakLoad)))
+	case c.Recovers != nil && *c.Recovers && rc.RecoveredAt != nil && rc.BreakAt != nil && !problem.recovered() && problem.RecoveryDoubt != "":
+		if rc.Inconclusive == "" {
+			rc.Inconclusive = "it recovered, but the starting design's not recovering can't be compared with: " + problem.RecoveryDoubt
+		}
 	case c.Recovers != nil && *c.Recovers && rc.RecoveredAt != nil && rc.BreakAt != nil && !problem.recovered():
 		rc.claim("helps (recovers where the starting design didn't)", true, fmt.Sprintf("recovered at %s, %s after its break; the starting design hadn't recovered when the load ended", analysis.Clock(*rc.RecoveredAt), analysis.Clock(*rc.RecoveredAt-*rc.BreakAt)))
 	case rc.PeakRPS == nil:

@@ -64,6 +64,9 @@ type Analysis struct {
 	// StoppedEarly is set when the run stopped the load after a break
 	// instead of finishing the profile.
 	StoppedEarly *EarlyStop `json:"stopped_early,omitempty"`
+	// AcceptStalls are where Toxiproxy held up new connections on an
+	// edge (see accepts.go), over the whole load.
+	AcceptStalls []AcceptStall `json:"accept_stalls,omitempty"`
 
 	Verdict     Verdict        `json:"verdict"`
 	Diagnoses   []*Diagnosis   `json:"diagnoses"`
@@ -336,6 +339,9 @@ func Analyze(dir string) (*Analysis, error) {
 		a.Analyzed = int(at / WindowSeconds)
 		a.Cutoff = fmt.Sprintf("%s at %s, which broke the run's tooling, so windows from %s on aren't analyzed", what, Clock(at), Clock(float64(a.Analyzed*WindowSeconds)))
 		a.Warnings = append(a.Warnings, "Analysis stops at "+Clock(float64(a.Analyzed*WindowSeconds))+": "+a.Cutoff+".")
+	}
+	if a.AcceptStalls, err = acceptStalls(dir, t0); err != nil {
+		a.Warnings = append(a.Warnings, "Toxiproxy's log: "+err.Error())
 	}
 	all := a.Windows
 	a.Windows = all[:a.Analyzed]

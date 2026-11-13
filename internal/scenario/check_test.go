@@ -339,3 +339,36 @@ func TestCheckProblemSignals(t *testing.T) {
 		t.Errorf("variant: %+v", v)
 	}
 }
+
+// A claim that rests on a run not recovering can't be judged when
+// Toxiproxy stalled after that run's break; one that recovered stands.
+func TestRecoveryDoubt(t *testing.T) {
+	yes, no := true, false
+	at, rec := 60.0, 120.0
+	doubt := "at 1:30 Toxiproxy accepted no new connections on api → db for 1.0 s"
+	down := func() *RunCheck {
+		return &RunCheck{Verdict: string(analysis.VerdictBroke), BreakAt: &at, RecoveryDoubt: doubt}
+	}
+
+	rc := down()
+	ownClaims(rc, Claim{Verdict: "broke", Recovers: &no})
+	if rc.Status != StatusInconclusive || !strings.Contains(rc.Inconclusive, "whether it recovers can't be judged: "+doubt) {
+		t.Errorf("doesn't recover: %s %q %+v", rc.Status, rc.Inconclusive, rc.Claims)
+	}
+
+	rc = down()
+	rc.RecoveredAt = &rec
+	ownClaims(rc, Claim{Verdict: "broke", Recovers: &yes})
+	if rc.Status != StatusOK {
+		t.Errorf("recovered anyway: %s %q %+v", rc.Status, rc.Inconclusive, rc.Claims)
+	}
+
+	load, rps := 100.0, 90.0
+	problem := down()
+	problem.BreakLoad, problem.PeakRPS = &load, &rps
+	sol := &RunCheck{Verdict: string(analysis.VerdictBroke), BreakAt: &at, RecoveredAt: &rec, PeakRPS: &rps}
+	solutionClaims(sol, Claim{Verdict: "broke", Recovers: &yes}, problem)
+	if sol.Status != StatusInconclusive || !strings.Contains(sol.Inconclusive, "the starting design's not recovering can't be compared with") {
+		t.Errorf("helps by recovering: %s %q %+v", sol.Status, sol.Inconclusive, sol.Claims)
+	}
+}
