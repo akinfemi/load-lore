@@ -4,10 +4,10 @@ Loadlore is an open-source, terminal-first lab for system design. You describe a
 
 The CLI is `loadl`.
 
-> **Status:** early development, pre-MVP. You can validate a design, run it on local Docker (Linux, or macOS with Colima) with a live dashboard, read its report and work through seven scenarios: [When do you need to scale your database?](scenarios/when-to-scale-your-database/), [The connection pool trap](scenarios/connection-pool-trap/), [The slow dependency](scenarios/slow-dependency/), [The cache restart](scenarios/cache-restart/), [The flaky network](scenarios/flaky-network/), [Healthy but broken](scenarios/healthy-but-broken/) and [The slow disk](scenarios/slow-disk/). All seven diagnosis rules are built: pool exhausted, queueing knee, connection storm, retry storm, cold cache, working set doesn't fit, and hot rows. Not built yet: `run --quick`, and releases (build from source for now). Docker Desktop and WSL2 aren't verified. The spec's "Build status" section has the details.
+> **Status:** early development, pre-MVP. You can validate a design, run it on local Docker (Linux, or macOS with Colima) with a live dashboard, read its report and work through seven scenarios: [When do you need to scale your database?](scenarios/when-to-scale-your-database/), [The connection pool trap](scenarios/connection-pool-trap/), [The slow dependency](scenarios/slow-dependency/), [The cache restart](scenarios/cache-restart/), [The flaky network](scenarios/flaky-network/), [Healthy but broken](scenarios/healthy-but-broken/) and [The slow disk](scenarios/slow-disk/). All seven diagnosis rules are built: pool exhausted, queueing knee, connection storm, retry storm, cold cache, working set doesn't fit, and hot rows. Not built yet: `run --quick`, restarting only the services a design change touched, and releases (build from source for now). Docker Desktop and WSL2 aren't verified. The spec's "Build status" section has the details.
 
 - **Spec:** [Loadlore — Product Spec](https://claude.ai/artifact/TEkM1GHG5mpmKXTcH3jJ6m) is the source of truth for scope and behavior.
-- **AI skill:** [`skills/loadlore-designer/`](skills/loadlore-designer/) turns plain-language descriptions into validated design files.
+- **AI skill:** [`skills/loadlore-designer/`](skills/loadlore-designer/) turns plain-language descriptions into validated design files. Its eval set ([`evals/`](skills/loadlore-designer/evals/)) runs with `go run ./cmd/skilleval`, and in CI on changes to the skill once an `ANTHROPIC_API_KEY` secret is set; it makes paid model calls.
 - **Using it on your own:** [`docs/how-to.md`](docs/how-to.md) walks through setup, a scenario, writing your own design, and reading the report, with `loadl` alone.
 
 ## Commands so far
@@ -47,6 +47,8 @@ A run stops its load 60 s after it sees the design break, by the same rule as th
 Each run starts from a fresh copy of the seeded dataset. `--reuse-data` skips the copy for quick iteration; the report then says which earlier runs wrote to the data.
 
 On macOS, `loadl run` keeps the Mac from idle-sleeping while it runs (`caffeinate`). It can't stop the sleep a closed lid causes, so keep the lid open for unattended runs. A run whose load took far longer on the wall clock than its profile, as when the host slept, is reported as inconclusive.
+
+A run is also inconclusive when Loadlore's own tooling may have set the limit rather than the design: before the break, the load generator dropped arrivals (more than 1%, or more than 5% where the system was already failing requests), the load generator or Toxiproxy ran short of CPU, or Toxiproxy held up new connections on an edge. Toxiproxy opens each upstream connection in turn, so one slow handshake stalls the rest; the analysis finds this in its log. The report says which, and what it looks like taken at face value.
 
 Results vary from run to run, and a laptop slows as it heats up. `loadl run --repeat 3` runs a design three times with the same seed and writes the spread of break time, peak served and p99 at the break to `.loadlore/series/<id>/series.md`. Runs after the first wait until the host speed index is back within 5% of the first run's. `loadl compare` says when a difference is within a series' spread, and flags runs whose speed index differs by more than 10%.
 
