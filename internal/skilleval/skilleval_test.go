@@ -179,3 +179,35 @@ func TestDecodeJudge(t *testing.T) {
 		t.Error("no answer accepted")
 	}
 }
+
+// Tool calls Claude Code refused are reported, so a missing permission
+// shows up rather than reading as the agent's choice.
+func TestDenied(t *testing.T) {
+	raw := []byte(`{"type":"result","result":"r","permission_denials":[{"tool_name":"Bash","tool_use_id":"x","tool_input":{"command":"loadl doctor --json"}}]}` + "\n")
+	if got := parseTranscript(raw).Denied; len(got) != 1 || got[0] != "Bash loadl doctor --json" {
+		t.Errorf("denied %q", got)
+	}
+}
+
+// The scenario judged is the one the agent wrote, not one it copied in to
+// read (with loadl init), which may sort first.
+func TestScenarioRootPrefersWritten(t *testing.T) {
+	dir := t.TempDir()
+	for _, d := range []string{"a-copied", "b-written"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, d, "meta.yaml"), []byte("title: x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := scenarioRoot(dir, []string{filepath.Join(dir, "b-written", "meta.yaml")}); got != filepath.Join(dir, "b-written") {
+		t.Errorf("written: %s", got)
+	}
+	if got := scenarioRoot(dir, []string{"b-written/meta.yaml"}); got != filepath.Join(dir, "b-written") {
+		t.Errorf("relative: %s", got)
+	}
+	if got := scenarioRoot(dir, nil); got != filepath.Join(dir, "a-copied") {
+		t.Errorf("none written: %s", got)
+	}
+}

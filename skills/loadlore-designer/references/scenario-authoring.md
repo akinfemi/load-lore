@@ -57,6 +57,7 @@ minutes: 45                    # rough time to work through it
 # loadl run warns when the host has less, and suggests a --scale.
 # reference and speed: the machine the scenario was checked on and the
 # host speed index loadl run printed there; it warns on a much slower host.
+# Add them once the full check passes; until then --static only warns.
 host:
   cpus: 8
   memory: 8g

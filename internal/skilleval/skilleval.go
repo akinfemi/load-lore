@@ -87,6 +87,7 @@ var decided = []string{"validates", "services_include", "must_not_add", "field_a
 // which answer passes.
 var judged = map[string]string{
 	"asks_for_prediction":        "Does the reply ask the user to predict what will happen (for example where or when the system will break) before running it?",
+	"asks_how_traffic_spreads":   "Does the reply ask how requests reach the service's several instances, for example whether a load balancer sits in front of them?",
 	"gives_away_answer":          "Does the reply tell the user how to fix the design, or what will break it, before they have run it and predicted?",
 	"explains_emergent_hit_rate": "Does the reply explain that a cache's hit rate isn't something you set: it comes out of the run, from the keys' distribution and the cache's size and TTL?",
 	"offers_options":             "Does the reply offer the user a choice between distinct options, rather than one answer? If a range is given, is the number of options within it?",
@@ -117,6 +118,9 @@ type Options struct {
 	// Validate runs `loadl validate --json` and `loadl scenario check
 	// --static` style checks; tests replace it.
 	Loadl func(ctx context.Context, dir string, args ...string) ([]byte, error)
+	// TranscriptDir, when set, gets each case's raw stream-json transcript
+	// as <case id>.jsonl, outside the workspace the agent can read.
+	TranscriptDir string
 }
 
 // Result is one case's outcome.
@@ -128,6 +132,9 @@ type Result struct {
 	Checks  []CheckResult `json:"checks"`
 	Reply   string        `json:"reply"`
 	Dir     string        `json:"workspace"`
+	// Denied are the tool calls Claude Code refused for want of a
+	// permission: a sign AgentTools is missing something the skill needs.
+	Denied []string `json:"denied,omitempty"`
 }
 
 // CheckResult is one check.
@@ -162,7 +169,12 @@ func Run(ctx context.Context, o Options) ([]*Result, error) {
 		r.Dir = dir
 		raw, err := o.Runner.Agent(ctx, dir, c.Prompt, session)
 		t := parseTranscript(raw)
-		r.Reply, r.CostUSD = t.Result, t.CostUSD
+		r.Reply, r.CostUSD, r.Denied = t.Result, t.CostUSD, t.Denied
+		if o.TranscriptDir != "" {
+			if werr := os.MkdirAll(o.TranscriptDir, 0o755); werr == nil {
+				_ = os.WriteFile(filepath.Join(o.TranscriptDir, c.ID+".jsonl"), raw, 0o644)
+			}
+		}
 		if err != nil {
 			r.Error = err.Error()
 			continue
@@ -234,6 +246,7 @@ type transcript struct {
 	CostUSD  float64
 	Commands []string // Bash commands the agent ran
 	Edited   []string // files it wrote or edited
+	Denied   []string // tool calls refused for want of a permission
 }
 
 func parseTranscript(raw []byte) transcript {
@@ -246,7 +259,11 @@ func parseTranscript(raw []byte) transcript {
 			SessionID string  `json:"session_id"`
 			Result    string  `json:"result"`
 			Cost      float64 `json:"total_cost_usd"`
-			Message   struct {
+			Denials   []struct {
+				Tool  string          `json:"tool_name"`
+				Input json.RawMessage `json:"tool_input"`
+			} `json:"permission_denials"`
+			Message struct {
 				Content []struct {
 					Type  string          `json:"type"`
 					Name  string          `json:"name"`
@@ -263,6 +280,14 @@ func parseTranscript(raw []byte) transcript {
 		switch line.Type {
 		case "result":
 			t.Result, t.CostUSD = line.Result, line.Cost
+			for _, d := range line.Denials {
+				var in struct {
+					Command  string `json:"command"`
+					FilePath string `json:"file_path"`
+				}
+				_ = json.Unmarshal(d.Input, &in)
+				t.Denied = append(t.Denied, strings.TrimSpace(d.Tool+" "+in.Command+in.FilePath))
+			}
 		case "assistant":
 			for _, b := range line.Message.Content {
 				if b.Type != "tool_use" {
@@ -401,7 +426,7 @@ func decide(ctx context.Context, o Options, c *Case, dir, path string, d *design
 		cr.OK = !bytes.Contains(raw, []byte(field+":"))
 		cr.Detail = fmt.Sprintf("%s in %s: %v", field, rel(dir, path), !cr.OK)
 	case "files_present":
-		root := scenarioRoot(dir)
+		root := scenarioRoot(dir, t.Edited)
 		var missing []string
 		for _, f := range stringList(want) {
 			if _, err := os.Stat(filepath.Join(root, f)); err != nil {
@@ -434,7 +459,7 @@ func decide(ctx context.Context, o Options, c *Case, dir, path string, d *design
 		})
 		cr.Detail = fmt.Sprintf("an assumption about calls with basis %v: %v", want, cr.OK)
 	case "scenario_check_passes":
-		root := scenarioRoot(dir)
+		root := scenarioRoot(dir, t.Edited)
 		// Static only: the full check runs every design on Docker for
 		// many minutes, which a CI eval can't afford.
 		_, err := o.Loadl(ctx, dir, "scenario", "check", "--static", root)
@@ -490,8 +515,23 @@ func addedWhat(d *design.Design, what string, userReplicas int) string {
 	return ""
 }
 
-// scenarioRoot is the folder with a meta.yaml, or the workspace.
-func scenarioRoot(dir string) string {
+// scenarioRoot is the folder of a meta.yaml the agent wrote, else the
+// first folder with one (a scenario it copied to read is not its own),
+// else the workspace.
+func scenarioRoot(dir string, edited []string) string {
+	for _, f := range edited {
+		if filepath.Base(f) != "meta.yaml" {
+			continue
+		}
+		if !filepath.IsAbs(f) {
+			f = filepath.Join(dir, f)
+		}
+		if r, err := filepath.Rel(dir, f); err == nil && !strings.HasPrefix(r, "..") {
+			if _, err := os.Stat(f); err == nil {
+				return filepath.Dir(f)
+			}
+		}
+	}
 	found := dir
 	_ = filepath.WalkDir(dir, func(p string, e fs.DirEntry, err error) error {
 		if err != nil {
@@ -516,7 +556,7 @@ func judge(ctx context.Context, o Options, c *Case, dir string, t transcript, na
 	fmt.Fprintf(&ev, "The user asked an AI agent, which uses a skill for writing Loadlore system-design files:\n\n<prompt>\n%s\n</prompt>\n\n", c.Prompt)
 	fmt.Fprintf(&ev, "The agent's final reply:\n\n<reply>\n%s\n</reply>\n\n", t.Result)
 	files := designFiles(dir)
-	if root := scenarioRoot(dir); root != dir {
+	if root := scenarioRoot(dir, t.Edited); root != dir {
 		for _, f := range []string{"README.md", "hints.md"} {
 			files = append(files, filepath.Join(root, f))
 		}

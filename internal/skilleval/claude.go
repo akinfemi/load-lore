@@ -15,7 +15,8 @@ import (
 var AgentTools = []string{
 	"Read", "Write", "Edit", "Glob", "Grep",
 	"Bash(loadl validate *)", "Bash(loadl diagram *)", "Bash(loadl schema *)", "Bash(loadl scenarios *)",
-	"Bash(loadl scenario check --static *)", "Bash(loadl predict *)", "Bash(loadl hint *)", "Bash(ls *)", "Bash(cat *)",
+	"Bash(loadl scenario check --static *)", "Bash(loadl predict *)", "Bash(loadl hint *)", "Bash(loadl init *)",
+	"Bash(loadl --help)", "Bash(loadl help *)", "Bash(ls *)", "Bash(cat *)",
 }
 
 // Claude runs Claude Code from PATH.
@@ -92,6 +93,9 @@ func Markdown(rs []*Result) string {
 		fmt.Fprintf(&b, "## %s: %s\n\n", r.ID, mark)
 		if r.Error != "" {
 			fmt.Fprintf(&b, "Error: %s\n\n", r.Error)
+		}
+		if len(r.Denied) > 0 {
+			fmt.Fprintf(&b, "Denied tool calls: %s\n\n", strings.Join(r.Denied, "; "))
 		}
 		for _, c := range r.Checks {
 			m := "ok  "

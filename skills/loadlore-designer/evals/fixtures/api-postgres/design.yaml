@@ -1,0 +1,22 @@
+version: 1
+name: api-postgres
+services:
+  lb: { kind: lb, target: api }
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    behavior:
+      cpu_ms: 2
+      calls:
+        - { target: db, op: read }
+  db:
+    kind: postgres
+    dataset: { rows: 100000 }
+workload:
+  entry: lb
+  profile:
+    - { ramp: { from: 50, to: 500, over: 2m } }
+assumptions:
+  - { field: services.api.behavior.cpu_ms, basis: guessed, why: a small JSON handler }
+  - { field: services.api.behavior.calls, basis: guessed, why: one read per request }
+  - { field: workload.profile, basis: guessed, why: ramp until it breaks }

@@ -37,6 +37,9 @@ func TestLibraryLints(t *testing.T) {
 				}
 			}
 		}
+		if s.Meta.Host.Reference == "" || s.Meta.Host.Speed <= 0 {
+			t.Errorf("%s: meta.yaml has no host.reference and host.speed", s.Name)
+		}
 		if len(s.Hints) < 3 {
 			t.Errorf("%s: %d hints", s.Name, len(s.Hints))
 		}

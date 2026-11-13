@@ -45,7 +45,7 @@ func main() {
 	rs, err := skilleval.Run(context.Background(), skilleval.Options{
 		SetPath: setPath, SkillDir: skillDir, WorkRoot: work, Only: ids,
 		Runner: skilleval.Claude{AgentModel: *agentModel, JudgeModel: *judgeModel, AgentUSD: *agentUSD, JudgeUSD: *judgeUSD},
-		Loadl:  skilleval.LoadlOnPath,
+		Loadl:  skilleval.LoadlOnPath, TranscriptDir: filepath.Join(*out, "transcripts"),
 	})
 	if err != nil {
 		fail(err)

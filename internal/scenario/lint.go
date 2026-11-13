@@ -60,7 +60,9 @@ func (s *Scenario) Lint() []Problem {
 		bad(MetaFile, "host.cpus and host.memory are required: what Docker needs available at --scale 1, Loadlore's own containers included")
 	}
 	if m.Host.Reference == "" || m.Host.Speed <= 0 {
-		bad(MetaFile, "host.reference and host.speed are required: the machine the scenario was checked on and its host speed index, as loadl run prints it")
+		// They come from the full check's runs, like the reference
+		// reports, so a draft without them is only warned.
+		warn(MetaFile, "no host.reference and host.speed yet: after the full loadl scenario check passes, add the machine it ran on and its host speed index, as loadl run prints it")
 	}
 	for i, q := range m.Predict {
 		if p := q.Problem(); p != "" {

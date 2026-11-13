@@ -7,8 +7,15 @@
 # user_replicas: how many replicas the prompt asked for (replicas_beyond_user).
 
 cases:
-  - id: basic-api-postgres
+  # Several replicas without saying how traffic reaches them: the skill
+  # asks before writing a design.
+  - id: replicas-ask-spread
     prompt: "I have a REST API with 2 instances in front of one Postgres. Mostly reads. I want to see when it falls over."
+    checks:
+      asks_how_traffic_spreads: true
+
+  - id: basic-api-postgres
+    prompt: "I have a REST API with 2 instances behind a load balancer, in front of one Postgres. Mostly reads, peaking at about 300 requests a second. I want to see when it falls over."
     user_replicas: 2
     checks:
       validates: true
@@ -27,6 +34,7 @@ cases:
 
   - id: hit-rate-request
     prompt: "Add a Redis cache with a 90% hit rate."
+    fixture: fixtures/api-postgres/
     checks:
       validates: true
       field_absent: hit_rate
@@ -56,7 +64,9 @@ cases:
       asks_for_budget: true
 
   - id: scenario-no-spoilers
-    prompt: "Write a scenario about a cache restart causing a thundering herd."
+    # A topic the library doesn't cover yet, so the agent writes rather
+    # than points at an existing scenario.
+    prompt: "Write a scenario about hot rows: many requests updating the same few rows in Postgres."
     checks:
       files_present: [README.md, design.yaml, hints.md, meta.yaml, solutions/]
       readme_contains_answer: false
