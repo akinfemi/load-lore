@@ -25,7 +25,7 @@ The load starts gently, at 10 requests a second, so the cache fills while traffi
 
 ## The question
 
-Before you run anything, write down your answers:
+Before you run anything, write down your guesses. Don't work them out: a gut answer is fine, and where the run differs from it is what you'll learn from.
 
 1. What do users see in the seconds after Redis comes back, and how long until the errors stop?
 2. How many times does the database run the review summary for the most popular product in the first second after the restart?

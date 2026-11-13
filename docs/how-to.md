@@ -51,7 +51,7 @@ The loop for each one:
 
 1. **Read the scenario's README.** It tells the story, draws the system, and asks the questions.
 
-2. **Predict.** Write down what you think will happen before you run it. That's most of what you learn from it.
+2. **Predict.** Write down what you think will happen before you run it. That's most of what you learn from it. Guess; don't calculate. A gut answer is fine, and a miss isn't a failure: where the run differs from your guess is the lesson. Loads depend on your machine, so slower cores break the same design at a lower load.
 
    ```sh
    loadl predict scenarios/connection-pool-trap/design.yaml

@@ -296,3 +296,18 @@ func TestSeriesSummary(t *testing.T) {
 		}
 	}
 }
+
+// The note under the predictions: a broken one is framed as the lesson,
+// and a load prediction gets the machine caveat. Held lines about other
+// metrics need neither.
+func TestPredictionNote(t *testing.T) {
+	held := analysis.ExpectResult{Text: "error_rate < 1%", Status: analysis.ExpectHeld, Metric: "error_rate"}
+	if n := predictionNote([]analysis.ExpectResult{held, {Note: "db gives out first", Status: analysis.ExpectNote}}); n != "" {
+		t.Errorf("held, no load: %q", n)
+	}
+	load := analysis.ExpectResult{Text: "break_load_rps within 25% of 900", Status: analysis.ExpectBroken, Metric: "break_load_rps"}
+	n := predictionNote([]analysis.ExpectResult{held, load})
+	if !strings.Contains(n, "isn't a wrong answer") || !strings.Contains(n, "depend on this machine") {
+		t.Errorf("broken load: %q", n)
+	}
+}

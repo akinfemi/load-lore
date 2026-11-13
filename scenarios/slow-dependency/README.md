@@ -23,7 +23,7 @@ The load ramps to 150 requests a second over a minute and holds there. At 2:01, 
 
 ## The question
 
-Before you run anything, write down your answers:
+Before you run anything, write down your guesses. Don't work them out: a gut answer is fine, and where the run differs from it is what you'll learn from.
 
 1. What do users see during the two seconds pricing is stopped?
 2. How long after it starts again do the errors stop?

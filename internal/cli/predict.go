@@ -44,7 +44,8 @@ scores the lines after loadl run.
 In a terminal, it asks each question in turn. --answer N=value answers
 question N without asking, for scripts and AI agents; --json with no
 answers lists the questions. Loads are requests per second (1000, 1.5k)
-or never; a component is one of the design's services.`,
+or never; a component is one of the design's services. The answers are
+guesses, not calculations: the report compares them with the run.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := args[0]
@@ -91,6 +92,7 @@ or never; a component is one of the design's services.`,
 			in := bufio.NewReader(cmd.InOrStdin())
 			lines := make([]string, len(res.Questions))
 			var missing []string
+			introduced := false
 			for i, q := range res.Questions {
 				a, ok := given[q.N]
 				if ok {
@@ -104,6 +106,10 @@ or never; a component is one of the design's services.`,
 				if !interactive {
 					missing = append(missing, strconv.Itoa(q.N))
 					continue
+				}
+				if !introduced {
+					fmt.Fprintln(out, guessIntro)
+					introduced = true
 				}
 				if lines[i], err = ask(out, in, q, services); err != nil {
 					return err
@@ -134,6 +140,13 @@ or never; a component is one of the design's services.`,
 	cmd.Flags().StringArrayVar(&answers, "answer", nil, "answer question N without asking, as N=value (repeatable)")
 	return cmd
 }
+
+// guessIntro comes before the first question asked in a terminal. The
+// questions want a guess, not a calculation; a learner who can't work out
+// a request's cost shouldn't think they're expected to.
+const guessIntro = `Guess; don't calculate. Answer from your gut: the run shows how close you
+were, and where it differs is what you'll learn from. Loads depend on this
+machine's speed, so a slower one breaks the same design at a lower load.`
 
 // ask asks q until it gets an answer that makes a line.
 func ask(out io.Writer, in *bufio.Reader, q predictQuestion, services []string) (string, error) {

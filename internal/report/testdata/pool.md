@@ -137,6 +137,8 @@ Evidence:
 | `db.cpu < 90% after 50s` | **held** | 48% | from 0:50 to the end | source: container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit |
 | `rps >= 400 after 60s` | **held** | 650 rps | from 1:00 to the end | source: k6_http_reqs_total{expected_response="true"} (k6: successful responses) |
 
+A broken prediction isn't a wrong answer: it shows where your picture of the system and the run differ, and that gap is what to look into. Loads and request rates depend on this machine: slower cores break the same design at a lower load, so a load guess can miss even when the reasoning behind it was right.
+
 ## Timeline
 
 | Time | Event |

@@ -39,11 +39,11 @@ check:
 # line in design.yaml. A load guess scores right within 25%, too high or
 # too low both count as wrong. The load ramps from 100 to 1,400 rps.
 predict:
-  - ask: At what offered load, in requests per second, will it break? The ramp goes from 100 to 1,400 rps; answer never if you think it holds.
+  - ask: At what offered load, in requests per second, will it break? The ramp goes from 100 to 1,400 rps. A rough guess is fine; answer never if you think it holds.
     answer: rps
     expect: break_load_rps within 25% of {answer}
     never: break_load_rps none
-  - ask: At what offered load will requests start failing, 1% or more of them? A load, or never.
+  - ask: At what offered load will requests start failing, 1% or more of them? A rough guess, or never.
     answer: rps
     expect: errors_load_rps within 25% of {answer}
     never: errors_load_rps none

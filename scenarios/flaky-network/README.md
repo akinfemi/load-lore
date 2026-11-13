@@ -21,7 +21,7 @@ The load ramps to 300 requests a second over 30 seconds and holds there. At 1:01
 
 ## The question
 
-Before you run anything, write down your answers:
+Before you run anything, write down your guesses. Don't work them out: a gut answer is fine, and where the run differs from it is what you'll learn from.
 
 1. What share of page requests fail while 1% of inventory's packets are lost?
 2. How long does a call whose reply lost a packet take?

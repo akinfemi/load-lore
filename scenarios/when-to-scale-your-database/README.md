@@ -23,11 +23,13 @@ The table has 5 million rows of 512 bytes, and requests pick keys from a zipf di
 
 ## The question
 
-Before you run anything, write down your answers:
+Before you run anything, write down your guesses. Don't work them out: a gut answer is fine, and where the run differs from it is what you'll learn from.
 
 1. At what load does it break: requests per second, and minutes into the ramp?
 2. Which component gives out first?
 3. What does it look like from outside: slow responses, errors, or both?
+
+Loads depend on your machine: slower cores break the same design at a lower load, so a guess can miss even when the reasoning behind it is right.
 
 `loadl predict design.yaml` asks questions like these and writes your answers into the `expect` block at the bottom of `design.yaml`, or write them there yourself. The report scores each one against what the run measured. The two lines already there are examples; the grammar is in the [design file reference](../../skills/loadlore-designer/references/schema.md).
 

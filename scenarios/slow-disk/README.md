@@ -21,7 +21,7 @@ The load ramps to 400 requests a second, half of them writes, and holds there. A
 
 ## The question
 
-Before you run anything, write down your answers:
+Before you run anything, write down your guesses. Don't work them out: a gut answer is fine, and where the run differs from it is what you'll learn from.
 
 1. What happens to the reads, which never touch the disk?
 2. Which component gives out first, and how busy is the database's CPU when it does?

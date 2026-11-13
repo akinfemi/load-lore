@@ -20,6 +20,7 @@ import (
 
 	"github.com/akinfemi/load-lore/internal/analysis"
 	"github.com/akinfemi/load-lore/internal/bench"
+	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/diagram"
 	"github.com/akinfemi/load-lore/internal/driver"
 	"github.com/akinfemi/load-lore/internal/mermaid"
@@ -545,6 +546,34 @@ func expectSection(d *doc, a *analysis.Analysis) {
 		d.line("| `%s` | %s | %s | %s | %s |", e.Text, result, cell(e.Shown), cell(e.Range), cell(notes))
 	}
 	d.line("")
+	if n := predictionNote(a.Expect); n != "" {
+		d.p(n)
+	}
+}
+
+// predictionNote goes under the scored predictions. Predictions are
+// guesses, not exam answers: a broken one shows where the learner's picture
+// of the system and the run differ, which is the lesson. And a load depends
+// on the machine, so a learner on slower cores who reasoned well can still
+// miss one.
+func predictionNote(es []analysis.ExpectResult) string {
+	var broken, load bool
+	for _, e := range es {
+		if e.Status == analysis.ExpectNote {
+			continue
+		}
+		broken = broken || e.Status == analysis.ExpectBroken
+		_, run := design.RunMetrics[e.Metric]
+		load = load || run || strings.Contains(e.Text, "rps")
+	}
+	var s []string
+	if broken {
+		s = append(s, "A broken prediction isn't a wrong answer: it shows where your picture of the system and the run differ, and that gap is what to look into.")
+	}
+	if load {
+		s = append(s, "Loads and request rates depend on this machine: slower cores break the same design at a lower load, so a load guess can miss even when the reasoning behind it was right.")
+	}
+	return strings.Join(s, " ")
 }
 
 // --- timeline ---

@@ -92,6 +92,10 @@ func Text(a *analysis.Analysis, path string, width int) string {
 				}
 			}
 		}
+		if n := predictionNote(a.Expect); n != "" {
+			line("")
+			para("  ", n)
+		}
 	}
 
 	if ecs := analysis.ErrorCauses(ws); len(ecs) > 0 {

@@ -25,11 +25,13 @@ The payment provider is outside your system and answers in about 80 ms; the desi
 
 ## The question
 
-Before you run anything, write down your answers:
+Before you run anything, write down your guesses. Don't work them out: a gut answer is fine, and where the run differs from it is what you'll learn from.
 
 1. At what load does it break, and how far into the ramp?
 2. Which component gives out first? How busy is the database when it does?
 3. If you made the pools three times bigger, what would happen?
+
+Loads depend on your machine: slower cores break the same design at a lower load, so a guess can miss even when the reasoning behind it is right.
 
 `loadl predict design.yaml` asks questions like these and writes your answers into the `expect` block at the bottom of `design.yaml`, or write them there yourself. The report scores each one against what the run measured. The two lines already there are examples; the grammar is in the [design file reference](../../skills/loadlore-designer/references/schema.md).
 
