@@ -586,18 +586,34 @@ func TestHotRows(t *testing.T) {
 		t.Fatalf("no hot rows: %+v", a.Diagnoses)
 	}
 	d := a.Diagnoses[i]
-	if d.From != 60 || !strings.Contains(d.Summary, "api's writes to db took 20 ms each, 10.0x their 2.0 ms at low load, while its reads stayed at 1.0 ms and 5.4 backends of db waited on locks") {
+	if d.From != 60 || !strings.Contains(d.Summary, "api's writes to db took 20 ms each, 10.0x their 2.0 ms at low load, while its reads stayed at 1.0 ms, and 5.4 backends of db waited on locks") {
 		t.Errorf("diagnosis %+v", d)
 	}
 	if !slices.ContainsFunc(d.Evidence, func(e Evidence) bool { return e.Source == SrcLockWaits }) {
 		t.Errorf("no lock-wait evidence: %+v", d.Evidence)
 	}
 
-	// Reads slow too: that's the database, not row locks.
+	// Reads of the hot rows slow too: still hot rows, since the lock waits
+	// say so, and the summary says the reads slowed.
 	w := hot()
 	w.ReadMs = w.WriteMs
+	a = analyze(t, analysistest.WriteRun(t, w, 1))
+	i = slices.IndexFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "hot-rows" })
+	if i < 0 || !strings.Contains(a.Diagnoses[i].Summary, "its reads, many of them of the same rows, slowed to 20 ms from 2.0 ms") {
+		t.Errorf("reads slowed too: %+v", a.Diagnoses)
+	}
+
+	// A lock wait now and then, as a busy database with spread-out writes
+	// shows (0.6 at most in the recorded runs): not hot rows.
+	w = hot()
+	w.LockWaits = func(t float64) float64 {
+		if t > 60 {
+			return 1
+		}
+		return 0
+	}
 	if fired(analyze(t, analysistest.WriteRun(t, w, 1))) {
-		t.Error("fired when reads slowed as much as writes")
+		t.Error("fired on one backend waiting")
 	}
 
 	// A slow disk: writes slow and reads don't, but nothing waits on a lock.
@@ -1324,5 +1340,47 @@ func TestStallsOnQuietCases(t *testing.T) {
 	}
 	if s := stallsOn("e", paused); len(s) != 0 {
 		t.Errorf("paused caller: %+v", s)
+	}
+}
+
+// The case real runs showed: contention for one hot row burns the
+// database's CPU in one window. Hot rows says so, and the queueing knee on
+// that CPU points at the rows rather than at more CPU.
+func TestHotRowsBurnCPU(t *testing.T) {
+	w := analysistest.Healthy()
+	after := func(t, lo, hi float64) float64 {
+		if t > 60 {
+			return hi
+		}
+		return lo
+	}
+	w.WriteMs = func(t float64) float64 { return after(t, 0.3, 400) }
+	w.ReadMs = func(t float64) float64 { return after(t, 0.2, 300) }
+	w.LockWaits = func(t float64) float64 { return after(t, 0, 45) }
+	// CPU in step with the load (offered is 10t rps) until the contention
+	// starts, then nearly all of it at once.
+	w.DBCPU = func(t float64) float64 { return after(t, t/600, 0.97) }
+	w.P99 = func(t float64) float64 { return after(t, 0.005, 0.8) }
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	var hot, knee *Diagnosis
+	for _, d := range a.Diagnoses {
+		switch d.Rule {
+		case "hot-rows":
+			hot = d
+		case "queueing-knee":
+			knee = d
+		}
+	}
+	if hot == nil {
+		t.Fatalf("no hot rows: %+v", a.Diagnoses)
+	}
+	if !strings.Contains(hot.Summary, "The contention burned db's CPU too") {
+		t.Errorf("summary %q", hot.Summary)
+	}
+	if knee == nil || !strings.Contains(knee.Next, "less than it would for real work") {
+		t.Errorf("knee %+v", knee)
+	}
+	if a.Diagnoses[0].Rule != "hot-rows" {
+		t.Errorf("first diagnosis %s, want hot-rows", a.Diagnoses[0].Rule)
 	}
 }

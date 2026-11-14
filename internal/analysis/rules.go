@@ -64,7 +64,7 @@ const (
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
-const RuleVersion = "8"
+const RuleVersion = "9"
 
 func diagnose(a *Analysis) []*Diagnosis {
 	out := []*Diagnosis{}
@@ -84,6 +84,14 @@ func diagnose(a *Analysis) []*Diagnosis {
 		for _, st := range storms {
 			if st.comp == d.comp && st.From < d.To && d.From < st.To {
 				d.Next = fmt.Sprintf("Much of %s's load was %s's retries (see the retry storm): stop the storm first. Capacity alone would have to cover every retry, %.1fx the calls %s's requests make at low load.", d.comp, st.caller, st.amp, st.caller)
+				break
+			}
+		}
+		// A knee on a database with hot rows: its CPU went on the
+		// contention, so more of it buys little.
+		for _, h := range out {
+			if h.Rule == "hot-rows" && h.comp == d.comp && h.From < d.To && d.From < h.To {
+				d.Next = fmt.Sprintf("%s's CPU went on contention for a few hot rows (see hot rows), not on more work, so more CPU moves the break less than it would for real work: spread the writes over more rows first.", d.comp)
 				break
 			}
 		}
