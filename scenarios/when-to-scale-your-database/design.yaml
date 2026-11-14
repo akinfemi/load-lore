@@ -24,6 +24,7 @@ services:
   db:
     kind: postgres
     version: "17"
+    replicas: 2
     resources: { cpu: 0.4, memory: 1g }
     config: { max_connections: 100, shared_buffers: 256MB }
     dataset: { rows: 5000000, row_bytes: 512 }
@@ -41,3 +42,4 @@ workload:
 expect:
   - break_load_rps within 25% of 3000
   - errors_load_rps none
+  - note: "the database gives out first"
