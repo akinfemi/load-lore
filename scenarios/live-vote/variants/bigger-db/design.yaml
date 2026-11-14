@@ -1,0 +1,51 @@
+version: 1
+name: live-vote-bigger-db
+
+# A TV talent show's live vote. During the final, viewers vote in the app:
+# each vote adds one to the contestant's tally, a row in Postgres, and the
+# results screen reads the tallies back. Ten contestants, and nine votes in
+# ten go to the favourite.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 1, memory: 512m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: db, op: read, when: read }    # the results screen reads a tally
+        - { target: db, op: write, when: write }  # a vote: the tally goes up by one
+      resilience:
+        timeout_ms: 2000
+    pools:
+      db: { size: 40, min: 40 }   # opened at start; 2 replicas x 40 = 80 connections, under max_connections
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 2, memory: 1g }   # twice the CPU
+    config: { max_connections: 100, shared_buffers: 256MB }
+    dataset: { rows: 1000, row_bytes: 256 }
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 200, to: 4500, over: 4m }
+  mix: { read: 0.2, write: 0.8 }
+  keys: { distribution: hotspot, share: 0.9, fraction: 0.1, count: 10 }
+
+assumptions:
+  - { field: services.api.behavior.cpu_ms, basis: guessed, why: "a small JSON handler" }
+  - { field: workload.mix, basis: guessed, why: "during the vote, most requests are votes" }
+  - { field: workload.keys, basis: guessed, why: "a clear favourite takes nine votes in ten" }
+
+# Your predictions, scored in the report. The line here is an example;
+# loadl predict design.yaml replaces it with your answers.
+expect:
+  - p99_ms < 100 until load_rps >= 1000
