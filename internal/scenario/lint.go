@@ -2,6 +2,7 @@ package scenario
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -190,7 +191,30 @@ func (s *Scenario) lintDesign(file, name, why string, ps *[]Problem) *design.Des
 	if name != "" && d.Name != name {
 		*ps = append(*ps, Problem{File: file, Message: fmt.Sprintf("name is %q; %s, %q", d.Name, why, name)})
 	}
+	for _, m := range postgresFloor(d) {
+		*ps = append(*ps, Problem{File: file, Message: m, Warning: true})
+	}
 	return d
+}
+
+// MinPostgresCPU is the smallest CPU limit a Postgres has been measured to
+// behave at in a scenario, at --scale 1. At 0.1 CPU (the first scenario at
+// --scale 0.25) it stalled under CPU throttling from the start of the
+// ramp, which is a different lesson; between the two is unmeasured.
+const MinPostgresCPU = 0.4
+
+// postgresFloor warns about each Postgres below MinPostgresCPU. Splitting a
+// fixed budget across replicas or shards stops here.
+func postgresFloor(d *design.Design) []string {
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(d.Services)) {
+		svc := d.Services[name]
+		if svc.Kind != "postgres" || svc.Resources == nil || svc.Resources.CPU == nil || *svc.Resources.CPU >= MinPostgresCPU {
+			continue
+		}
+		out = append(out, fmt.Sprintf("services.%s has %g CPU, under %g, the smallest a Postgres has been measured to behave at: below it, CPU throttling can stall it from the start of the load and the run teaches something else. Give it %g or more", name, *svc.Resources.CPU, MinPostgresCPU, MinPostgresCPU))
+	}
+	return out
 }
 
 // HasErrors reports whether any problem isn't a warning.

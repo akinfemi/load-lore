@@ -327,3 +327,25 @@ func TestLibraryFitsToxiproxy(t *testing.T) {
 		}
 	}
 }
+
+// A Postgres under the measured floor warns; one at it, or with the
+// default CPU, doesn't.
+func TestPostgresFloor(t *testing.T) {
+	for _, tc := range []struct {
+		cpu  string
+		want int
+	}{{"0.2", 1}, {"0.4", 0}, {"", 0}} {
+		res := ""
+		if tc.cpu != "" {
+			res = "\n    resources: { cpu: " + tc.cpu + ", memory: 1g }"
+		}
+		src := "version: 1\nname: x\nservices:\n  api:\n    image: loadlore/synthetic\n    behavior: { calls: [ { target: db, op: read } ] }\n  db:\n    kind: postgres" + res + "\n    dataset: { rows: 1000 }\nworkload:\n  entry: api\n  profile: [ { ramp: { from: 10, to: 100, over: 1m } } ]\n"
+		d, diags := design.Load([]byte(src))
+		if diags.HasErrors() {
+			t.Fatalf("%s: %v", tc.cpu, diags.Errors())
+		}
+		if got := postgresFloor(d); len(got) != tc.want {
+			t.Errorf("cpu %q: %q", tc.cpu, got)
+		}
+	}
+}
