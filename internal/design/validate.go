@@ -128,6 +128,7 @@ func (v *validator) service(name string, s *Service) {
 		notFor("config", s.Config != nil, why)
 		notFor("dataset", s.Dataset != nil, why)
 		notFor("disk", s.Disk != nil, "it is for postgres")
+		notFor("primary", s.Primary != "", "it is for postgres-replica")
 		notFor("target", s.Target != "", "it is for pgbouncer and lb")
 		notFor("pool_mode", s.PoolMode != "", "it is for pgbouncer")
 		notFor("default_pool_size", s.DefaultPoolSize != nil, "it is for pgbouncer")
@@ -152,7 +153,12 @@ func (v *validator) service(name string, s *Service) {
 	notFor("behavior", s.Behavior != nil, why)
 	notFor("pools", s.Pools != nil, why)
 	notFor("concurrency", s.Concurrency != nil, why)
-	notFor("dataset", s.Dataset != nil && s.Kind != "postgres", "datasets are seeded into postgres")
+	notFor("dataset", s.Dataset != nil && s.Kind == "postgres-replica", "a replica starts from a copy of its primary's data, so the dataset goes on the primary")
+	notFor("dataset", s.Dataset != nil && !s.IsPostgres(), "datasets are seeded into postgres")
+	notFor("primary", s.Primary != "" && s.Kind != "postgres-replica", "it is for postgres-replica")
+	if s.Kind == "postgres-replica" {
+		v.replica(name, p, s)
+	}
 	notFor("disk", s.Disk != nil && s.Kind != "postgres", "it is for postgres")
 	if dk := s.Disk; dk != nil && s.Kind == "postgres" {
 		if dk.ReadMs != nil && (*dk.ReadMs < 0 || *dk.ReadMs > 100) {
@@ -178,8 +184,11 @@ func (v *validator) service(name string, s *Service) {
 	}
 	if s.Replicas != nil && *s.Replicas != 1 {
 		msg := fmt.Sprintf("%s runs exactly one replica", s.Kind)
-		if s.Kind == "postgres" {
-			msg += "; read replicas are planned for phase 2"
+		switch s.Kind {
+		case "postgres":
+			msg += "; for read replicas, add a kind: postgres-replica service with primary: " + name
+		case "postgres-replica":
+			msg += " for now; for more, add more postgres-replica services"
 		}
 		v.errorf(pathKey(p, "replicas"), CodeRange, "%s", msg)
 	}
@@ -200,8 +209,8 @@ func (v *validator) service(name string, s *Service) {
 			v.errorf(pathKey(p, "target"), CodeRequired, "pgbouncer needs a target: the postgres service it pools connections to")
 		case !ok:
 			v.unknownService(pathKey(p, "target"), s.Target)
-		case t == nil || t.Kind != "postgres":
-			v.errorf(pathKey(p, "target"), CodeOpTarget, "pgbouncer's target must be a postgres service; %q isn't", s.Target)
+		case t == nil || !t.IsPostgres():
+			v.errorf(pathKey(p, "target"), CodeOpTarget, "pgbouncer's target must be a postgres or postgres-replica service; %q isn't", s.Target)
 		}
 		for _, k := range sortedKeys(s.Config) {
 			kp := pathKey(pathKey(p, "config"), k)
@@ -247,6 +256,8 @@ func opsFor(t *Service) []string {
 		return []string{"http"}
 	case t.Kind == "postgres", t.Kind == "pgbouncer":
 		return []string{"read", "write"}
+	case t.Kind == "postgres-replica":
+		return []string{"read"}
 	case t.Kind == "redis":
 		return []string{"get", "set", "del"}
 	}
@@ -274,7 +285,11 @@ func (v *validator) call(caller, p string, c *Call) {
 			v.unknownService(pathKey(p, "target"), c.Target)
 		case t != nil && c.Op != "":
 			if ops := opsFor(t); ops != nil && !slices.Contains(ops, c.Op) && !v.failed[pathKey(p, "op")] {
-				v.errorf(pathKey(p, "op"), CodeOpTarget, "%s is %s; use op %s", c.Target, describeService(t), strings.Join(ops, ", "))
+				if t.Kind == "postgres-replica" {
+					v.errorf(pathKey(p, "op"), CodeOpTarget, "%s is a read replica and serves reads only; send writes to its primary, %s", c.Target, t.Primary)
+				} else {
+					v.errorf(pathKey(p, "op"), CodeOpTarget, "%s is %s; use op %s", c.Target, describeService(t), strings.Join(ops, ", "))
+				}
 			}
 			if t.IsApp() && t.Replicas != nil && *t.Replicas > 1 {
 				v.warnf(pathKey(p, "target"), CodeNoLB, "%s", noLBMessage(caller, c.Target, *t.Replicas))
@@ -345,12 +360,12 @@ func (v *validator) pools(name, p string, s *Service) {
 			v.unknownService(pp, t)
 			continue
 		}
-		if pool.Hold == "request" && ts.Kind != "postgres" && ts.Kind != "pgbouncer" {
+		if pool.Hold == "request" && !ts.IsPostgres() && ts.Kind != "pgbouncer" {
 			v.errorf(pathKey(pp, "hold"), CodeNotApplicable, "hold: request only applies to postgres and pgbouncer targets; %s is %s", t, describeKind(ts))
 		}
 		if pool.Min != nil && *pool.Min > 0 {
 			switch {
-			case ts.Kind != "postgres" && ts.Kind != "pgbouncer":
+			case !ts.IsPostgres() && ts.Kind != "pgbouncer":
 				v.errorf(pathKey(pp, "min"), CodeNotApplicable, "a pool minimum only applies to postgres and pgbouncer targets; %s is %s", t, describeKind(ts))
 			case pool.Size != nil && *pool.Min > *pool.Size:
 				v.errorf(pathKey(pp, "min"), CodeRange, "min %d is more than the pool's size, %d", *pool.Min, *pool.Size)
@@ -881,11 +896,15 @@ func (d *Design) EntryPath() EntryPathInfo {
 				visit(c.Target)
 				return
 			case t.Kind == "pgbouncer":
-				if pg, ok := d.Services[t.Target]; ok && pg != nil && pg.Kind == "postgres" && c.Op == "read" {
-					read[t.Target] = true
+				if pg, ok := d.Services[t.Target]; ok && pg != nil && c.Op == "read" {
+					if db := d.datasetOf(t.Target); db != "" {
+						read[db] = true
+					}
 				}
-			case t.Kind == "postgres" && c.Op == "read":
-				read[c.Target] = true
+			case t.IsPostgres() && c.Op == "read":
+				if db := d.datasetOf(c.Target); db != "" {
+					read[db] = true
+				}
 			}
 			if c.Query != "scan" {
 				info.Keyed = true
@@ -972,4 +991,50 @@ var pgbouncerOwnKeys = map[string]string{
 	"admin_users":               "Loadlore's exporter reads PgBouncer's statistics as this user",
 	"stats_users":               "Loadlore's exporter reads PgBouncer's statistics",
 	"ignore_startup_parameters": "Loadlore sets it so the exporter and clients can connect",
+}
+
+// datasetOf is the postgres whose dataset a postgres service serves: itself,
+// or a replica's primary. Empty when name is neither.
+func (d *Design) datasetOf(name string) string {
+	s := d.Services[name]
+	switch {
+	case s == nil:
+		return ""
+	case s.Kind == "postgres":
+		return name
+	case s.Kind == "postgres-replica":
+		if pr := d.Services[s.Primary]; pr != nil && pr.Kind == "postgres" {
+			return s.Primary
+		}
+	}
+	return ""
+}
+
+// replicaOwnKeys are postgresql.conf settings Loadlore sets on a replica to
+// stream from its primary.
+var replicaOwnKeys = map[string]string{
+	"primary_conninfo":  "Loadlore points the replica at its primary",
+	"primary_slot_name": "Loadlore manages replication itself",
+	"hot_standby":       "a replica serves reads, so hot_standby stays on",
+}
+
+// replica checks a postgres-replica: a primary that is a postgres, the
+// primary's version, and no settings that would stop it streaming.
+func (v *validator) replica(name, p string, s *Service) {
+	switch pr, ok := v.d.Services[s.Primary]; {
+	case s.Primary == "":
+		v.errorf(pathKey(p, "primary"), CodeRequired, "postgres-replica needs a primary: the postgres service it streams from")
+	case !ok:
+		v.unknownService(pathKey(p, "primary"), s.Primary)
+	case v.broken(s.Primary):
+	case pr == nil || pr.Kind != "postgres":
+		v.errorf(pathKey(p, "primary"), CodeOpTarget, "a replica's primary must be a postgres service; %q is %s", s.Primary, describeService(pr))
+	case pr.Version != "" && s.Version != "" && pr.Version != s.Version:
+		v.errorf(pathKey(p, "version"), CodeConflict, "a replica runs its primary's version: %s is %s, %s is %s", s.Primary, pr.Version, name, s.Version)
+	}
+	for _, k := range sortedKeys(s.Config) {
+		if why, ok := replicaOwnKeys[k]; ok {
+			v.errorf(pathKey(pathKey(p, "config"), k), CodeNotApplicable, "%s can't be set in config: %s", k, why)
+		}
+	}
 }

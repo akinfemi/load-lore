@@ -55,6 +55,9 @@ func (s *Service) IsSynthetic() bool {
 // IsApp reports whether the service is an application service.
 func (s *Service) IsApp() bool { return s.Kind == "" && s.Image != "" }
 
+// IsPostgres is whether s is a Postgres: a primary or a read replica.
+func (s *Service) IsPostgres() bool { return s.Kind == "postgres" || s.Kind == "postgres-replica" }
+
 func ptr[T any](v T) *T { return &v }
 
 func setDefault[T any](p **T, v T) {
@@ -85,6 +88,15 @@ func applyDefaults(d *Design) {
 		switch {
 		case s.IsApp():
 			defaultApp(s, d.Services)
+		case s.Kind == "postgres-replica":
+			// A replica runs its primary's version; validation reports a
+			// mismatch or a missing primary.
+			if pr := d.Services[s.Primary]; s.Version == "" && pr != nil && pr.Kind == "postgres" {
+				s.Version = pr.Version
+			}
+			if s.Version == "" {
+				s.Version = DefaultPostgresVersion
+			}
 		case s.Kind == "postgres":
 			if s.Version == "" {
 				s.Version = DefaultPostgresVersion

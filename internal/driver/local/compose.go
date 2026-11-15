@@ -193,6 +193,10 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 			}
 			c.Healthcheck = &composeHealth{Test: []string{"CMD-SHELL", fmt.Sprintf("pg_isready -U %s -d %s -h 127.0.0.1", plan.DBUser, plan.DBName)}, Interval: "1s", Timeout: "3s", Retries: 180}
 			c.StopGracePeriod = "10s"
+			if s.Primary != "" {
+				// It streams from the primary from the moment it starts.
+				c.DependsOn = map[string]composeDepend{s.Primary: {Condition: "service_healthy"}}
+			}
 			cf.Services[s.Name] = c
 			healthyDeps[s.Name] = composeDepend{Condition: "service_healthy"}
 

@@ -114,7 +114,31 @@ type Service struct {
 
 	// PgBouncer.
 	PgBouncer *PgBouncer `json:"pgbouncer,omitempty"`
+
+	// Postgres read replicas: the primary it streams from. A replica's
+	// Kind is postgres, so it is measured like one; it starts from a copy
+	// of the primary's seeded data, and its Dataset is the primary's.
+	Primary string `json:"primary,omitempty"`
 }
+
+// Replicas lists the read replicas of the postgres service named primary.
+func (p *Plan) Replicas(primary string) []*Service {
+	var out []*Service
+	for _, s := range p.Services {
+		if s.Primary == primary && primary != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// Replication settings Loadlore applies.
+const (
+	// DefaultWALKeepSize is the WAL a primary with replicas keeps for them
+	// unless the design sets wal_keep_size: enough for a replica that falls
+	// behind under a run's write load to catch up rather than lose its place.
+	DefaultWALKeepSize = "1GB"
+)
 
 // PgBouncer is a PgBouncer's settings and the Postgres behind it.
 type PgBouncer struct {
@@ -368,6 +392,7 @@ func Build(d *design.Design, opt Options) (*Plan, error) {
 		p.Services = append(p.Services, s)
 		byName[name] = s
 	}
+	p.replicas(d, byName)
 
 	p.proxies(d, byName)
 	for _, name := range names {
@@ -408,6 +433,12 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 		for i := range *ds.Replicas {
 			s.Containers = append(s.Containers, fmt.Sprintf("%s-%d", name, i))
 		}
+	case ds.Kind == "postgres-replica":
+		// The rest, the primary's image and dataset, is filled once every
+		// service is built (replicas).
+		s.Kind, s.Port, minMem = "postgres", PostgresPort, minMemoryPG
+		s.Version, s.Primary = ds.Version, ds.Primary
+		s.Containers = []string{name}
 	case ds.Kind == "postgres":
 		s.Kind, s.Port, minMem = "postgres", PostgresPort, minMemoryPG
 		s.Version = ds.Version
@@ -1015,8 +1046,11 @@ func (p *Plan) assume(d *design.Design) {
 		if s := d.Services[name]; s.Kind == "pgbouncer" {
 			p.assumePgBouncer(name, s)
 		}
-		if s := d.Services[name]; s.Kind == "postgres" {
+		if s := d.Services[name]; s.IsPostgres() {
 			p.assumeDisk(name, s)
+		}
+		if s := d.Services[name]; s.Kind == "postgres-replica" {
+			p.assumeReplica(name, s)
 		}
 		if s := d.Services[name]; s.Kind == "lb" {
 			p.Assumptions = append(p.Assumptions, Assumption{
@@ -1286,4 +1320,50 @@ func (p *Plan) partition(pf *Fault, f *design.Fault, byName map[string]*Service)
 		return fmt.Errorf("partition: %s and %s don't call each other, so there is no connection to cut", f.Between[0], f.Between[1])
 	}
 	return nil
+}
+
+// replicas gives each read replica its primary's image and dataset, points
+// it at the primary, and has each primary with replicas keep WAL for them.
+func (p *Plan) replicas(d *design.Design, byName map[string]*Service) {
+	for _, s := range p.Services {
+		pr := byName[s.Primary]
+		if s.Primary == "" || pr == nil {
+			continue
+		}
+		s.Image = pr.Image
+		spec := *pr.Dataset
+		spec.Indexes = slices.Clone(pr.Dataset.Indexes)
+		s.Dataset = &spec
+		if s.Config == nil {
+			s.Config = map[string]string{}
+		}
+		s.Config["primary_conninfo"] = fmt.Sprintf("host=%s port=%d user=%s password=%s application_name=%s", pr.Name, PostgresPort, DBUser, DBPassword, s.Name)
+		if pr.Config == nil {
+			pr.Config = map[string]string{}
+		}
+		if _, set := pr.Config["wal_keep_size"]; !set {
+			pr.Config["wal_keep_size"] = DefaultWALKeepSize
+		}
+	}
+}
+
+// assumeReplica says how a read replica replicates: asynchronous streaming
+// from a copy of its primary's data, and the WAL the primary keeps for it.
+func (p *Plan) assumeReplica(name string, ds *design.Service) {
+	pr := p.Service(ds.Primary)
+	if pr == nil {
+		return
+	}
+	keep := pr.Config["wal_keep_size"]
+	why := "Loadlore's default: enough for a replica that falls behind under write load to catch up"
+	if keep != DefaultWALKeepSize {
+		why = "set in the design"
+	}
+	p.Assumptions = append(p.Assumptions,
+		Assumption{Field: "services." + name + " replication", Value: "asynchronous streaming from " + ds.Primary,
+			Why: "the replica starts from a copy of " + ds.Primary + "'s seeded data and replays its WAL as it arrives, directly, not through Toxiproxy: a commit on " + ds.Primary + " doesn't wait for it, so a read on " + name + " can miss a write that just committed"})
+	field := "services." + ds.Primary + ".config.wal_keep_size"
+	if !slices.ContainsFunc(p.Assumptions, func(a Assumption) bool { return a.Field == field }) {
+		p.Assumptions = append(p.Assumptions, Assumption{Field: field, Value: keep, Why: why})
+	}
 }

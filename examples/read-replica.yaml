@@ -1,0 +1,38 @@
+version: 1
+name: read-replica
+
+# Reads go to a streaming read replica, writes to its primary.
+
+services:
+  lb:
+    kind: lb
+    target: api
+
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 1, memory: 512m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: ro, op: read, when: read }    # reads from the replica
+        - { target: db, op: write, when: write }  # writes to the primary
+    pools: { db: 20, ro: 20 }
+
+  db:
+    kind: postgres
+    resources: { cpu: 1, memory: 1g }
+    config: { max_connections: 100, shared_buffers: 256MB }
+    dataset: { rows: 1000000, row_bytes: 256 }
+
+  ro:
+    kind: postgres-replica
+    primary: db
+    resources: { cpu: 1, memory: 1g }
+    config: { max_connections: 100, shared_buffers: 256MB }
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 100, to: 2000, over: 1m }
+  mix: { read: 0.8, write: 0.2 }

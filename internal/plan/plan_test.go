@@ -558,3 +558,32 @@ func findAssumption(p *Plan, field string) *Assumption {
 	}
 	return nil
 }
+
+// A read replica is planned as a postgres with its primary's image and
+// dataset, pointed at the primary, which keeps WAL for it.
+func TestReadReplica(t *testing.T) {
+	d := loadFile(t, "../../examples/read-replica.yaml")
+	p, err := Build(d, Options{RunID: "r", Scale: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, ro := p.Service("db"), p.Service("ro")
+	if ro.Kind != "postgres" || ro.Primary != "db" || ro.Image != db.Image || ro.Dataset == nil || ro.Dataset.Rows != db.Dataset.Rows || ro.Dataset == db.Dataset {
+		t.Fatalf("replica %+v", ro)
+	}
+	if want := "host=db port=5432 user=loadlore password=loadlore application_name=ro"; ro.Config["primary_conninfo"] != want {
+		t.Errorf("primary_conninfo %q", ro.Config["primary_conninfo"])
+	}
+	if db.Config["wal_keep_size"] != DefaultWALKeepSize || db.Primary != "" {
+		t.Errorf("primary config %v, primary %q", db.Config, db.Primary)
+	}
+	if rs := p.Replicas("db"); len(rs) != 1 || rs[0] != ro {
+		t.Errorf("replicas of db: %v", rs)
+	}
+	if a := findAssumption(p, "services.ro replication"); a == nil || a.Value != "asynchronous streaming from db" {
+		t.Errorf("replication assumption %+v", a)
+	}
+	if a := findAssumption(p, "services.db.config.wal_keep_size"); a == nil || a.Value != "1GB" {
+		t.Errorf("wal_keep_size assumption %+v", a)
+	}
+}

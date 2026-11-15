@@ -49,8 +49,11 @@ var ComponentMetrics = map[string]map[string]MetricKind{
 
 // metricClass is the ComponentMetrics key for a service.
 func (s *Service) metricClass() string {
-	if s.Kind == "" {
+	switch s.Kind {
+	case "":
 		return "service"
+	case "postgres-replica":
+		return "postgres"
 	}
 	return s.Kind
 }

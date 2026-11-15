@@ -207,3 +207,43 @@ func TestDiskCompose(t *testing.T) {
 		t.Errorf("cache has a blkio_config")
 	}
 }
+
+// A read replica waits for its primary and streams from it; the data copy
+// marks it a standby and opens the primary to replication.
+func TestReplicaCompose(t *testing.T) {
+	d, diags, err := design.LoadFile("../../../examples/read-replica.yaml")
+	if err != nil || diags.HasErrors() {
+		t.Fatal(err, diags)
+	}
+	p, err := plan.Build(d, plan.Options{RunID: "test-run", Seed: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildCompose(p, stackInput{Project: "loadlore-test-run", K6Script: []byte("// script\n"), DataVols: map[string]string{"db": "v1", "ro": "v2"}, Synthetic: "loadlore/synthetic:dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cf composeFile
+	if err := yaml.Unmarshal(got, &cf); err != nil {
+		t.Fatal(err)
+	}
+	ro := cf.Services["ro"]
+	if ro == nil || ro.DependsOn["db"].Condition != "service_healthy" || !slices.Contains(ro.Command, "primary_conninfo=host=db port=5432 user=loadlore password=loadlore application_name=ro") {
+		t.Fatalf("ro service: %+v", ro)
+	}
+	if cf.Services["lore-pgexp-ro"] == nil {
+		t.Error("the replica has no exporter")
+	}
+	if !slices.Contains(cf.Services["db"].Command, "wal_keep_size=1GB") {
+		t.Errorf("db command %v", cf.Services["db"].Command)
+	}
+	if s := replicationSetup(p, p.Service("ro")); !strings.Contains(s, "touch /to/standby.signal") {
+		t.Errorf("replica setup %q", s)
+	}
+	if s := replicationSetup(p, p.Service("db")); !strings.Contains(s, "host replication all all scram-sha-256") {
+		t.Errorf("primary setup %q", s)
+	}
+	if s := replicationSetup(p, p.Service("api")); s != "" {
+		t.Errorf("app setup %q", s)
+	}
+}

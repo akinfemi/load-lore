@@ -102,6 +102,7 @@ Resilience fields apply to every outbound call of the service:
 | `kind` | Key fields | Notes |
 | --- | --- | --- |
 | `postgres` | `version` (default `"17"`), `config` (any postgresql.conf key; Postgres's own defaults apply, such as `max_connections` 100 and `shared_buffers` 128MB), `dataset`, `disk` | |
+| `postgres-replica` | `primary` (required, a postgres service), `resources`, `config` | A streaming read replica of `primary`: it starts from a copy of the primary's data and replays its WAL as it arrives, asynchronously, so a read can miss a write that just committed. It serves reads only: a call with `op: write` to it is an error. It runs the primary's `version` and has no `dataset` of its own. Loadlore sets `primary_conninfo` and keeps `hot_standby` on; the primary keeps `wal_keep_size` 1GB for its replicas unless its `config` sets it. One replica per service: for several, add several services |
 | `redis` | `version` (default `"8"`), `config` (any redis.conf key) | Unless `config` sets them, `maxmemory` is 75% of the container's memory limit and `maxmemory-policy` is `allkeys-lru`, as managed Redis usually does. Both are printed as assumptions in every report, and `--scale` scales `maxmemory`. `maxmemory: 0` restores stock Redis, including being OOM-killed when the cache outgrows its container |
 | `pgbouncer` | `target` (required, a postgres service), `pool_mode` (`transaction`; also `session`, `statement`), `default_pool_size` (`20`), `config` (pgbouncer.ini keys) | PgBouncer 1.26. Clients beyond `default_pool_size` server connections wait in PgBouncer. `max_client_conn` defaults to PgBouncer's 100, and the plan notes when the callers' pools can open more. Loadlore sets the listen, auth and admin keys itself, and `pool_mode` and `default_pool_size` are fields, so `config` can't set those |
 | `lb` | `target` (required, an application service), `algorithm`, `health_check` | A load balancer (HAProxy) in front of the target's replicas. See below |
@@ -285,7 +286,6 @@ Documented for later phases. `loadl validate` rejects these with a "planned" err
 
 - **Workers** (phase 2): `role: worker` with `consume: { from: <queue>, concurrency: 8 }`, running `calls` once per message instead of per HTTP request.
 - **Queues** (phase 2): `kind: kafka` or `kind: rabbitmq` with `partitions` and `retention`, and the call op `publish`, e.g. `{ target: orders, op: publish, mode: async, when: write }`.
-- **Read replicas** (phase 2): `kind: postgres-replica` with `primary`. Replication lag emerges; it is never set.
 - **Cloud mode** (phase 2):
 
 ```yaml

@@ -20,7 +20,7 @@ type Design struct {
 type Service struct {
 	// Common.
 	Image     string     `yaml:"image,omitempty" json:"image,omitempty" jsonschema_description:"Container image for an application service: loadlore/synthetic or your own. Mutually exclusive with kind."`
-	Kind      string     `yaml:"kind,omitempty" json:"kind,omitempty" jsonschema:"enum=postgres,enum=redis,enum=pgbouncer,enum=lb" jsonschema_description:"Built-in component. Mutually exclusive with image."`
+	Kind      string     `yaml:"kind,omitempty" json:"kind,omitempty" jsonschema:"enum=postgres,enum=postgres-replica,enum=redis,enum=pgbouncer,enum=lb" jsonschema_description:"Built-in component. Mutually exclusive with image."`
 	Replicas  *int       `yaml:"replicas,omitempty" json:"replicas,omitempty" jsonschema:"minimum=1,default=1" jsonschema_description:"Number of replicas. Datastores, pgbouncer and lb run exactly one."`
 	Resources *Resources `yaml:"resources,omitempty" json:"resources,omitempty" jsonschema_description:"Default 1 CPU and 512m; lb defaults to 0.5 CPU and 256m."`
 
@@ -33,6 +33,7 @@ type Service struct {
 	// Datastores and infrastructure.
 	Version string                 `yaml:"version,omitempty" json:"version,omitempty" jsonschema_description:"Major version. postgres default \"17\"; redis default \"8\"."`
 	Config  map[string]ConfigValue `yaml:"config,omitempty" json:"config,omitempty" jsonschema_description:"Native config keys: postgresql.conf for postgres, redis.conf for redis, pgbouncer.ini for pgbouncer."`
+	Primary string                 `yaml:"primary,omitempty" json:"primary,omitempty" jsonschema_description:"postgres-replica: the postgres service it streams from. The replica starts from a copy of the primary's data and serves reads only."`
 	Dataset *Dataset               `yaml:"dataset,omitempty" json:"dataset,omitempty" jsonschema_description:"Rows seeded before the run. postgres only."`
 	Disk    *Disk                  `yaml:"disk,omitempty" json:"disk,omitempty" jsonschema_description:"Model the data disk like a cloud volume: a wait per read and an IOPS cap. postgres only; without it the data sits on the Docker host's disk, which on a laptop is mostly served from memory."`
 

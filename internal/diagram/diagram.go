@@ -63,6 +63,10 @@ func Annotated(d *design.Design, an *Annotations) *mermaid.Flowchart {
 			edge(name, s.Target, mermaid.Solid, fmt.Sprintf("pool %d", deref(s.DefaultPoolSize)))
 		case s.Kind == "lb" && s.Target != "":
 			edge(name, s.Target, mermaid.Solid, lbLabel(s)...)
+		case s.Kind == "postgres-replica" && s.Primary != "":
+			if _, ok := d.Services[s.Primary]; ok {
+				edge(s.Primary, name, mermaid.Dotted, "streams WAL")
+			}
 		case s.Behavior != nil:
 			for _, e := range callEdges(s) {
 				lines := []string{strings.Join(e.ops, ", ")}

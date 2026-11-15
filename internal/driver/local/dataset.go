@@ -55,7 +55,11 @@ func (d *Driver) prepareData(ctx context.Context, s *plan.Service, progress func
 		d.event("seed_cache_hit", map[string]any{"service": s.Name, "volume": cache})
 	}
 
-	if d.plan.ReuseData && !s.SlowDisk {
+	// A replica and its primary start from the same copy of the cache, so
+	// the replica can stream from where the primary starts: reused data,
+	// which drifts run to run, would leave them apart.
+	replicated := s.Primary != "" || len(d.plan.Replicas(s.Name)) > 0
+	if d.plan.ReuseData && !s.SlowDisk && !replicated {
 		return d.reuseData(ctx, s, cache, progress)
 	}
 	run := fmt.Sprintf("loadlore-%s-%s-data", d.runID, s.Name)
@@ -69,7 +73,7 @@ func (d *Driver) prepareData(ctx context.Context, s *plan.Service, progress func
 		return "", err
 	}
 	if _, err := d.docker(ctx, "run", "--rm", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID,
-		"-v", cache+":/from:ro", "-v", run+":/to", ImageAlpine, "sh", "-c", "cp -a /from/. /to/ && rm -f /to/"+seededMarker); err != nil {
+		"-v", cache+":/from:ro", "-v", run+":/to", ImageAlpine, "sh", "-c", "cp -a /from/. /to/ && rm -f /to/"+seededMarker+replicationSetup(d.plan, s)); err != nil {
 		return "", err
 	}
 	if s.Disk != nil {
@@ -169,4 +173,18 @@ func (d *Driver) seed(ctx context.Context, s *plan.Service, vol string) error {
 	}
 	_, err := d.docker(ctx, "run", "--rm", "--label", LabelOwner+"=1", "-v", vol+":/data", ImageAlpine, "touch", "/data/"+seededMarker)
 	return err
+}
+
+// replicationSetup is the shell that readies a copied data directory for
+// replication: a replica gets standby.signal, so it starts in recovery and
+// streams from its primary (primary_conninfo is in its config); a primary
+// with replicas lets them connect for replication.
+func replicationSetup(p *plan.Plan, s *plan.Service) string {
+	switch {
+	case s.Primary != "":
+		return " && touch /to/standby.signal && chown $(stat -c %u:%g /to/PG_VERSION) /to/standby.signal"
+	case len(p.Replicas(s.Name)) > 0:
+		return " && echo 'host replication all all scram-sha-256' >> /to/pg_hba.conf"
+	}
+	return ""
 }

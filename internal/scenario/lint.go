@@ -209,7 +209,7 @@ func postgresFloor(d *design.Design) []string {
 	var out []string
 	for _, name := range slices.Sorted(maps.Keys(d.Services)) {
 		svc := d.Services[name]
-		if svc.Kind != "postgres" || svc.Resources == nil || svc.Resources.CPU == nil || *svc.Resources.CPU >= MinPostgresCPU {
+		if !svc.IsPostgres() || svc.Resources == nil || svc.Resources.CPU == nil || *svc.Resources.CPU >= MinPostgresCPU {
 			continue
 		}
 		out = append(out, fmt.Sprintf("services.%s has %g CPU, under %g, the smallest a Postgres has been measured to behave at: below it, CPU throttling can stall it from the start of the load and the run teaches something else. Give it %g or more", name, *svc.Resources.CPU, MinPostgresCPU, MinPostgresCPU))
