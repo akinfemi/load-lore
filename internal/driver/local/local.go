@@ -189,12 +189,15 @@ func (d *Driver) Up(ctx context.Context, p *plan.Plan, dir *rundir.Dir, progress
 
 	vols := map[string]string{}
 	for _, s := range p.Services {
-		if s.Kind == "postgres" {
-			v, err := d.prepareData(ctx, s, progress)
+		if s.Kind != "postgres" {
+			continue
+		}
+		for _, c := range s.Containers {
+			v, err := d.prepareData(ctx, s, c, progress)
 			if err != nil {
 				return err
 			}
-			vols[s.Name] = v
+			vols[c] = v
 		}
 	}
 

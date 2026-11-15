@@ -2,8 +2,10 @@ package local
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -245,5 +247,50 @@ func TestReplicaCompose(t *testing.T) {
 	}
 	if s := replicationSetup(p, p.Service("api")); s != "" {
 		t.Errorf("app setup %q", s)
+	}
+}
+
+// Several read replicas are containers of one service: each has its own
+// data, exporter and scrape job, and names itself to the primary.
+func TestReplicasCompose(t *testing.T) {
+	d, diags, err := design.LoadFile("../../../examples/read-replica.yaml")
+	if err != nil || diags.HasErrors() {
+		t.Fatal(err, diags)
+	}
+	n := 2
+	d.Services["ro"].Replicas = &n
+	p, err := plan.Build(d, plan.Options{RunID: "test-run", Seed: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildCompose(p, stackInput{Project: "loadlore-test-run", K6Script: []byte("// script\n"), DataVols: map[string]string{"db": "v1", "ro-0": "v2", "ro-1": "v3"}, Synthetic: "loadlore/synthetic:dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cf composeFile
+	if err := yaml.Unmarshal(got, &cf); err != nil {
+		t.Fatal(err)
+	}
+	if cf.Services["ro"] != nil {
+		t.Error("a container named after the service")
+	}
+	for i, c := range []string{"ro-0", "ro-1"} {
+		s := cf.Services[c]
+		if s == nil || s.Labels[LabelService] != "ro" || s.Labels[LabelReplica] != strconv.Itoa(i) || s.DependsOn["db"].Condition != "service_healthy" {
+			t.Fatalf("%s: %+v", c, s)
+		}
+		if !slices.Contains(s.Command, "primary_conninfo=host=db port=5432 user=loadlore password=loadlore application_name="+c) {
+			t.Errorf("%s command %v", c, s.Command)
+		}
+		if vol := cf.Volumes["data-"+c]; vol == nil || vol.Name != map[string]string{"ro-0": "v2", "ro-1": "v3"}[c] {
+			t.Errorf("%s volume %+v", c, vol)
+		}
+		if exp := cf.Services["lore-pgexp-"+c]; exp == nil || !strings.HasPrefix(exp.Environment["DATA_SOURCE_URI"], c+":5432/") {
+			t.Errorf("%s exporter %+v", c, exp)
+		}
+		job := fmt.Sprintf("job_name: postgres-%s\n    static_configs:\n      - targets: [\"lore-pgexp-%s:9187\"]\n        labels: {service: \"ro\", replica: \"%d\"}", c, c, i)
+		if !strings.Contains(cf.Configs["prometheus"].Content, job) {
+			t.Errorf("no scrape job for %s:\n%s", c, cf.Configs["prometheus"].Content)
+		}
 	}
 }

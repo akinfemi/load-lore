@@ -190,7 +190,8 @@ func (c *Config) Validate() error {
 			bad("target %s: kind %q", name, t.Kind)
 		case len(t.Addrs) == 0:
 			bad("target %s: no addrs", name)
-		case t.Kind != KindHTTP && len(t.Addrs) != 1:
+		case t.Kind == KindRedis && len(t.Addrs) != 1:
+			// Postgres targets may have several: one per read replica.
 			bad("target %s: a %s target has exactly one addr", name, t.Kind)
 		case t.Pool < 1:
 			bad("target %s: pool %d", name, t.Pool)

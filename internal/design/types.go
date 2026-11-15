@@ -21,7 +21,7 @@ type Service struct {
 	// Common.
 	Image     string     `yaml:"image,omitempty" json:"image,omitempty" jsonschema_description:"Container image for an application service: loadlore/synthetic or your own. Mutually exclusive with kind."`
 	Kind      string     `yaml:"kind,omitempty" json:"kind,omitempty" jsonschema:"enum=postgres,enum=postgres-replica,enum=redis,enum=pgbouncer,enum=lb" jsonschema_description:"Built-in component. Mutually exclusive with image."`
-	Replicas  *int       `yaml:"replicas,omitempty" json:"replicas,omitempty" jsonschema:"minimum=1,default=1" jsonschema_description:"Number of replicas. Datastores, pgbouncer and lb run exactly one."`
+	Replicas  *int       `yaml:"replicas,omitempty" json:"replicas,omitempty" jsonschema:"minimum=1,default=1" jsonschema_description:"Number of replicas. A postgres-replica can run several, each streaming from its primary, and callers spread their reads across them. Other datastores, pgbouncer and lb run exactly one."`
 	Resources *Resources `yaml:"resources,omitempty" json:"resources,omitempty" jsonschema_description:"Default 1 CPU and 512m; lb defaults to 0.5 CPU and 256m."`
 
 	// Application services.

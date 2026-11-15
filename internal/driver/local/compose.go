@@ -174,43 +174,56 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 	for _, s := range p.Services {
 		switch s.Kind {
 		case "postgres":
-			c := base(s.Image, s.Name, "datastore", -1, s.CPU, s.Memory)
-			setPeriod(c, s)
-			c.PullPolicy = "missing"
-			c.Environment = map[string]string{"POSTGRES_USER": plan.DBUser, "POSTGRES_PASSWORD": plan.DBPassword, "POSTGRES_DB": plan.DBName}
-			c.Command = []string{"postgres"}
-			for _, k := range sortedKeys(s.Config) {
-				c.Command = append(c.Command, "-c", k+"="+s.Config[k])
-			}
-			// Docker's 64 MB /dev/shm is too small for parallel queries.
-			c.ShmSize = memStr(max(64<<20, s.Memory/4))
-			vol := "data-" + s.Name
-			cf.Volumes[vol] = &composeVolume{External: true, Name: in.DataVols[s.Name]}
-			c.Volumes = []string{vol + ":" + pgDataPath(s.Version)}
-			if dev := in.DiskDevs[s.Name]; s.Disk != nil && dev != "" {
-				rate := []composeDeviceRate{{Path: dev, Rate: s.Disk.IOPS}}
-				c.BlkioConfig = &composeBlkio{DeviceReadIOPS: rate, DeviceWriteIOPS: rate}
-			}
-			c.Healthcheck = &composeHealth{Test: []string{"CMD-SHELL", fmt.Sprintf("pg_isready -U %s -d %s -h 127.0.0.1", plan.DBUser, plan.DBName)}, Interval: "1s", Timeout: "3s", Retries: 180}
-			c.StopGracePeriod = "10s"
-			if s.Primary != "" {
-				// It streams from the primary from the moment it starts.
-				c.DependsOn = map[string]composeDepend{s.Primary: {Condition: "service_healthy"}}
-			}
-			cf.Services[s.Name] = c
-			healthyDeps[s.Name] = composeDepend{Condition: "service_healthy"}
+			// One container per replica: a primary has one, a postgres-replica
+			// service one or several, each with its own data and exporter.
+			for i, name := range s.Containers {
+				replica := -1
+				if len(s.Containers) > 1 {
+					replica = i
+				}
+				c := base(s.Image, s.Name, "datastore", replica, s.CPU, s.Memory)
+				setPeriod(c, s)
+				c.PullPolicy = "missing"
+				c.Environment = map[string]string{"POSTGRES_USER": plan.DBUser, "POSTGRES_PASSWORD": plan.DBPassword, "POSTGRES_DB": plan.DBName}
+				c.Command = []string{"postgres"}
+				for _, k := range sortedKeys(s.Config) {
+					v := s.Config[k]
+					if k == "primary_conninfo" {
+						// The primary tells its replicas apart by this.
+						v += " application_name=" + name
+					}
+					c.Command = append(c.Command, "-c", k+"="+v)
+				}
+				// Docker's 64 MB /dev/shm is too small for parallel queries.
+				c.ShmSize = memStr(max(64<<20, s.Memory/4))
+				vol := "data-" + name
+				cf.Volumes[vol] = &composeVolume{External: true, Name: in.DataVols[name]}
+				c.Volumes = []string{vol + ":" + pgDataPath(s.Version)}
+				if dev := in.DiskDevs[s.Name]; s.Disk != nil && dev != "" {
+					rate := []composeDeviceRate{{Path: dev, Rate: s.Disk.IOPS}}
+					c.BlkioConfig = &composeBlkio{DeviceReadIOPS: rate, DeviceWriteIOPS: rate}
+				}
+				c.Healthcheck = &composeHealth{Test: []string{"CMD-SHELL", fmt.Sprintf("pg_isready -U %s -d %s -h 127.0.0.1", plan.DBUser, plan.DBName)}, Interval: "1s", Timeout: "3s", Retries: 180}
+				c.StopGracePeriod = "10s"
+				if s.Primary != "" {
+					// It streams from the primary from the moment it starts.
+					c.DependsOn = map[string]composeDepend{s.Primary: {Condition: "service_healthy"}}
+				}
+				cf.Services[name] = c
+				healthyDeps[name] = composeDepend{Condition: "service_healthy"}
 
-			exp := base(ImagePGExporter, s.Name, "exporter", -1, p.Infra.ExporterCPU, p.Infra.ExporterMem)
-			exp.Environment = map[string]string{
-				"DATA_SOURCE_URI":  fmt.Sprintf("%s:%d/%s?sslmode=disable", s.Name, plan.PostgresPort, plan.DBName),
-				"DATA_SOURCE_USER": plan.DBUser, "DATA_SOURCE_PASS": plan.DBPassword,
+				exp := base(ImagePGExporter, s.Name, "exporter", replica, p.Infra.ExporterCPU, p.Infra.ExporterMem)
+				exp.Environment = map[string]string{
+					"DATA_SOURCE_URI":  fmt.Sprintf("%s:%d/%s?sslmode=disable", name, plan.PostgresPort, plan.DBName),
+					"DATA_SOURCE_USER": plan.DBUser, "DATA_SOURCE_PASS": plan.DBPassword,
+				}
+				// The exporter has no lock-wait metric of its own; this query adds one.
+				exp.Environment["PG_EXPORTER_EXTEND_QUERY_PATH"] = pgExporterQueriesPath
+				cf.Configs["pgexp-queries"] = &composeConfig{Content: pgExporterQueries}
+				exp.Configs = []composeConfigRef{{Source: "pgexp-queries", Target: pgExporterQueriesPath}}
+				exp.DependsOn = map[string]composeDepend{name: {Condition: "service_healthy"}}
+				cf.Services["lore-pgexp-"+name] = exp
 			}
-			// The exporter has no lock-wait metric of its own; this query adds one.
-			exp.Environment["PG_EXPORTER_EXTEND_QUERY_PATH"] = pgExporterQueriesPath
-			cf.Configs["pgexp-queries"] = &composeConfig{Content: pgExporterQueries}
-			exp.Configs = []composeConfigRef{{Source: "pgexp-queries", Target: pgExporterQueriesPath}}
-			exp.DependsOn = map[string]composeDepend{s.Name: {Condition: "service_healthy"}}
-			cf.Services["lore-pgexp-"+s.Name] = exp
 		case "redis":
 			c := base(s.Image, s.Name, "datastore", -1, s.CPU, s.Memory)
 			setPeriod(c, s)
@@ -465,7 +478,9 @@ func toxiproxyConfig(p *plan.Plan) ([]byte, error) {
 // prometheusConfig scrapes every container of the run once a second. The
 // cAdvisor job keeps only this run's containers.
 func prometheusConfig(p *plan.Plan) string {
-	var app, pg, rd, pgb, lbs []string
+	type pgTarget struct{ service, container, replica string }
+	var app, rd, pgb, lbs []string
+	var pg []pgTarget
 	for _, s := range p.Services {
 		switch s.Kind {
 		case "lb":
@@ -478,7 +493,13 @@ func prometheusConfig(p *plan.Plan) string {
 				app = append(app, fmt.Sprintf("%s:%d", c, plan.AppPort))
 			}
 		case "postgres":
-			pg = append(pg, s.Name)
+			for i, c := range s.Containers {
+				t := pgTarget{service: s.Name, container: c}
+				if len(s.Containers) > 1 {
+					t.replica = strconv.Itoa(i)
+				}
+				pg = append(pg, t)
+			}
 		case "redis":
 			rd = append(rd, s.Name)
 		case "pgbouncer":
@@ -493,8 +514,12 @@ func prometheusConfig(p *plan.Plan) string {
 	if len(app) > 0 {
 		job("synthetic", app, "")
 	}
-	for _, name := range pg {
-		job("postgres-"+name, []string{fmt.Sprintf("lore-pgexp-%s:9187", name)}, fmt.Sprintf("        labels: {service: %q}\n", name))
+	for _, t := range pg {
+		labels := fmt.Sprintf("        labels: {service: %q}\n", t.service)
+		if t.replica != "" {
+			labels = fmt.Sprintf("        labels: {service: %q, replica: %q}\n", t.service, t.replica)
+		}
+		job("postgres-"+t.container, []string{fmt.Sprintf("lore-pgexp-%s:9187", t.container)}, labels)
 	}
 	for _, name := range rd {
 		job("redis-"+name, []string{fmt.Sprintf("lore-redisexp-%s:9121", name)}, fmt.Sprintf("        labels: {service: %q}\n", name))

@@ -438,7 +438,15 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 		// service is built (replicas).
 		s.Kind, s.Port, minMem = "postgres", PostgresPort, minMemoryPG
 		s.Version, s.Primary = ds.Version, ds.Primary
+		// One replica keeps the service's name, as a primary does; several
+		// are numbered, as an application's replicas are.
 		s.Containers = []string{name}
+		if n := *ds.Replicas; n > 1 {
+			s.Containers = nil
+			for i := range n {
+				s.Containers = append(s.Containers, fmt.Sprintf("%s-%d", name, i))
+			}
+		}
 	case ds.Kind == "postgres":
 		s.Kind, s.Port, minMem = "postgres", PostgresPort, minMemoryPG
 		s.Version = ds.Version
@@ -1181,9 +1189,7 @@ func (p *Plan) TotalCPU() float64 {
 	t := p.Infra.LoadCPU + p.Infra.ProxyCPU + p.Infra.PromCPU + p.Infra.CAdvisorCPU
 	for _, s := range p.Services {
 		t += s.CPU * float64(len(s.Containers))
-		if s.Kind == "postgres" || s.Kind == "redis" || s.Kind == "pgbouncer" {
-			t += p.Infra.ExporterCPU
-		}
+		t += p.Infra.ExporterCPU * float64(exporters(s))
 	}
 	return math.Round(t*100) / 100
 }
@@ -1193,9 +1199,7 @@ func (p *Plan) TotalMemory() int64 {
 	t := p.Infra.LoadMemory + p.Infra.ProxyMemory + p.Infra.PromMemory + p.Infra.CAdvisorMem
 	for _, s := range p.Services {
 		t += s.Memory * int64(len(s.Containers))
-		if s.Kind == "postgres" || s.Kind == "redis" || s.Kind == "pgbouncer" {
-			t += p.Infra.ExporterMem
-		}
+		t += p.Infra.ExporterMem * int64(exporters(s))
 	}
 	return t
 }
@@ -1339,7 +1343,9 @@ func (p *Plan) replicas(d *design.Design, byName map[string]*Service) {
 		if s.Config == nil {
 			s.Config = map[string]string{}
 		}
-		s.Config["primary_conninfo"] = fmt.Sprintf("host=%s port=%d user=%s password=%s application_name=%s", pr.Name, PostgresPort, DBUser, DBPassword, s.Name)
+		// Each container adds application_name=<its name>, so the primary's
+		// pg_stat_replication tells the replicas apart.
+		s.Config["primary_conninfo"] = fmt.Sprintf("host=%s port=%d user=%s password=%s", pr.Name, PostgresPort, DBUser, DBPassword)
 		if pr.Config == nil {
 			pr.Config = map[string]string{}
 		}
@@ -1381,4 +1387,17 @@ func (p *Plan) replicatedData(s *Service) string {
 		return s.Name
 	}
 	return ""
+}
+
+// exporters is how many metrics exporters Loadlore runs for s: one per
+// Postgres container (several read replicas each get one), one for a
+// Redis or PgBouncer, none for the rest.
+func exporters(s *Service) int {
+	switch s.Kind {
+	case "postgres":
+		return len(s.Containers)
+	case "redis", "pgbouncer":
+		return 1
+	}
+	return 0
 }

@@ -52,11 +52,15 @@ func newClient(name string, t Target, timeout time.Duration, m *metrics) (client
 // --- postgres (and pgbouncer) ---
 
 type pgClient struct {
-	name    string
-	data    string // the postgres whose rows it serves (Target.Data)
-	min     int
-	hold    string
-	pool    *pgxpool.Pool
+	name string
+	data string // the postgres whose rows it serves (Target.Data)
+	min  int
+	hold string
+	// pools has one pool per address: a target with several replicas,
+	// such as read replicas, gets each call spread across them in turn,
+	// as a client configured with every replica's host does.
+	pools   []*pgxpool.Pool
+	next    atomic.Uint64
 	spec    dataset.Spec
 	payload string
 	m       *metrics
@@ -87,37 +91,46 @@ func (p *pgClient) writePayload() (payload, token string) {
 var tokenEpoch = time.Now().UnixNano()
 
 func newPGClient(name string, t Target, m *metrics) (*pgClient, error) {
-	u := url.URL{
-		Scheme:   "postgres",
-		User:     url.UserPassword(t.User, t.Password),
-		Host:     t.Addrs[0],
-		Path:     "/" + t.Database,
-		RawQuery: "sslmode=disable&application_name=loadlore-synthetic",
-	}
-	cfg, err := pgxpool.ParseConfig(u.String())
-	if err != nil {
-		return nil, fmt.Errorf("target %s: %w", name, err)
-	}
-	cfg.MaxConns = int32(t.Pool)
-	// With a minimum, pgxpool opens that many connections in the
-	// background at once and keeps them open; without one, it opens
-	// connections only when callers need them.
-	cfg.MinConns = int32(t.PoolMin)
-	cfg.ConnConfig.Tracer = &connectTracer{target: name, m: m}
-	if t.SimpleProtocol {
-		// pgbouncer in transaction mode can't keep server-side prepared
-		// statements across transactions.
-		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
-	}
-	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
-	if err != nil {
-		return nil, fmt.Errorf("target %s: %w", name, err)
-	}
 	spec := dataset.Spec{Rows: t.Rows, RowBytes: t.RowBytes}
-	return &pgClient{
-		name: name, min: t.PoolMin, hold: t.Hold, pool: pool, spec: spec, m: m,
+	p := &pgClient{
+		name: name, min: t.PoolMin, hold: t.Hold, spec: spec, m: m,
 		payload: strings.Repeat("w", spec.PayloadLen()), data: t.Data,
-	}, nil
+	}
+	for _, addr := range t.Addrs {
+		u := url.URL{
+			Scheme:   "postgres",
+			User:     url.UserPassword(t.User, t.Password),
+			Host:     addr,
+			Path:     "/" + t.Database,
+			RawQuery: "sslmode=disable&application_name=loadlore-synthetic",
+		}
+		cfg, err := pgxpool.ParseConfig(u.String())
+		if err != nil {
+			p.close()
+			return nil, fmt.Errorf("target %s: %w", name, err)
+		}
+		cfg.MaxConns = int32(t.Pool)
+		// With a minimum, pgxpool opens that many connections in the
+		// background at once and keeps them open; without one, it opens
+		// connections only when callers need them.
+		cfg.MinConns = int32(t.PoolMin)
+		cfg.ConnConfig.Tracer = &connectTracer{target: name, m: m}
+		if t.SimpleProtocol {
+			// pgbouncer in transaction mode can't keep server-side prepared
+			// statements across transactions.
+			cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+		}
+		pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+		if err != nil {
+			p.close()
+			return nil, fmt.Errorf("target %s: %w", name, err)
+		}
+		p.pools = append(p.pools, pool)
+	}
+	if len(p.pools) == 0 {
+		return nil, fmt.Errorf("target %s: no addresses", name)
+	}
+	return p, nil
 }
 
 func (p *pgClient) do(ctx context.Context, c *Call, r request) (bool, error) {
@@ -214,7 +227,8 @@ func (p *pgClient) conn(ctx context.Context) (*pgxpool.Conn, func(), error) {
 func (p *pgClient) acquire(ctx context.Context) (*pgxpool.Conn, error) {
 	p.pending.Add(1)
 	start := time.Now()
-	conn, err := p.pool.Acquire(ctx)
+	pool := p.pools[(p.next.Add(1)-1)%uint64(len(p.pools))]
+	conn, err := pool.Acquire(ctx)
 	p.pending.Add(-1)
 	p.m.poolWait.WithLabelValues(p.name).Observe(time.Since(start).Seconds())
 	if err != nil {
@@ -305,23 +319,29 @@ func withoutSession(ctx context.Context) context.Context {
 	return context.WithValue(ctx, sessionKey{}, (*session)(nil))
 }
 
+// snapshot sums the pools: one per replica of the target.
 func (p *pgClient) snapshot() poolSnapshot {
-	s := p.pool.Stat()
-	return poolSnapshot{
-		target: p.name, max: int64(s.MaxConns()), inUse: int64(s.AcquiredConns()),
-		idle: int64(s.IdleConns()), pending: p.pending.Load(),
+	ps := poolSnapshot{target: p.name, pending: p.pending.Load()}
+	for _, pool := range p.pools {
+		s := pool.Stat()
+		ps.max += int64(s.MaxConns())
+		ps.inUse += int64(s.AcquiredConns())
+		ps.idle += int64(s.IdleConns())
 	}
+	return ps
 }
 
 // ping checks the database answers and, for a pool with a minimum, that
 // the minimum is open, so the load starts on a warm pool.
 func (p *pgClient) ping(ctx context.Context) error {
-	if err := p.pool.Ping(ctx); err != nil {
-		return err
-	}
-	s := p.pool.Stat()
-	if open := int(s.AcquiredConns() + s.IdleConns()); open < p.min {
-		return fmt.Errorf("%d of the pool's minimum %d connections open", open, p.min)
+	for _, pool := range p.pools {
+		if err := pool.Ping(ctx); err != nil {
+			return err
+		}
+		s := pool.Stat()
+		if open := int(s.AcquiredConns() + s.IdleConns()); open < p.min {
+			return fmt.Errorf("%d of the pool's minimum %d connections open", open, p.min)
+		}
 	}
 	return nil
 }
@@ -355,7 +375,11 @@ func (t *connectTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.
 	return ctx
 }
 func (t *connectTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
-func (p *pgClient) close()                                                               { p.pool.Close() }
+func (p *pgClient) close() {
+	for _, pool := range p.pools {
+		pool.Close()
+	}
+}
 
 // poolWaitErr labels an error that ended a wait for a pool connection. A
 // deadline means the pool was the bottleneck; a cancel means the caller left.

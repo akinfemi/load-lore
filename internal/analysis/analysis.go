@@ -708,11 +708,13 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 			sw.LockWaits = num(mean, true)
 		}
 		if s.Primary != "" {
-			if mx, _, ok := st.gaugeSum("pg_replication_lag_seconds", svc, wa, wb); ok {
-				sw.ReplicationLagS = num(mx, true)
+			// Several replicas lag separately: the worst one's is the lag.
+			if lag := st.gaugeEach("pg_replication_lag_seconds", svc, "instance", wa, wb); len(lag) > 0 {
+				sw.ReplicationLagS = num(maxOf(lag), true)
 			}
-			if mx, _, ok := st.gaugeSum("pg_stat_replication_pg_wal_lsn_diff", eq("service", s.Primary, "application_name", s.Name), wa, wb); ok {
-				sw.ReplicationLagBytes = num(mx, true)
+			mine := func(l map[string]string) bool { return l["service"] == s.Primary && slices.Contains(s.Containers, l["application_name"]) }
+			if behind := st.gaugeEach("pg_stat_replication_pg_wal_lsn_diff", mine, "application_name", wa, wb); len(behind) > 0 {
+				sw.ReplicationLagBytes = num(maxOf(behind), true)
 			}
 			stale, ok1 := st.increase("loadlore_read_after_write_total", eq("target", s.Name, "result", "stale"), wa, wb)
 			fresh, ok2 := st.increase("loadlore_read_after_write_total", eq("target", s.Name, "result", "fresh"), wa, wb)
@@ -983,4 +985,13 @@ func peakVUs(a *Analysis) *float64 {
 		peak = maxPtr(peak, w.VUs)
 	}
 	return peak
+}
+
+// maxOf is the largest value in m, which must not be empty.
+func maxOf(m map[string]float64) float64 {
+	mx := math.Inf(-1)
+	for _, v := range m {
+		mx = math.Max(mx, v)
+	}
+	return mx
 }

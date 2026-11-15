@@ -182,13 +182,10 @@ func (v *validator) service(name string, s *Service) {
 		notFor("version", s.Version != "", "the lb's version is pinned by Loadlore")
 		notFor("config", s.Config != nil, "set algorithm and health_check instead")
 	}
-	if s.Replicas != nil && *s.Replicas != 1 {
+	if s.Replicas != nil && *s.Replicas != 1 && s.Kind != "postgres-replica" {
 		msg := fmt.Sprintf("%s runs exactly one replica", s.Kind)
-		switch s.Kind {
-		case "postgres":
+		if s.Kind == "postgres" {
 			msg += "; for read replicas, add a kind: postgres-replica service with primary: " + name
-		case "postgres-replica":
-			msg += " for now; for more, add more postgres-replica services"
 		}
 		v.errorf(pathKey(p, "replicas"), CodeRange, "%s", msg)
 	}
@@ -211,6 +208,8 @@ func (v *validator) service(name string, s *Service) {
 			v.unknownService(pathKey(p, "target"), s.Target)
 		case t == nil || !t.IsPostgres():
 			v.errorf(pathKey(p, "target"), CodeOpTarget, "pgbouncer's target must be a postgres or postgres-replica service; %q isn't", s.Target)
+		case t.Replicas != nil && *t.Replicas > 1:
+			v.errorf(pathKey(p, "target"), CodeOpTarget, "pgbouncer connects to one server, and %q has %d replicas; give each replica its own postgres-replica service, or call the replicas directly", s.Target, *t.Replicas)
 		}
 		for _, k := range sortedKeys(s.Config) {
 			kp := pathKey(pathKey(p, "config"), k)
@@ -665,6 +664,9 @@ func (v *validator) faultTarget(p string, f *Fault) {
 	}
 	if f.Inject == "disk_slow" && t.IsApp() {
 		v.errorf(pathKey(p, "target"), CodeOpTarget, "disk_slow targets a datastore; %s is an application service", f.Target.Name)
+	}
+	if f.Inject == "disk_slow" && t.Kind == "postgres-replica" {
+		v.errorf(pathKey(p, "target"), CodeOpTarget, "disk_slow slows a primary's disk; slowing a read replica's isn't supported yet")
 	}
 	if edgeFaults[f.Inject] && f.Target.Name != v.d.entry() && !v.d.isCalled(f.Target.Name) {
 		v.errorf(pathKey(p, "target"), CodeOpTarget, "nothing calls %s, so there is no connection for %s to act on", f.Target.Name, f.Inject)

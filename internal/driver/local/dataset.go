@@ -34,10 +34,11 @@ func datasetHash(s *plan.Service) string {
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
-// prepareData makes a fresh writable data volume for a postgres service:
-// a copy of the cached seeded volume, seeding it first on a cache miss.
-// The copy keeps one run's writes out of the next run's data.
-func (d *Driver) prepareData(ctx context.Context, s *plan.Service, progress func(string)) (string, error) {
+// prepareData makes a fresh writable data volume for one container of a
+// postgres service: a copy of the cached seeded volume, seeding it first
+// on a cache miss. The copy keeps one run's writes out of the next run's
+// data. Each of several read replicas gets its own copy.
+func (d *Driver) prepareData(ctx context.Context, s *plan.Service, container string, progress func(string)) (string, error) {
 	cache := cacheVolume(s)
 	hit, err := d.volumeHasMarker(ctx, cache)
 	if err != nil {
@@ -62,8 +63,8 @@ func (d *Driver) prepareData(ctx context.Context, s *plan.Service, progress func
 	if d.plan.ReuseData && !s.SlowDisk && !replicated {
 		return d.reuseData(ctx, s, cache, progress)
 	}
-	run := fmt.Sprintf("loadlore-%s-%s-data", d.runID, s.Name)
-	progress(fmt.Sprintf("copying %s's cached data into a fresh volume", s.Name))
+	run := fmt.Sprintf("loadlore-%s-%s-data", d.runID, container)
+	progress(fmt.Sprintf("copying %s's cached data into a fresh volume", container))
 	start := time.Now()
 	if s.SlowDisk {
 		if err := d.slowDiskVolume(ctx, s, run); err != nil {
@@ -81,7 +82,7 @@ func (d *Driver) prepareData(ctx context.Context, s *plan.Service, progress func
 			return "", fmt.Errorf("%s's disk: emptying the page cache: %w", s.Name, err)
 		}
 	}
-	d.event("data_copy", map[string]any{"service": s.Name, "volume": run, "seconds": time.Since(start).Seconds()})
+	d.event("data_copy", map[string]any{"service": s.Name, "container": container, "volume": run, "seconds": time.Since(start).Seconds()})
 	return run, nil
 }
 

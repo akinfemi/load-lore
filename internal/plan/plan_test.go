@@ -571,7 +571,7 @@ func TestReadReplica(t *testing.T) {
 	if ro.Kind != "postgres" || ro.Primary != "db" || ro.Image != db.Image || ro.Dataset == nil || ro.Dataset.Rows != db.Dataset.Rows || ro.Dataset == db.Dataset {
 		t.Fatalf("replica %+v", ro)
 	}
-	if want := "host=db port=5432 user=loadlore password=loadlore application_name=ro"; ro.Config["primary_conninfo"] != want {
+	if want := "host=db port=5432 user=loadlore password=loadlore"; ro.Config["primary_conninfo"] != want {
 		t.Errorf("primary_conninfo %q", ro.Config["primary_conninfo"])
 	}
 	if db.Config["wal_keep_size"] != DefaultWALKeepSize || db.Primary != "" {
@@ -585,5 +585,32 @@ func TestReadReplica(t *testing.T) {
 	}
 	if a := findAssumption(p, "services.db.config.wal_keep_size"); a == nil || a.Value != "1GB" {
 		t.Errorf("wal_keep_size assumption %+v", a)
+	}
+}
+
+// Several replicas are numbered containers of one service, each with an
+// exporter in the budget.
+func TestReadReplicas(t *testing.T) {
+	d := loadFile(t, "../../examples/read-replica.yaml")
+	one, err := Build(d, Options{RunID: "r", Scale: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 3
+	d.Services["ro"].Replicas = &n
+	p, err := Build(d, Options{RunID: "r", Scale: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Service("ro").Containers; !slices.Equal(got, []string{"ro-0", "ro-1", "ro-2"}) {
+		t.Errorf("containers %v", got)
+	}
+	if got := len(p.proxiesInto("api", "ro")); got != 3 {
+		t.Errorf("%d proxies from api to ro, want one per replica", got)
+	}
+	ro := p.Service("ro")
+	want := one.TotalCPU() + 2*(ro.CPU+p.Infra.ExporterCPU)
+	if got := p.TotalCPU(); math.Abs(got-want) > 0.011 {
+		t.Errorf("total CPU %v, want %v", got, want)
 	}
 }
