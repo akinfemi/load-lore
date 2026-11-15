@@ -135,10 +135,11 @@ done`, slowDiskTools, prefix)
 }
 
 // trimDockerDisk hands blocks freed inside the Docker host back to the
-// machine under it, best effort. A slow-disk run writes its dataset twice
-// (the volume and the device's image file), and on a VM such as Colima's
-// the disk image on the Mac keeps that space after the volumes are removed
-// until something trims it; a few runs can fill a laptop's disk.
+// machine under it, best effort. Each run copies its datasets into fresh
+// volumes (a slow-disk run writes them twice: the volume and the device's
+// image file), and on a VM such as Colima's the disk image on the Mac
+// keeps that space after the volumes are removed until something trims
+// it; a scenario check's few runs can fill a laptop's disk.
 func (d *Driver) trimDockerDisk(ctx context.Context) {
 	out, err := d.docker(ctx, "info", "-f", "{{.DockerRootDir}}")
 	root := strings.TrimSpace(string(out))

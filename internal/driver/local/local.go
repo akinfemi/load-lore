@@ -671,7 +671,9 @@ func (d *Driver) Down(ctx context.Context) error {
 		if d.runID != "" {
 			errs = append(errs, removeByLabel(ctx, d.api, LabelRun+"="+d.runID, true))
 		}
-		if d.plan != nil && hasSlowDisk(d.plan) {
+		// Every run's volumes held a copy of its data; trimming gives the
+		// space back to the machine under a VM.
+		if d.plan != nil {
 			d.trimDockerDisk(ctx)
 		}
 		d.downErr = errors.Join(errs...)
