@@ -31,6 +31,14 @@ type Driver interface {
 	StopLoad(ctx context.Context) error
 	// Inject applies a fault. undo ends it, for faults that can end.
 	Inject(ctx context.Context, f *plan.Fault) (undo func(context.Context) error, err error)
+	// Metric reads an autoscaled service's metric (cpu, p99 or inflight)
+	// over its running replicas, averaged over the last window. ok is
+	// false while there's no data.
+	Metric(ctx context.Context, service, metric string, window time.Duration) (v float64, ok bool, err error)
+	// Scale makes an autoscaled service run n replicas, starting or
+	// draining and stopping them; ready is called as each new one takes
+	// traffic.
+	Scale(ctx context.Context, service string, n int, ready func(container string, took time.Duration)) error
 	// Sample reads current numbers for progress output.
 	Sample(ctx context.Context, elapsed time.Duration) (*Sample, error)
 	// Collect copies metrics, logs and container state into the run

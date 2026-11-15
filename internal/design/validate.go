@@ -142,6 +142,7 @@ func (v *validator) service(name string, s *Service) {
 			v.resilience(pathKey(p, "behavior.resilience"), s.Behavior.Resilience)
 		}
 		v.pools(name, p, s)
+		v.autoscale(name, p, s)
 		if c := s.Concurrency; c != nil && c.Model == "workers" && c.Max != nil && *c.Max < 1 {
 			v.errorf(pathKey(p, "concurrency.max"), CodeRange, "workers needs at least 1 worker")
 		}
@@ -153,6 +154,7 @@ func (v *validator) service(name string, s *Service) {
 	notFor("behavior", s.Behavior != nil, why)
 	notFor("pools", s.Pools != nil, why)
 	notFor("concurrency", s.Concurrency != nil, why)
+	notFor("autoscale", s.Autoscale != nil, why)
 	notFor("dataset", s.Dataset != nil && s.Kind == "postgres-replica", "a replica starts from a copy of its primary's data, so the dataset goes on the primary")
 	notFor("dataset", s.Dataset != nil && !s.IsPostgres(), "datasets are seeded into postgres")
 	notFor("primary", s.Primary != "" && s.Kind != "postgres-replica", "it is for postgres-replica")
@@ -1043,6 +1045,73 @@ func (v *validator) replica(name, p string, s *Service) {
 	for _, k := range sortedKeys(s.Config) {
 		if why, ok := replicaOwnKeys[k]; ok {
 			v.errorf(pathKey(pathKey(p, "config"), k), CodeNotApplicable, "%s can't be set in config: %s", k, why)
+		}
+	}
+}
+
+// autoscale checks an application service's autoscale block: a sane range
+// that holds its starting replicas, a target its metric can use, and an lb
+// in front to add replicas to and drain them from.
+func (v *validator) autoscale(name, p string, s *Service) {
+	a := s.Autoscale
+	if a == nil {
+		return
+	}
+	ap := pathKey(p, "autoscale")
+	if a.Max == nil {
+		v.errorf(pathKey(ap, "max"), CodeRequired, "autoscale needs max: the most replicas it may run")
+		return
+	}
+	lo, hi := 1, *a.Max
+	if a.Min != nil {
+		lo = *a.Min
+	}
+	switch {
+	case lo < 1:
+		v.errorf(pathKey(ap, "min"), CodeRange, "min must be at least 1")
+	case hi < lo:
+		v.errorf(pathKey(ap, "max"), CodeRange, "max %d is below min %d", hi, lo)
+	case s.Replicas != nil && (*s.Replicas < lo || *s.Replicas > hi):
+		v.errorf(pathKey(p, "replicas"), CodeRange, "replicas is how many it starts with, so it must be from min %d to max %d, not %d", lo, hi, *s.Replicas)
+	}
+	switch {
+	case a.Target == nil:
+		v.errorf(pathKey(ap, "target"), CodeRequired, "autoscale on %s needs a target: %s", a.Metric, map[string]string{"p99": "the p99 in milliseconds to hold, such as 200", "inflight": "the requests in flight per replica to hold, such as 20"}[a.Metric])
+	case *a.Target <= 0:
+		v.errorf(pathKey(ap, "target"), CodeRange, "target must be above 0")
+	case a.Metric == "cpu" && *a.Target > 1:
+		v.errorf(pathKey(ap, "target"), CodeRange, "a cpu target is a fraction of the replica's CPU limit, such as 0.7, not %g", *a.Target)
+	}
+	if a.IntervalS != nil && *a.IntervalS < 5 {
+		v.errorf(pathKey(ap, "interval_s"), CodeRange, "interval_s must be at least 5: metrics are scraped every second and averaged over the interval")
+	}
+	if a.ScaleUpCooldownS != nil && *a.ScaleUpCooldownS < 0 {
+		v.errorf(pathKey(ap, "scale_up_cooldown_s"), CodeRange, "scale_up_cooldown_s can't be negative")
+	}
+	if a.ScaleDownCooldownS != nil && *a.ScaleDownCooldownS < 0 {
+		v.errorf(pathKey(ap, "scale_down_cooldown_s"), CodeRange, "scale_down_cooldown_s can't be negative")
+	}
+	fronted := false
+	for _, other := range v.d.Services {
+		if other != nil && other.Kind == "lb" && other.Target == name {
+			fronted = true
+		}
+	}
+	if !fronted {
+		v.errorf(ap, CodeNotApplicable, "autoscale needs a kind: lb service with target: %s, to add replicas to and drain them from", name)
+	}
+	if v.d.entry() == name {
+		v.errorf(ap, CodeNotApplicable, "the workload's entry is %s itself; make its lb the entry, so new replicas get traffic", name)
+	}
+	for _, caller := range v.d.ServiceNames() {
+		c := v.d.Services[caller]
+		if c == nil || c.Behavior == nil {
+			continue
+		}
+		direct := false
+		walkCalls(c.Behavior.Calls, func(call *Call) { direct = direct || call.Target == name })
+		if direct {
+			v.errorf(ap, CodeNotApplicable, "%s calls %s directly; call its lb instead, so new replicas get %s's calls too", caller, name, caller)
 		}
 	}
 }

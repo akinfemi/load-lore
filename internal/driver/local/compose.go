@@ -281,10 +281,16 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 		c.Configs = []composeConfigRef{{Source: cfgName, Target: "/usr/local/etc/haproxy/haproxy.cfg"}}
 		// The image has no HTTP client; bash can open a TCP connection.
 		c.Healthcheck = &composeHealth{Test: []string{"CMD", "bash", "-c", fmt.Sprintf("exec 3<>/dev/tcp/127.0.0.1/%d", plan.LBStatsPort)}, Interval: "1s", Timeout: "3s", Retries: 60}
-		// The replicas start first so the lb's first checks find them up.
+		// The replicas start first so the lb's first checks find them up;
+		// an autoscaler's later replicas aren't started yet.
 		deps := map[string]composeDepend{svcToxiproxy: {Condition: "service_started"}}
 		for _, srv := range s.LB.Servers {
-			deps[srv.Name] = composeDepend{Condition: "service_healthy"}
+			if !srv.Disabled {
+				deps[srv.Name] = composeDepend{Condition: "service_healthy"}
+			}
+		}
+		if s.LB.Autoscaled {
+			c.Ports = []string{fmt.Sprintf("127.0.0.1::%d", plan.LBAdminPort)}
 		}
 		c.DependsOn = deps
 		cf.Services[s.Name] = c
@@ -311,6 +317,10 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 				c.Healthcheck = &composeHealth{Test: []string{"CMD", "/synthetic", "healthcheck"}, Interval: "1s", Timeout: "3s", Retries: 120}
 			}
 			c.DependsOn = healthyDeps
+			if !slices.Contains(s.Running(), name) {
+				// An autoscaler's replica: started during the run, by name.
+				c.Profiles = []string{profileScale}
+			}
 			cf.Services[name] = c
 		}
 	}
@@ -421,9 +431,14 @@ func pgbouncerConfig(s *plan.Service) string {
 // else is HAProxy's own default.
 func haproxyConfig(lb *plan.LB) string {
 	var b strings.Builder
+	admin := ""
+	if lb.Autoscaled {
+		// The autoscaler enables and drains servers through it.
+		admin = fmt.Sprintf("    stats socket ipv4@0.0.0.0:%d level admin\n", plan.LBAdminPort)
+	}
 	fmt.Fprintf(&b, `global
     maxconn 50000
-
+%s
 defaults
     mode http
     timeout connect 5s
@@ -444,9 +459,13 @@ backend replicas
     balance %s
     option httpchk GET %s
     default-server check inter %dms fall %d rise %d
-`, lb.TimeoutMs, plan.AppPort, lb.StatsListen, lbAlgorithms[lb.Algorithm], lb.CheckPath, lb.IntervalMs, lb.Fall, lb.Rise)
+`, admin, lb.TimeoutMs, plan.AppPort, lb.StatsListen, lbAlgorithms[lb.Algorithm], lb.CheckPath, lb.IntervalMs, lb.Fall, lb.Rise)
 	for _, srv := range lb.Servers {
-		fmt.Fprintf(&b, "    server %s %s\n", srv.Name, srv.Addr)
+		off := ""
+		if srv.Disabled {
+			off = " disabled"
+		}
+		fmt.Fprintf(&b, "    server %s %s%s\n", srv.Name, srv.Addr, off)
 	}
 	return b.String()
 }
@@ -569,3 +588,7 @@ func sortedKeys(m map[string]string) []string {
 	slices.Sort(keys)
 	return keys
 }
+
+// profileScale holds an autoscaler's replicas that don't run when the load
+// starts: compose up leaves them, and the autoscaler starts them by name.
+const profileScale = "scale"

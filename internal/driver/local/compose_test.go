@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -292,5 +293,52 @@ func TestReplicasCompose(t *testing.T) {
 		if !strings.Contains(cf.Configs["prometheus"].Content, job) {
 			t.Errorf("no scrape job for %s:\n%s", c, cf.Configs["prometheus"].Content)
 		}
+	}
+}
+
+// An autoscaled service has a container per replica it may run; the ones it
+// doesn't start with are in the scale profile and start disabled on the
+// lb, whose runtime API is published.
+func TestAutoscaleCompose(t *testing.T) {
+	d, diags, err := design.LoadFile("../../../examples/autoscale.yaml")
+	if err != nil || diags.HasErrors() {
+		t.Fatal(err, diags)
+	}
+	p, err := plan.Build(d, plan.Options{RunID: "test-run", Seed: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildCompose(p, stackInput{Project: "loadlore-test-run", K6Script: []byte("// script\n"), DataVols: map[string]string{"db": "v"}, Synthetic: "loadlore/synthetic:dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cf composeFile
+	if err := yaml.Unmarshal(got, &cf); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 5 {
+		c := cf.Services[fmt.Sprintf("api-%d", i)]
+		if c == nil {
+			t.Fatalf("no api-%d", i)
+		}
+		if scaled := slices.Contains(c.Profiles, profileScale); scaled != (i >= 2) {
+			t.Errorf("api-%d profiles %v", i, c.Profiles)
+		}
+	}
+	lb := cf.Services["lb"]
+	if _, ok := lb.DependsOn["api-2"]; ok || lb.DependsOn["api-1"].Condition != "service_healthy" {
+		t.Errorf("lb depends on %v", lb.DependsOn)
+	}
+	if !slices.Contains(lb.Ports, "127.0.0.1::9999") {
+		t.Errorf("lb ports %v", lb.Ports)
+	}
+	cfg := cf.Configs["haproxy-lb"].Content
+	for _, want := range []string{"stats socket ipv4@0.0.0.0:9999 level admin", "server api-1 lore-toxiproxy:", "server api-4 lore-toxiproxy:"} {
+		if !strings.Contains(cfg, want) {
+			t.Errorf("haproxy.cfg lacks %q:\n%s", want, cfg)
+		}
+	}
+	if !regexp.MustCompile(`server api-4 \S+ disabled`).MatchString(cfg) || regexp.MustCompile(`server api-1 \S+ disabled`).MatchString(cfg) {
+		t.Errorf("disabled servers wrong:\n%s", cfg)
 	}
 }

@@ -70,6 +70,27 @@ A pool is a size, or `{ size, min }`. `min` (default `0`, postgres and pgbouncer
 | `event-loop` (Node.js) | in-flight requests per replica; CPU work is serialized on one core per replica, I/O is concurrent | `0` (unlimited) |
 | `workers` (Python/Ruby: gunicorn, puma) | worker count, one request per worker at a time | `4` |
 
+`autoscale` adds and removes replicas during the run, as a Kubernetes HorizontalPodAutoscaler does. `replicas` is how many it starts with, and an `lb` must sit in front: other services call the lb, not the service.
+
+```yaml
+api:
+  image: loadlore/synthetic
+  replicas: 2
+  autoscale: { max: 6, metric: cpu, target: 0.7 }
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `min` | `replicas` | Fewest replicas |
+| `max` | required | Most replicas. Loadlore budgets CPU and memory for all of them |
+| `metric` | `cpu` | `cpu`: mean CPU of the running replicas against their limit. `p99`: the service's own p99 in ms. `inflight`: mean requests in flight per replica |
+| `target` | `0.7` for `cpu` | The value to hold: a fraction for `cpu`, milliseconds for `p99`, requests for `inflight` (required for those two) |
+| `interval_s` | `15` | Seconds between decisions; the metric is averaged over this window |
+| `scale_up_cooldown_s` | `0` | Seconds after a change before it scales up again. Kubernetes' default is `0`; a cloud autoscaling group's cooldown applies here too |
+| `scale_down_cooldown_s` | `300` | Seconds after a change before it scales down, Kubernetes' stabilization window |
+
+Every `interval_s` it wants `ceil(running × value ÷ target)` replicas, within `min` and `max`, and ignores a change within 10% of the target. A new replica is a real container: it starts, its pools open their connections (all `min` of them, at once), it passes its health check, and only then does the lb send it traffic. A leaving replica is drained first: the lb sends it no new requests, and it stops once its requests finish. The report shows each decision and how long each new replica took to take traffic.
+
 Call fields:
 
 | Field | Default | Values |

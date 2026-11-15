@@ -477,6 +477,34 @@ func timeline(events []rundir.Event, t0 float64, project string) ([]Event, []Dat
 				detail += ": " + msg
 			}
 			out = append(out, Event{At: at, Kind: e.Kind, Detail: detail})
+		case "autoscale":
+			num := func(k string) float64 { f, _ := e.Fields[k].(float64); return f }
+			v, target := num("value"), num("target")
+			shown := fmt.Sprintf("%g, target %g", v, target)
+			switch str("metric") {
+			case "cpu":
+				shown = fmt.Sprintf("CPU %s of its limit, target %s", Pct(v), Pct(target))
+			case "p99":
+				shown = fmt.Sprintf("p99 %s, target %s", Ms(v), Ms(target))
+			case "inflight":
+				shown = fmt.Sprintf("%.1f requests in flight per replica, target %g", v, target)
+			}
+			out = append(out, Event{At: at, Kind: "autoscale", Detail: fmt.Sprintf("%s %d → %d replicas (%s)", str("service"), int(num("from")), int(num("to")), shown)})
+		case "replica_ready":
+			num := func(k string) float64 { f, _ := e.Fields[k].(float64); return f }
+			out = append(out, Event{At: at, Kind: "replica_ready", Detail: fmt.Sprintf("%s took traffic, %.1f s after the decision", str("container"), num("seconds"))})
+		case "replicas_stopped":
+			var names []string
+			if xs, ok := e.Fields["containers"].([]any); ok {
+				for _, x := range xs {
+					if n, ok := x.(string); ok {
+						names = append(names, n)
+					}
+				}
+			}
+			out = append(out, Event{At: at, Kind: "replicas_stopped", Detail: strings.Join(names, ", ") + " drained and stopped"})
+		case "autoscale_error":
+			out = append(out, Event{At: at, Kind: "autoscale_error", Detail: fmt.Sprintf("%s: scaling failed: %s", str("service"), str("error"))})
 		case "load_stop":
 			num := func(k string) float64 { f, _ := e.Fields[k].(float64); return f }
 			out = append(out, Event{At: at, Kind: "load_stop", Detail: fmt.Sprintf("the live check confirmed the break at %s; the rest of the profile didn't run", Clock(num("confirmed_at_s")))})
@@ -628,12 +656,26 @@ func roleOf(kind string) string {
 // their limits, counting only containers that reported in the window (a
 // killed replica stops counting).
 func (b *builder) cpu(m matcher, limit float64, wa, wb float64) (util, throttled *float64, replicas int) {
-	used := 0.0
+	return b.cpuOf(m, limit, wa, wb, false)
+}
+
+// cpuOf is cpu; with runningOnly, a container whose CPU didn't advance in
+// the window doesn't count as a replica: an autoscaler's stopped replica,
+// which cAdvisor goes on reporting for a while.
+func (b *builder) cpuOf(m matcher, limit float64, wa, wb float64, runningOnly bool) (util, throttled *float64, replicas int) {
+	used, seen := 0.0, 0
 	for _, ss := range b.st.match("container_cpu_usage_seconds_total", m) {
 		if inc, ok := b.st.increaseOne(ss, wa, wb); ok {
+			seen++
+			if runningOnly && inc <= 0 {
+				continue
+			}
 			used += inc
 			replicas++
 		}
+	}
+	if runningOnly && replicas == 0 && seen > 0 {
+		replicas = seen
 	}
 	if replicas == 0 || limit <= 0 {
 		return nil, nil, 0
@@ -669,7 +711,7 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 	st := b.st
 	sw := &ServiceWindow{}
 	m := eq("service", s.Name, "role", roleOf(s.Kind))
-	sw.CPU, sw.Throttled, sw.Replicas = b.cpu(m, s.CPU, wa, wb)
+	sw.CPU, sw.Throttled, sw.Replicas = b.cpuOf(m, s.CPU, wa, wb, s.Autoscale != nil)
 	if mem := st.gaugeEach("container_memory_working_set_bytes", m, "name", wa, wb); len(mem) > 0 && s.Memory > 0 {
 		worst := 0.0
 		for _, v := range mem {

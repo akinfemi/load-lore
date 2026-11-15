@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"fmt"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,8 @@ type fakeDriver struct {
 	speeds   []int // speed indexes pre-flight and then each Speed call measure
 
 	sample   *driver.Sample // what Sample returns; nil: an empty sample
+	metric   func(service, metric string) (float64, bool)
+	scaled   []string // Scale calls, "service=n"
 	stopOnce sync.Once
 	stopCh   chan struct{} // closed by StopLoad
 }
@@ -101,6 +104,21 @@ func (f *fakeDriver) Inject(_ context.Context, fl *plan.Fault) (func(context.Con
 		f.mu.Unlock()
 		return nil
 	}, nil
+}
+
+func (f *fakeDriver) Metric(_ context.Context, service, metric string, _ time.Duration) (float64, bool, error) {
+	if f.metric == nil {
+		return 0, false, nil
+	}
+	v, ok := f.metric(service, metric)
+	return v, ok, nil
+}
+
+func (f *fakeDriver) Scale(_ context.Context, service string, n int, ready func(string, time.Duration)) error {
+	f.mu.Lock()
+	f.scaled = append(f.scaled, fmt.Sprintf("%s=%d", service, n))
+	f.mu.Unlock()
+	return nil
 }
 
 func (f *fakeDriver) Sample(context.Context, time.Duration) (*driver.Sample, error) {

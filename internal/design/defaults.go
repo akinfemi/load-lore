@@ -157,6 +157,18 @@ func defaultApp(s *Service, services map[string]*Service) {
 	if max, ok := DefaultConcurrencyMax[s.Concurrency.Model]; ok {
 		setDefault(&s.Concurrency.Max, max)
 	}
+	if a := s.Autoscale; a != nil {
+		setDefault(&a.Min, *s.Replicas)
+		if a.Metric == "" {
+			a.Metric = "cpu"
+		}
+		if a.Metric == "cpu" {
+			setDefault(&a.Target, DefaultAutoscaleCPU)
+		}
+		setDefault(&a.IntervalS, DefaultAutoscaleIntervalS)
+		setDefault(&a.ScaleUpCooldownS, 0)
+		setDefault(&a.ScaleDownCooldownS, DefaultAutoscaleScaleDownS)
+	}
 	if !s.IsSynthetic() {
 		return
 	}
@@ -251,3 +263,12 @@ func walkCalls(calls []*Call, fn func(*Call)) {
 
 // complement returns 1-f rounded to 9 decimals, so 1-0.9 prints as 0.1.
 func complement(f float64) float64 { return math.Round((1-f)*1e9) / 1e9 }
+
+// Autoscale defaults, as a Kubernetes HorizontalPodAutoscaler's: its
+// decision interval, no wait before scaling up, and its scale-down
+// stabilization window; and a common CPU target.
+const (
+	DefaultAutoscaleCPU        = 0.7
+	DefaultAutoscaleIntervalS  = 15
+	DefaultAutoscaleScaleDownS = 300
+)

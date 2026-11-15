@@ -42,6 +42,11 @@ type Driver struct {
 	// compose file's IOPS cap.
 	diskDevs map[string]string
 
+	// scaleMu serializes Scale; running is how many replicas each
+	// autoscaled service runs, once the autoscaler has changed it.
+	scaleMu sync.Mutex
+	running map[string]int
+
 	tox  *toxiproxyClient
 	prom *promClient
 

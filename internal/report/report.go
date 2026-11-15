@@ -593,7 +593,7 @@ func timelineSection(d *doc, a *analysis.Analysis) {
 	d.line("| Time | Event |")
 	d.line("| --- | --- |")
 	for _, e := range a.Timeline {
-		kind := map[string]string{"fault_start": "fault started", "fault_end": "fault ended", "fault_error": "fault failed", "container": "container", "stall": "stall", "load_stop": "load stopped"}[e.Kind]
+		kind := map[string]string{"fault_start": "fault started", "fault_end": "fault ended", "fault_error": "fault failed", "container": "container", "stall": "stall", "load_stop": "load stopped", "autoscale": "autoscale", "replica_ready": "replica ready", "replicas_stopped": "scaled in", "autoscale_error": "autoscale failed"}[e.Kind]
 		d.line("| %s | %s: %s |", analysis.Clock(e.At), kind, cell(e.Detail))
 	}
 	d.line("")
@@ -787,6 +787,14 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 			}
 			return "–"
 		}})
+		if s.Autoscale != nil {
+			cols = append(cols, col{name + " replicas", func(w *analysis.Window) string {
+				if sw := w.Services[name]; sw != nil && sw.Replicas > 0 {
+					return strconv.Itoa(sw.Replicas)
+				}
+				return "–"
+			}})
+		}
 		switch s.Kind {
 		case "postgres", "pgbouncer":
 			cols = append(cols, col{name + " conns", func(w *analysis.Window) string {

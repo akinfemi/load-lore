@@ -361,6 +361,7 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 		st.update(func(s *Status) { s.Phase, s.LoadStarted = PhaseLoad, &ts })
 		_ = dir.Event("load_start", map[string]any{"peak_rate": p.Workload.PeakRate, "duration": p.Duration.String()})
 		wg.Go(func() { timeline(loadCtx, t, p.Faults, drv, dir, out) })
+		wg.Go(func() { autoscale(loadCtx, t, p, drv, dir, out) })
 		var watch *breakWatch
 		if earlyStop {
 			watch = newBreakWatch(p)

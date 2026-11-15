@@ -20,8 +20,11 @@ import (
 
 // Fixed names and ports inside a stack.
 const (
-	AppPort       = 8080
-	LBStatsPort   = 8405
+	AppPort     = 8080
+	LBStatsPort = 8405
+	// LBAdminPort is HAProxy's runtime API, for an lb in front of an
+	// autoscaled service: the autoscaler enables and drains servers on it.
+	LBAdminPort   = 9999
 	PostgresPort  = 5432
 	PgBouncerPort = 6432
 	RedisPort     = 6379
@@ -115,10 +118,36 @@ type Service struct {
 	// PgBouncer.
 	PgBouncer *PgBouncer `json:"pgbouncer,omitempty"`
 
+	// Autoscaled application services: Containers has one per replica it
+	// may run, max of them; Autoscale.Start of them run from the start.
+	Autoscale *Autoscale `json:"autoscale,omitempty"`
+
 	// Postgres read replicas: the primary it streams from. A replica's
 	// Kind is postgres, so it is measured like one; it starts from a copy
 	// of the primary's seeded data, and its Dataset is the primary's.
 	Primary string `json:"primary,omitempty"`
+}
+
+// Autoscale is an application service's autoscaler, defaults filled in.
+type Autoscale struct {
+	Start     int     `json:"start"` // replicas running when the load starts
+	Min       int     `json:"min"`
+	Max       int     `json:"max"`
+	Metric    string  `json:"metric"` // cpu, p99 or inflight
+	Target    float64 `json:"target"`
+	IntervalS int     `json:"interval_s"`
+	// Seconds after a change before scaling up again, and down.
+	UpCooldownS   int `json:"scale_up_cooldown_s"`
+	DownCooldownS int `json:"scale_down_cooldown_s"`
+}
+
+// Running is how many of s's containers run when the load starts: all of
+// them, but for an autoscaled service, its start count.
+func (s *Service) Running() []string {
+	if s.Autoscale != nil {
+		return s.Containers[:s.Autoscale.Start]
+	}
+	return s.Containers
 }
 
 // Replicas lists the read replicas of the postgres service named primary.
@@ -161,12 +190,18 @@ type LB struct {
 	Servers     []LBServer `json:"servers"`
 	ServerPort  int        `json:"server_port"`
 	StatsListen int        `json:"stats_listen"`
+	// Autoscaled: the target is autoscaled; servers it doesn't start with
+	// begin disabled, and the runtime API is open on LBAdminPort.
+	Autoscaled bool `json:"autoscaled,omitempty"`
 }
 
 // LBServer is one replica behind an lb, reached through its proxy.
 type LBServer struct {
 	Name string `json:"name"` // the replica's container: api-0
 	Addr string `json:"addr"` // the proxy in front of it
+	// Disabled: an autoscaled replica that isn't running when the load
+	// starts; the autoscaler enables it once it is healthy.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // Proxy is one proxied connection: callers of From reach the To container
@@ -430,7 +465,12 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 		if ds.IsSynthetic() {
 			s.Image = "" // filled from Infra.SyntheticImg by drivers
 		}
-		for i := range *ds.Replicas {
+		n := *ds.Replicas
+		if a := ds.Autoscale; a != nil {
+			n = *a.Max
+			s.Autoscale = &Autoscale{Start: *ds.Replicas, Min: *a.Min, Max: *a.Max, Metric: a.Metric, Target: *a.Target, IntervalS: *a.IntervalS, UpCooldownS: *a.ScaleUpCooldownS, DownCooldownS: *a.ScaleDownCooldownS}
+		}
+		for i := range n {
 			s.Containers = append(s.Containers, fmt.Sprintf("%s-%d", name, i))
 		}
 	case ds.Kind == "postgres-replica":
@@ -698,10 +738,14 @@ func (p *Plan) lbs(d *design.Design, byName map[string]*Service) {
 		if s.LB == nil {
 			continue
 		}
+		t := byName[s.LB.Target]
+		running := t.Running()
 		for _, x := range p.proxiesInto(name, s.LB.Target) {
-			s.LB.Servers = append(s.LB.Servers, LBServer{Name: strings.SplitN(x.Upstream, ":", 2)[0], Addr: x.Addr()})
+			c := strings.SplitN(x.Upstream, ":", 2)[0]
+			s.LB.Servers = append(s.LB.Servers, LBServer{Name: c, Addr: x.Addr(), Disabled: !slices.Contains(running, c)})
 		}
-		s.LB.ServerPort = byName[s.LB.Target].Port
+		s.LB.ServerPort = t.Port
+		s.LB.Autoscaled = t.Autoscale != nil
 	}
 	for _, name := range d.ServiceNames() {
 		s := byName[name]
@@ -1058,6 +1102,9 @@ func (p *Plan) assume(d *design.Design) {
 		if s := d.Services[name]; s.Kind == "postgres-replica" {
 			p.assumeReplica(name, s)
 		}
+		if s := d.Services[name]; s.Autoscale != nil {
+			p.assumeAutoscale(name, s)
+		}
 		if s := d.Services[name]; s.Kind == "lb" {
 			p.Assumptions = append(p.Assumptions, Assumption{
 				Field: "services." + name + " timeouts", Value: "connect 5s, server 60s",
@@ -1413,4 +1460,28 @@ func planDisk(dk *design.Disk, scale float64) *Disk {
 	}
 	disk.IOPS = max(1, int(math.Round(float64(disk.IOPS)*scale)))
 	return &disk
+}
+
+// assumeAutoscale says how an autoscaler decides: its metric and target,
+// its range, its interval and cooldowns.
+func (p *Plan) assumeAutoscale(name string, ds *design.Service) {
+	s := p.Service(name)
+	if s == nil || s.Autoscale == nil {
+		return
+	}
+	a := s.Autoscale
+	target := fmt.Sprintf("%g", a.Target)
+	switch a.Metric {
+	case "cpu":
+		target = fmt.Sprintf("%g%% CPU", a.Target*100)
+	case "p99":
+		target = fmt.Sprintf("p99 %g ms", a.Target)
+	case "inflight":
+		target = fmt.Sprintf("%g requests in flight per replica", a.Target)
+	}
+	p.Assumptions = append(p.Assumptions, Assumption{
+		Field: "services." + name + ".autoscale",
+		Value: fmt.Sprintf("%s, %d to %d replicas (starts with %d), every %d s, scale-up cooldown %d s, scale-down cooldown %d s", target, a.Min, a.Max, a.Start, a.IntervalS, a.UpCooldownS, a.DownCooldownS),
+		Why:   "as a Kubernetes HorizontalPodAutoscaler: it wants ceil(replicas × metric ÷ target), ignores changes within 10%, and decides nothing while a change is still starting replicas. Unset values are Kubernetes' defaults: 15 s, no wait to scale up, 300 s before scaling down",
+	})
 }

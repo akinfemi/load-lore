@@ -29,6 +29,7 @@ type Service struct {
 	Behavior    *Behavior       `yaml:"behavior,omitempty" json:"behavior,omitempty" jsonschema_description:"What the synthetic service does per request. Only for loadlore/synthetic."`
 	Pools       map[string]Pool `yaml:"pools,omitempty" json:"pools,omitempty" jsonschema_description:"Connection pool per call target: a size (connections per replica, default 10), or {size, min}."`
 	Concurrency *Concurrency    `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	Autoscale   *Autoscale      `yaml:"autoscale,omitempty" json:"autoscale,omitempty" jsonschema_description:"Add and remove replicas during the run from a metric, as a Kubernetes HorizontalPodAutoscaler or a cloud autoscaling group does. replicas is how many it starts with. Needs an lb in front."`
 
 	// Datastores and infrastructure.
 	Version string                 `yaml:"version,omitempty" json:"version,omitempty" jsonschema_description:"Major version. postgres default \"17\"; redis default \"8\"."`
@@ -133,6 +134,25 @@ type CircuitBreaker struct {
 // Bulkhead caps concurrent outbound calls.
 type Bulkhead struct {
 	MaxConcurrent int `yaml:"max_concurrent" json:"max_concurrent" jsonschema:"required,minimum=1"`
+}
+
+// Autoscale adds and removes an application service's replicas during the
+// run. Every interval it reads the metric over the running replicas and
+// wants ceil(running x value / target) replicas, within min and max, as a
+// Kubernetes HorizontalPodAutoscaler does, ignoring changes within 10%.
+// By default, as there, it scales up as soon as it wants more and waits
+// 300 s after its last change before scaling down; a cloud autoscaling
+// group's cooldown also delays scale-ups (scale_up_cooldown_s). New
+// replicas start for real and take traffic once healthy; leaving replicas
+// are drained first.
+type Autoscale struct {
+	Min                *int     `yaml:"min,omitempty" json:"min,omitempty" jsonschema:"minimum=1" jsonschema_description:"Fewest replicas. Default: replicas."`
+	Max                *int     `yaml:"max" json:"max" jsonschema:"required,minimum=1" jsonschema_description:"Most replicas. Loadlore budgets CPU and memory for all of them."`
+	Metric             string   `yaml:"metric,omitempty" json:"metric,omitempty" jsonschema:"enum=cpu,enum=p99,enum=inflight,default=cpu" jsonschema_description:"cpu: mean CPU of the running replicas against their limit. p99: the service's own p99 in ms. inflight: mean requests in flight per replica."`
+	Target             *float64 `yaml:"target,omitempty" json:"target,omitempty" jsonschema_description:"The metric's value to hold: a fraction for cpu (default 0.7), milliseconds for p99, requests for inflight. Required for p99 and inflight."`
+	IntervalS          *int     `yaml:"interval_s,omitempty" json:"interval_s,omitempty" jsonschema:"minimum=5,default=15" jsonschema_description:"Seconds between decisions; the metric is averaged over this window. Kubernetes' default is 15."`
+	ScaleUpCooldownS   *int     `yaml:"scale_up_cooldown_s,omitempty" json:"scale_up_cooldown_s,omitempty" jsonschema:"minimum=0,default=0" jsonschema_description:"Seconds after a change before it scales up again. Kubernetes' default is 0; a cloud autoscaling group's cooldown, often 300, applies here too."`
+	ScaleDownCooldownS *int     `yaml:"scale_down_cooldown_s,omitempty" json:"scale_down_cooldown_s,omitempty" jsonschema:"minimum=0,default=300" jsonschema_description:"Seconds after a change before it scales down. Kubernetes' scale-down stabilization window is 300."`
 }
 
 // Concurrency approximates the real service runtime.

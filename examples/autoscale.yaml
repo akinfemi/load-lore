@@ -1,0 +1,33 @@
+version: 1
+name: autoscale
+
+# An api behind a load balancer that adds replicas as its CPU climbs.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 1000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 1
+      calls:
+        - { target: db, op: read }
+    pools: { db: 10 }
+    autoscale: { max: 5, metric: cpu, target: 0.6 }
+
+  db:
+    kind: postgres
+    resources: { cpu: 1, memory: 1g }
+    config: { max_connections: 100 }
+    dataset: { rows: 100000, row_bytes: 256 }
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 100, to: 1500, over: 2m }
+    - hold: { rps: 1500, for: 1m }
