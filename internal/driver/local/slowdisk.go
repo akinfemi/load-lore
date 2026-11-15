@@ -32,9 +32,16 @@ func (d *Driver) slowDiskName(svc string) string { return "lore-" + d.runID + "-
 func (d *Driver) slowDiskVolume(ctx context.Context, s *plan.Service, vol string) error {
 	name := d.slowDiskName(s.Name)
 	img := vol + "-img"
-	read := 0
+	read, loop := 0, ""
 	if s.Disk != nil {
-		read = s.Disk.ReadMs
+		// Direct I/O: without it the loop device reads its image file one
+		// request at a time per cgroup, through the Docker host's page cache,
+		// and on Colima that capped Postgres at about 4,000 reads a second
+		// whatever the disk block allowed. It also keeps the image out of the
+		// host's page cache, where it would be memory outside the database's
+		// limit. Fault-only slow disks keep the buffered loop they were
+		// measured with.
+		read, loop = s.Disk.ReadMs, "--direct-io=on --sector-size 4096 "
 	}
 	size := max(int64(2)<<30, 6*s.Dataset.Rows*int64(s.Dataset.RowBytes))
 	if _, err := d.docker(ctx, "volume", "create", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID, img); err != nil {
@@ -43,11 +50,11 @@ func (d *Driver) slowDiskVolume(ctx context.Context, s *plan.Service, vol string
 	script := fmt.Sprintf(`set -e
 %s
 truncate -s %d /img/disk.img
-L=$(losetup -f --show /img/disk.img)
+L=$(losetup -f --show %s/img/disk.img)
 S=$(blockdev --getsz $L)
 dmsetup create %s --table "0 $S delay $L 0 %d $L 0 0 $L 0 0"
 mkfs.ext4 -q /dev/mapper/%s
-echo "minor=$(dmsetup info -c --noheadings -o minor %s)"`, slowDiskTools, size, name, read, name, name)
+echo "minor=$(dmsetup info -c --noheadings -o minor %s)"`, slowDiskTools, size, loop, name, read, name, name)
 	out, err := d.docker(ctx, "run", "--rm", "--privileged", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID,
 		"-v", img+":/img", ImageAlpine, "sh", "-c", script)
 	if err != nil {

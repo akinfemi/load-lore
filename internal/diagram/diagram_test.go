@@ -80,3 +80,14 @@ func TestRPSFormatting(t *testing.T) {
 		}
 	}
 }
+
+// A postgres's disk block shows on its node, defaults filled in.
+func TestDiskLabel(t *testing.T) {
+	iops := 10000
+	if got := diskLabel(&design.Disk{}); got != "disk 1 ms · 3,000 IOPS" {
+		t.Errorf("defaults: %q", got)
+	}
+	if got := diskLabel(&design.Disk{IOPS: &iops}); got != "disk 1 ms · 10,000 IOPS" {
+		t.Errorf("iops set: %q", got)
+	}
+}

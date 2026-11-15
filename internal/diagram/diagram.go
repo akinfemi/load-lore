@@ -11,6 +11,7 @@ import (
 
 	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/mermaid"
+	"github.com/akinfemi/load-lore/internal/plan"
 )
 
 // LoadNode is the id of the load generator node.
@@ -112,8 +113,24 @@ func addNode(f *mermaid.Flowchart, name string, s *design.Service, extra []strin
 	case s.Kind == "lb":
 		f.Node(mermaid.ID(name), mermaid.Hexagon, append([]string{title, "load balancer", res}, extra...)...)
 	default:
-		f.Node(mermaid.ID(name), mermaid.Cylinder, append([]string{title, strings.TrimSpace(s.Kind + " " + s.Version), res}, extra...)...)
+		lines := []string{title, strings.TrimSpace(s.Kind + " " + s.Version), res}
+		if dk := s.Disk; dk != nil {
+			lines = append(lines, diskLabel(dk))
+		}
+		f.Node(mermaid.ID(name), mermaid.Cylinder, append(lines, extra...)...)
 	}
+}
+
+// diskLabel is a postgres disk block's read wait and IOPS, defaults filled.
+func diskLabel(dk *design.Disk) string {
+	read, iops := plan.DefaultDiskReadMs, plan.DefaultDiskIOPS
+	if dk.ReadMs != nil {
+		read = *dk.ReadMs
+	}
+	if dk.IOPS != nil {
+		iops = *dk.IOPS
+	}
+	return fmt.Sprintf("disk %d ms · %s IOPS", read, strings.TrimSuffix(rps(float64(iops)), " rps"))
 }
 
 // nodeOrder lists services breadth first from the entry, then the rest by
