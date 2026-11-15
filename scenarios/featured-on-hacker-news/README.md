@@ -4,7 +4,7 @@ Level 2 · about 40 minutes · teaches autoscaling, scale-up lag, choosing the m
 
 ## The story
 
-You run the api for a small product. It sits behind a load balancer on two replicas, and the platform autoscales it on CPU, as its defaults suggest: hold the replicas' CPU at 70%, between 2 and 6 of them. Each replica serves about 470 requests a second at its limit.
+You run the api for a small product. It sits behind a load balancer on two replicas, and the platform autoscales it on CPU, as its defaults suggest: hold the replicas' CPU at 70%, between 2 and 6 of them. Each replica's CPU request and limit are the same, half a CPU, as many teams set them, so the autoscaler measures CPU against the limit. Each replica serves about 470 requests a second at its limit.
 
 ```mermaid
 flowchart LR

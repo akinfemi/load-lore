@@ -18,7 +18,7 @@ Add up what stands between the surge and a new replica taking traffic: the wait 
 
 ## A metric that keeps growing
 
-Requests in flight, or p99, keep growing while a backlog builds; CPU stops at 100%. What would an autoscaler on in-flight requests ask for when every replica has a hundred requests queued?
+Requests in flight, or p99, keep growing while a backlog builds; CPU stops at 100% of the limit. What would an autoscaler on in-flight requests ask for when every replica has a hundred requests queued?
 
 ## Ways out
 

@@ -83,7 +83,7 @@ api:
 | --- | --- | --- |
 | `min` | `replicas` | Fewest replicas |
 | `max` | required | Most replicas. Loadlore budgets CPU and memory for all of them |
-| `metric` | `cpu` | `cpu`: mean CPU of the running replicas against their limit. `p99`: the service's own p99 in ms. `inflight`: mean requests in flight per replica |
+| `metric` | `cpu` | `cpu`: mean CPU of the running replicas against their limit, so it can't read above 100%. (Kubernetes measures against a pod's request; this matches a request equal to the limit.) `p99`: the service's own p99 in ms. `inflight`: mean requests in flight per replica |
 | `target` | `0.7` for `cpu` | The value to hold: a fraction for `cpu`, milliseconds for `p99`, requests for `inflight` (required for those two) |
 | `interval_s` | `15` | Seconds between decisions; the metric is averaged over this window |
 | `scale_up_cooldown_s` | `0` | Seconds after a change before it scales up again. Kubernetes' default is `0`; a cloud autoscaling group's cooldown applies here too |

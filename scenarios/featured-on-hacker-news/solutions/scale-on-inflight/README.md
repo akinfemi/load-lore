@@ -14,6 +14,8 @@ autoscale: { max: 6, metric: inflight, target: 10 }   # was metric: cpu, target:
 
 CPU stops at 100% of a replica's limit. With a 70% target, a decision over saturated replicas asks for at most 1 ÷ 0.7 = 1.43 times as many, so two replicas become three, and the next step waits until the third is serving: about 30 seconds of start-up each time. In the reference check, the starting design's replicas arrived at 2:02 and 2:47, and the sixth, asked for at 3:00, hadn't arrived when the load ended at 3:15: it never recovered.
 
+The ceiling comes from measuring CPU against the limit. Kubernetes measures it against a pod's request, the CPU it's guaranteed; here the request equals the limit. With a request below the limit, a busy pod can read above 100%, up to limit ÷ request, and a decision can take a bigger step, but only while its node has CPU to spare. During a surge across a cluster, that spare CPU is often gone.
+
 Requests in flight keep growing while a backlog builds. When the surge lands, each replica has a hundred or more requests waiting, ten times the target, so the first decision asks for all six. They still take 30 seconds to start, and the run still breaks as the surge lands, at 1:20, but all six took traffic at 2:02 and it recovered at 2:20, instead of not at all.
 
 ## What it costs

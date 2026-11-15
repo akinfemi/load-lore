@@ -85,7 +85,7 @@ func autoscaleLag(a *Analysis) []*Diagnosis {
 			Clock(b.At), s.Name, running, as.Max, Pct(*sw.CPU), later)
 		d.Next = fmt.Sprintf("Let %s's autoscaler react sooner and in bigger steps: decide more often (interval_s), and keep more replicas running before a spike you expect (min).", s.Name)
 		if as.Metric == "cpu" {
-			d.Next = fmt.Sprintf("Scale %s on a metric that keeps growing with the backlog, inflight or p99: CPU stops at 100%%, so with a target of %s one decision can add at most %.0f%% more replicas, however far the load has run ahead. Also decide more often (interval_s), and keep more replicas running before a spike you expect (min).", s.Name, Pct(as.Target), (1/as.Target-1)*100)
+			d.Next = fmt.Sprintf("Scale %s on a metric that keeps growing with the backlog, inflight or p99: CPU stops at the replicas' limit, so with a target of %s one decision can add at most %.0f%% more replicas, however far the load has run ahead. (Kubernetes measures CPU against a pod's request, which Loadlore treats as equal to the limit; a request below the limit raises this cap by limit ÷ request, but only while the node has CPU to spare.) Also decide more often (interval_s), and keep more replicas running before a spike you expect (min).", s.Name, Pct(as.Target), (1/as.Target-1)*100)
 		}
 		out = append(out, d)
 	}
