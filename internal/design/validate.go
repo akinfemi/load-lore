@@ -127,6 +127,7 @@ func (v *validator) service(name string, s *Service) {
 		notFor("version", s.Version != "", why)
 		notFor("config", s.Config != nil, why)
 		notFor("dataset", s.Dataset != nil, why)
+		notFor("disk", s.Disk != nil, "it is for postgres")
 		notFor("target", s.Target != "", "it is for pgbouncer and lb")
 		notFor("pool_mode", s.PoolMode != "", "it is for pgbouncer")
 		notFor("default_pool_size", s.DefaultPoolSize != nil, "it is for pgbouncer")
@@ -152,6 +153,15 @@ func (v *validator) service(name string, s *Service) {
 	notFor("pools", s.Pools != nil, why)
 	notFor("concurrency", s.Concurrency != nil, why)
 	notFor("dataset", s.Dataset != nil && s.Kind != "postgres", "datasets are seeded into postgres")
+	notFor("disk", s.Disk != nil && s.Kind != "postgres", "it is for postgres")
+	if dk := s.Disk; dk != nil && s.Kind == "postgres" {
+		if dk.ReadMs != nil && (*dk.ReadMs < 0 || *dk.ReadMs > 100) {
+			v.errorf(pathKey(p, "disk.read_ms"), CodeRange, "read_ms must be 0 to 100 whole milliseconds, not %d", *dk.ReadMs)
+		}
+		if dk.IOPS != nil && *dk.IOPS < 100 {
+			v.errorf(pathKey(p, "disk.iops"), CodeRange, "iops must be at least 100, not %d", *dk.IOPS)
+		}
+	}
 	if s.Kind != "pgbouncer" && s.Kind != "lb" {
 		notFor("target", s.Target != "", "it is for pgbouncer and lb")
 	}

@@ -72,6 +72,11 @@ func (d *Driver) prepareData(ctx context.Context, s *plan.Service, progress func
 		"-v", cache+":/from:ro", "-v", run+":/to", ImageAlpine, "sh", "-c", "cp -a /from/. /to/ && rm -f /to/"+seededMarker); err != nil {
 		return "", err
 	}
+	if s.Disk != nil {
+		if err := d.dropPageCache(ctx); err != nil {
+			return "", fmt.Errorf("%s's disk: emptying the page cache: %w", s.Name, err)
+		}
+	}
 	d.event("data_copy", map[string]any{"service": s.Name, "volume": run, "seconds": time.Since(start).Seconds()})
 	return run, nil
 }

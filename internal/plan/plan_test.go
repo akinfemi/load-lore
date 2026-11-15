@@ -515,3 +515,43 @@ func TestDiskSlowFault(t *testing.T) {
 		t.Errorf("disk_slow on redis: %v", err)
 	}
 }
+
+// A disk block puts the postgres on a dm-delay device with its defaults,
+// scales its IOPS (not its wait) and says so; without one, the assumption
+// says reads that miss memory go to the Docker host's disk.
+func TestDisk(t *testing.T) {
+	d := loadFile(t, "../../examples/smoke.yaml")
+	p, err := Build(d, Options{RunID: "r", Scale: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if db := p.Service("db"); db.Disk != nil {
+		t.Errorf("no disk block: disk %+v", db.Disk)
+	}
+	if a := findAssumption(p, "services.db.disk"); a == nil || a.Value != "the Docker host's" {
+		t.Errorf("no disk block: assumption %+v", a)
+	}
+	read := 4
+	d.Services["db"].Disk = &design.Disk{ReadMs: &read}
+	p, err = Build(d, Options{RunID: "r", Scale: 0.5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := p.Service("db")
+	if db.Disk == nil || *db.Disk != (Disk{ReadMs: 4, IOPS: 1500}) || !db.SlowDisk {
+		t.Fatalf("disk %+v, slow disk %v", db.Disk, db.SlowDisk)
+	}
+	a := findAssumption(p, "services.db.disk")
+	if a == nil || a.Value != "4 ms per read, 1500 IOPS" || !strings.Contains(a.Why, "default") || !strings.Contains(a.Why, "the wait not") {
+		t.Errorf("disk assumption %+v", a)
+	}
+}
+
+func findAssumption(p *Plan, field string) *Assumption {
+	for i := range p.Assumptions {
+		if p.Assumptions[i].Field == field {
+			return &p.Assumptions[i]
+		}
+	}
+	return nil
+}

@@ -392,6 +392,11 @@
       "why": "Docker's default. A container that uses its CPU share early in a period stalls until the next one, which can show up in p99 when a service has a fraction of a CPU"
     },
     {
+      "field": "services.db.disk",
+      "value": "the Docker host's",
+      "why": "no disk block: a read that misses db's memory goes to the Docker host's disk, which on a laptop mostly answers from the host's own memory, fast and uncapped. Add disk: {} for a cloud volume's wait and IOPS cap"
+    },
+    {
       "field": "services.lb timeouts",
       "value": "connect 5s, server 60s",
       "why": "HAProxy's own timeouts, with its defaults otherwise. A request already sent to a replica that dies waits for the server timeout (or the load generator's); health checks only stop new requests going there"

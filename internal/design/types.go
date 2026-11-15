@@ -34,6 +34,7 @@ type Service struct {
 	Version string                 `yaml:"version,omitempty" json:"version,omitempty" jsonschema_description:"Major version. postgres default \"17\"; redis default \"8\"."`
 	Config  map[string]ConfigValue `yaml:"config,omitempty" json:"config,omitempty" jsonschema_description:"Native config keys: postgresql.conf for postgres, redis.conf for redis, pgbouncer.ini for pgbouncer."`
 	Dataset *Dataset               `yaml:"dataset,omitempty" json:"dataset,omitempty" jsonschema_description:"Rows seeded before the run. postgres only."`
+	Disk    *Disk                  `yaml:"disk,omitempty" json:"disk,omitempty" jsonschema_description:"Model the data disk like a cloud volume: a wait per read and an IOPS cap. postgres only; without it the data sits on the Docker host's disk, which on a laptop is mostly served from memory."`
 
 	// pgbouncer and lb.
 	Target string `yaml:"target,omitempty" json:"target,omitempty" jsonschema_description:"pgbouncer: the postgres service it pools connections to. lb: the application service whose replicas it spreads traffic across."`
@@ -45,6 +46,17 @@ type Service struct {
 	// lb.
 	Algorithm   string       `yaml:"algorithm,omitempty" json:"algorithm,omitempty" jsonschema:"enum=round-robin,enum=least-conn,enum=random,default=round-robin" jsonschema_description:"How the lb picks a healthy replica for each request."`
 	HealthCheck *HealthCheck `yaml:"health_check,omitempty" json:"health_check,omitempty" jsonschema_description:"Active health checks the lb runs against each replica."`
+}
+
+// Disk models a postgres's data disk like a network-attached cloud volume.
+// Every read that misses memory waits ReadMs, and reads and writes are each
+// capped at IOPS a second, so reads queue at the cap the way they do on a
+// real volume. Without it, the data sits on the Docker host's disk; on a
+// laptop, a read that misses the container's memory comes back from the
+// host's own, in about a tenth of a millisecond and with no cap.
+type Disk struct {
+	ReadMs *int `yaml:"read_ms,omitempty" json:"read_ms,omitempty" jsonschema:"minimum=0,maximum=100,default=1" jsonschema_description:"Milliseconds every read from the disk waits, in whole milliseconds. A gp3 volume takes about 1."`
+	IOPS   *int `yaml:"iops,omitempty" json:"iops,omitempty" jsonschema:"minimum=100,default=3000" jsonschema_description:"Reads a second the disk serves, and writes a second, each; gp3's baseline is 3000. Scaled with --scale."`
 }
 
 // HealthCheck is an lb's active check of each replica: an HTTP GET every

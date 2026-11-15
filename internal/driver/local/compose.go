@@ -70,6 +70,18 @@ type composeService struct {
 	Profiles        []string                 `yaml:"profiles,omitempty"`
 	Restart         string                   `yaml:"restart"`
 	StopGracePeriod string                   `yaml:"stop_grace_period,omitempty"`
+	BlkioConfig     *composeBlkio            `yaml:"blkio_config,omitempty"`
+}
+
+// composeBlkio caps a container's I/O on a device.
+type composeBlkio struct {
+	DeviceReadIOPS  []composeDeviceRate `yaml:"device_read_iops,omitempty"`
+	DeviceWriteIOPS []composeDeviceRate `yaml:"device_write_iops,omitempty"`
+}
+
+type composeDeviceRate struct {
+	Path string `yaml:"path"`
+	Rate int    `yaml:"rate"`
 }
 
 type composeHealth struct {
@@ -120,6 +132,7 @@ type stackInput struct {
 	Project   string
 	K6Script  []byte
 	DataVols  map[string]string // postgres service -> run volume name
+	DiskDevs  map[string]string // postgres service with a disk -> its dm-delay device
 	Synthetic string            // image
 }
 
@@ -174,6 +187,10 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 			vol := "data-" + s.Name
 			cf.Volumes[vol] = &composeVolume{External: true, Name: in.DataVols[s.Name]}
 			c.Volumes = []string{vol + ":" + pgDataPath(s.Version)}
+			if dev := in.DiskDevs[s.Name]; s.Disk != nil && dev != "" {
+				rate := []composeDeviceRate{{Path: dev, Rate: s.Disk.IOPS}}
+				c.BlkioConfig = &composeBlkio{DeviceReadIOPS: rate, DeviceWriteIOPS: rate}
+			}
 			c.Healthcheck = &composeHealth{Test: []string{"CMD-SHELL", fmt.Sprintf("pg_isready -U %s -d %s -h 127.0.0.1", plan.DBUser, plan.DBName)}, Interval: "1s", Timeout: "3s", Retries: 180}
 			c.StopGracePeriod = "10s"
 			cf.Services[s.Name] = c

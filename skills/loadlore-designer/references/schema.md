@@ -101,7 +101,7 @@ Resilience fields apply to every outbound call of the service:
 
 | `kind` | Key fields | Notes |
 | --- | --- | --- |
-| `postgres` | `version` (default `"17"`), `config` (any postgresql.conf key; Postgres's own defaults apply, such as `max_connections` 100 and `shared_buffers` 128MB), `dataset` | |
+| `postgres` | `version` (default `"17"`), `config` (any postgresql.conf key; Postgres's own defaults apply, such as `max_connections` 100 and `shared_buffers` 128MB), `dataset`, `disk` | |
 | `redis` | `version` (default `"8"`), `config` (any redis.conf key) | Unless `config` sets them, `maxmemory` is 75% of the container's memory limit and `maxmemory-policy` is `allkeys-lru`, as managed Redis usually does. Both are printed as assumptions in every report, and `--scale` scales `maxmemory`. `maxmemory: 0` restores stock Redis, including being OOM-killed when the cache outgrows its container |
 | `pgbouncer` | `target` (required, a postgres service), `pool_mode` (`transaction`; also `session`, `statement`), `default_pool_size` (`20`), `config` (pgbouncer.ini keys) | PgBouncer 1.26. Clients beyond `default_pool_size` server connections wait in PgBouncer. `max_client_conn` defaults to PgBouncer's 100, and the plan notes when the callers' pools can open more. Loadlore sets the listen, auth and admin keys itself, and `pool_mode` and `default_pool_size` are fields, so `config` can't set those |
 | `lb` | `target` (required, an application service), `algorithm`, `health_check` | A load balancer (HAProxy) in front of the target's replicas. See below |
@@ -134,6 +134,19 @@ dataset: { rows: 5000000, row_bytes: 512, indexes: [id, user_id] }
 ```
 
 `rows` is required; `row_bytes` defaults to `512`; `indexes` lists extra indexed columns (`id` is always indexed).
+
+`disk` (postgres only) makes the data disk behave like a network-attached cloud volume. Without it, the data sits on the Docker host's disk, and on a laptop a read that misses Postgres's memory comes back from the host's own memory in about a tenth of a millisecond, with no limit on how many. So a working set bigger than the database's memory only hurts with a `disk` block. `disk: {}` takes the defaults:
+
+```yaml
+disk: { read_ms: 1, iops: 3000 }
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `read_ms` | `1` | Milliseconds every read from the disk waits, whole milliseconds, 0 to 100. A gp3 volume takes about 1. |
+| `iops` | `3000` | Reads a second the disk serves, and writes a second, each; at least 100. gp3's baseline is 3000. Scaled with `--scale`. |
+
+Reads that miss shared_buffers and the database container's own page cache wait `read_ms`, and queue once they reach `iops`. Loadlore empties the Docker host's page cache after copying the dataset in, so the container's memory limit holds. A `disk_slow` fault on the same database adds its write delay on top.
 
 There is deliberately no field for hit rate, capacity or failure point. Those emerge from the run, and `loadl validate` rejects such fields with an explanation.
 

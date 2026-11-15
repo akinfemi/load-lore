@@ -38,6 +38,9 @@ type Driver struct {
 	runID       string
 	project     string
 	composePath string
+	// diskDevs is each postgres's dm-delay device (/dev/dm-N), for the
+	// compose file's IOPS cap.
+	diskDevs map[string]string
 
 	tox  *toxiproxyClient
 	prom *promClient
@@ -202,7 +205,7 @@ func (d *Driver) Up(ctx context.Context, p *plan.Plan, dir *rundir.Dir, progress
 	if err := dir.Write("load.js", script); err != nil {
 		return err
 	}
-	compose, err := buildCompose(p, stackInput{Project: d.project, K6Script: script, DataVols: vols, Synthetic: p.Infra.SyntheticImg})
+	compose, err := buildCompose(p, stackInput{Project: d.project, K6Script: script, DataVols: vols, DiskDevs: d.diskDevs, Synthetic: p.Infra.SyntheticImg})
 	if err != nil {
 		return err
 	}
@@ -657,6 +660,9 @@ func (d *Driver) Down(ctx context.Context) error {
 		if d.runID != "" {
 			errs = append(errs, removeByLabel(ctx, d.api, LabelRun+"="+d.runID, true))
 		}
+		if d.plan != nil && hasSlowDisk(d.plan) {
+			d.trimDockerDisk(ctx)
+		}
 		d.downErr = errors.Join(errs...)
 	})
 	return d.downErr
@@ -722,7 +728,9 @@ func DownAll(ctx context.Context, withCaches bool) (removed Counts, err error) {
 	if ns, err := api.NetworkList(ctx, client.NetworkListOptions{Filters: f}); err == nil {
 		removed.Networks = len(ns.Items)
 	}
-	return removed, errors.Join(slowErr, removeByLabel(ctx, api, LabelOwner+"=1", withCaches))
+	err = errors.Join(slowErr, removeByLabel(ctx, api, LabelOwner+"=1", withCaches))
+	(&Driver{host: host}).trimDockerDisk(ctx)
+	return removed, err
 }
 
 // Counts is what DownAll removed.

@@ -71,15 +71,31 @@ type Assumption struct {
 	Why   string `json:"why"`
 }
 
+// Disk is a postgres's data disk modelled like a cloud volume: every read
+// that reaches it waits ReadMs, and reads and writes are each capped at
+// IOPS a second (scaled with --scale).
+type Disk struct {
+	ReadMs int `json:"read_ms"`
+	IOPS   int `json:"iops"`
+}
+
+// Default disk: about a gp3 volume's read latency and baseline IOPS.
+const (
+	DefaultDiskReadMs = 1
+	DefaultDiskIOPS   = 3000
+)
+
 // Service is one design service, expanded to containers.
 type Service struct {
 	Name       string   `json:"name"`
 	Kind       string   `json:"kind"` // app, postgres, redis, pgbouncer, lb
 	Image      string   `json:"image"`
 	Containers []string `json:"containers"` // one per replica: api-0, api-1; or db
-	// SlowDisk: a disk_slow fault targets this postgres, so its data lives
-	// on a dm-delay device that the fault slows.
-	SlowDisk  bool    `json:"slow_disk,omitempty"`
+	// SlowDisk: a disk_slow fault targets this postgres, or it has a Disk,
+	// so its data lives on a dm-delay device.
+	SlowDisk bool `json:"slow_disk,omitempty"`
+	// Disk models the data disk like a cloud volume (the design's disk).
+	Disk      *Disk   `json:"disk,omitempty"`
 	CPU       float64 `json:"cpu"`           // per container, after scaling
 	CPUPeriod int     `json:"cpu_period_ms"` // CFS period the CPU limit is enforced over
 	Memory    int64   `json:"memory"`        // bytes per container, after scaling
@@ -410,6 +426,17 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 			spec.Rows = max(1, int64(math.Round(float64(spec.Rows)*scale)))
 		}
 		s.Dataset = &spec
+		if dk := ds.Disk; dk != nil {
+			disk := Disk{ReadMs: DefaultDiskReadMs, IOPS: DefaultDiskIOPS}
+			if dk.ReadMs != nil {
+				disk.ReadMs = *dk.ReadMs
+			}
+			if dk.IOPS != nil {
+				disk.IOPS = *dk.IOPS
+			}
+			disk.IOPS = max(1, int(math.Round(float64(disk.IOPS)*scale)))
+			s.Disk, s.SlowDisk = &disk, true
+		}
 	case ds.Kind == "redis":
 		s.Kind, s.Port, minMem = "redis", RedisPort, minMemoryRedis
 		s.Version = ds.Version
@@ -978,6 +1005,9 @@ func (p *Plan) assume(d *design.Design) {
 		if s := d.Services[name]; s.Kind == "pgbouncer" {
 			p.assumePgBouncer(name, s)
 		}
+		if s := d.Services[name]; s.Kind == "postgres" {
+			p.assumeDisk(name, s)
+		}
 		if s := d.Services[name]; s.Kind == "lb" {
 			p.Assumptions = append(p.Assumptions, Assumption{
 				Field: "services." + name + " timeouts", Value: "connect 5s, server 60s",
@@ -1027,6 +1057,29 @@ func (p *Plan) assume(d *design.Design) {
 	if p.Assumptions == nil {
 		p.Assumptions = []Assumption{}
 	}
+}
+
+// assumeDisk says what a postgres's data disk is: the Docker host's, which
+// on a laptop answers reads that miss memory from the host's own memory,
+// or one modelled like a cloud volume.
+func (p *Plan) assumeDisk(name string, ds *design.Service) {
+	s := p.Service(name)
+	if s == nil {
+		return
+	}
+	a := Assumption{Field: "services." + name + ".disk", Value: "the Docker host's",
+		Why: "no disk block: a read that misses " + name + "'s memory goes to the Docker host's disk, which on a laptop mostly answers from the host's own memory, fast and uncapped. Add disk: {} for a cloud volume's wait and IOPS cap"}
+	if s.Disk != nil {
+		a.Value = fmt.Sprintf("%d ms per read, %d IOPS", s.Disk.ReadMs, s.Disk.IOPS)
+		a.Why = "set in the design: every read that misses " + name + "'s memory waits this long, and reads and writes are each capped at this rate, as on a cloud volume"
+		if ds.Disk.ReadMs == nil || ds.Disk.IOPS == nil {
+			a.Why += fmt.Sprintf(" (unset values default to about a gp3 volume's: %d ms, %d IOPS)", DefaultDiskReadMs, DefaultDiskIOPS)
+		}
+		if p.Scale != 1 {
+			a.Why += "; IOPS scaled with --scale, the wait not"
+		}
+	}
+	p.Assumptions = append(p.Assumptions, a)
 }
 
 // assumePeriods lists the CFS periods of the services that don't set one,

@@ -3,6 +3,7 @@ package local
 import (
 	"flag"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -174,5 +175,35 @@ func TestPgBouncerCompose(t *testing.T) {
 	}
 	if cf.Services["api-0"].DependsOn["pgb"].Condition != "service_healthy" {
 		t.Errorf("api starts before pgb: %+v", cf.Services["api-0"].DependsOn)
+	}
+}
+
+// A postgres with a disk block gets its IOPS cap on its dm-delay device.
+func TestDiskCompose(t *testing.T) {
+	d, diags, err := design.LoadFile("../../../examples/smoke.yaml")
+	if err != nil || diags.HasErrors() {
+		t.Fatal(err, diags)
+	}
+	d.Services["db"].Disk = &design.Disk{}
+	p, err := plan.Build(d, plan.Options{RunID: "test-run", Seed: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildCompose(p, stackInput{Project: "loadlore-test-run", K6Script: []byte("// script\n"), DataVols: map[string]string{"db": "v"},
+		DiskDevs: map[string]string{"db": "/dev/dm-3"}, Synthetic: "loadlore/synthetic:dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cf composeFile
+	if err := yaml.Unmarshal(got, &cf); err != nil {
+		t.Fatal(err)
+	}
+	want := []composeDeviceRate{{Path: "/dev/dm-3", Rate: 3000}}
+	b := cf.Services["db"].BlkioConfig
+	if b == nil || !slices.Equal(b.DeviceReadIOPS, want) || !slices.Equal(b.DeviceWriteIOPS, want) {
+		t.Errorf("db blkio_config %+v", b)
+	}
+	if cf.Services["cache"].BlkioConfig != nil {
+		t.Errorf("cache has a blkio_config")
 	}
 }
