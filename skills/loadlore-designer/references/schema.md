@@ -88,8 +88,9 @@ api:
 | `interval_s` | `15` | Seconds between decisions; the metric is averaged over this window |
 | `scale_up_cooldown_s` | `0` | Seconds after a change before it scales up again. Kubernetes' default is `0`; a cloud autoscaling group's cooldown applies here too |
 | `scale_down_cooldown_s` | `300` | Seconds after a change before it scales down, Kubernetes' stabilization window |
+| `startup_s` | `30` | Seconds a new replica waits before its container starts, for finding a node or VM and pulling the image, which this machine has already done. Its own start, pools and health checks then run for real. Kubernetes with the image on the node takes seconds; a new node or VM, one to several minutes. Printed as an assumption |
 
-Every `interval_s` it wants `ceil(running × value ÷ target)` replicas, within `min` and `max`, and ignores a change within 10% of the target. A new replica is a real container: it starts, its pools open their connections (all `min` of them, at once), it passes its health check, and only then does the lb send it traffic. A leaving replica is drained first: the lb sends it no new requests, and it stops once its requests finish. The report shows each decision and how long each new replica took to take traffic.
+Every `interval_s` it wants `ceil(ready × value ÷ target)` replicas, where `ready` is the replicas taking traffic, within `min` and `max`, and ignores a change within 10% of the target. It goes on deciding while new replicas start, asking for more if it wants more, and scales down only once none are starting. A new replica is a real container: it starts, its pools open their connections (all `min` of them, at once), it passes its health check, and only then does the lb send it traffic. A leaving replica is drained first: the lb sends it no new requests, and it stops once its requests finish. The report shows each decision and how long each new replica took to take traffic.
 
 Call fields:
 

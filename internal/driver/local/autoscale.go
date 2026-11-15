@@ -51,9 +51,12 @@ func (d *Driver) Metric(ctx context.Context, service, metric string, window time
 	return v, true, nil
 }
 
-// Scale runs service with n replicas: it starts the next ones in order and
-// enables them on the lb once healthy, or drains and stops the last ones.
-// ready is called as each new replica takes traffic, with the time it took.
+// Scale runs service with n replicas. Scaling up starts the next ones in
+// order, in the background of the call that wanted them: each waits the
+// autoscaler's startup_s, starts, passes its health check and is enabled
+// on the lb, then ready is called; Scale returns once they're under way, so
+// the autoscaler goes on deciding meanwhile. Scaling down drains and stops
+// the last ones, and refuses while replicas are still starting.
 func (d *Driver) Scale(ctx context.Context, service string, n int, ready func(container string, took time.Duration)) error {
 	s := d.plan.Service(service)
 	if s == nil || s.Autoscale == nil {
@@ -61,9 +64,8 @@ func (d *Driver) Scale(ctx context.Context, service string, n int, ready func(co
 	}
 	n = min(max(n, 1), len(s.Containers))
 	d.scaleMu.Lock()
-	defer d.scaleMu.Unlock()
 	if d.running == nil {
-		d.running = map[string]int{}
+		d.running, d.starting = map[string]int{}, map[string]int{}
 	}
 	cur, ok := d.running[service]
 	if !ok {
@@ -72,22 +74,19 @@ func (d *Driver) Scale(ctx context.Context, service string, n int, ready func(co
 	switch {
 	case n > cur:
 		add := s.Containers[cur:n]
-		start := time.Now()
-		args := append([]string{"--profile", profileScale, "up", "-d", "--no-deps", "--wait", "--wait-timeout", "180"}, add...)
-		if _, err := d.compose(ctx, args...); err != nil {
-			return fmt.Errorf("starting %s: %w", strings.Join(add, ", "), err)
-		}
-		for _, c := range add {
-			if err := d.lbCommand(ctx, service, "enable server replicas/"+c); err != nil {
-				return err
-			}
-			d.event("replica_ready", map[string]any{"service": service, "container": c, "seconds": time.Since(start).Seconds()})
-			if ready != nil {
-				ready(c, time.Since(start))
-			}
-		}
+		d.running[service] = n
+		d.starting[service] += len(add)
+		d.scaleMu.Unlock()
+		go d.startReplicas(ctx, service, add, time.Duration(s.Autoscale.StartupS)*time.Second, ready)
+		return nil
 	case n < cur:
+		if d.starting[service] > 0 {
+			d.scaleMu.Unlock()
+			return fmt.Errorf("%d of %s's replicas are still starting", d.starting[service], service)
+		}
 		leave := s.Containers[n:cur]
+		d.running[service] = n
+		d.scaleMu.Unlock()
 		for _, c := range leave {
 			if err := d.lbCommand(ctx, service, "set server replicas/"+c+" state drain"); err != nil {
 				return err
@@ -103,9 +102,51 @@ func (d *Driver) Scale(ctx context.Context, service string, n int, ready func(co
 			return fmt.Errorf("stopping %s: %w", strings.Join(leave, ", "), err)
 		}
 		d.event("replicas_stopped", map[string]any{"service": service, "containers": leave})
+		return nil
 	}
-	d.running[service] = n
+	d.scaleMu.Unlock()
 	return nil
+}
+
+// startReplicas brings up containers for an autoscaled service: after the
+// startup wait, compose starts them and waits for their health checks, and
+// each is enabled on the lb.
+func (d *Driver) startReplicas(ctx context.Context, service string, add []string, wait time.Duration, ready func(string, time.Duration)) {
+	defer func() {
+		d.scaleMu.Lock()
+		d.starting[service] -= len(add)
+		d.scaleMu.Unlock()
+	}()
+	start := time.Now()
+	// Finding capacity and pulling the image, which this host has already
+	// done.
+	if wait > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+	}
+	fail := func(err error) {
+		if ctx.Err() == nil {
+			d.event("autoscale_error", map[string]any{"service": service, "containers": add, "error": err.Error()})
+		}
+	}
+	args := append([]string{"--profile", profileScale, "up", "-d", "--no-deps", "--wait", "--wait-timeout", "180"}, add...)
+	if _, err := d.compose(ctx, args...); err != nil {
+		fail(fmt.Errorf("starting %s: %w", strings.Join(add, ", "), err))
+		return
+	}
+	for _, c := range add {
+		if err := d.lbCommand(ctx, service, "enable server replicas/"+c); err != nil {
+			fail(err)
+			return
+		}
+		d.event("replica_ready", map[string]any{"service": service, "container": c, "seconds": time.Since(start).Seconds()})
+		if ready != nil {
+			ready(c, time.Since(start))
+		}
+	}
 }
 
 // awaitDrained waits until the lb has no requests in progress on any of

@@ -111,7 +111,11 @@ func addNode(f *mermaid.Flowchart, name string, s *design.Service, extra []strin
 		if !s.IsSynthetic() {
 			lines = append(lines, s.Image)
 		}
-		f.Node(mermaid.ID(name), mermaid.Box, append(append(lines, res), extra...)...)
+		lines = append(lines, res)
+		if a := s.Autoscale; a != nil && a.Min != nil && a.Max != nil {
+			lines = append(lines, autoscaleLabel(a))
+		}
+		f.Node(mermaid.ID(name), mermaid.Box, append(lines, extra...)...)
 	case s.Kind == "pgbouncer":
 		f.Node(mermaid.ID(name), mermaid.Rounded, append([]string{title, "pgbouncer · " + s.PoolMode, res}, extra...)...)
 	case s.Kind == "lb":
@@ -304,4 +308,20 @@ func deref(p *int) int {
 		return 0
 	}
 	return *p
+}
+
+// autoscaleLabel is an autoscaler's range and metric: autoscale 2–6 on CPU 70%.
+func autoscaleLabel(a *design.Autoscale) string {
+	on := a.Metric
+	if a.Target != nil {
+		switch a.Metric {
+		case "cpu":
+			on = "CPU " + pct(*a.Target)
+		case "p99":
+			on = fmt.Sprintf("p99 %g ms", *a.Target)
+		case "inflight":
+			on = fmt.Sprintf("%g in flight", *a.Target)
+		}
+	}
+	return fmt.Sprintf("autoscale %d–%d on %s", *a.Min, *a.Max, on)
 }

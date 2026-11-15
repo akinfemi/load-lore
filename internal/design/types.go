@@ -152,6 +152,7 @@ type Autoscale struct {
 	Target             *float64 `yaml:"target,omitempty" json:"target,omitempty" jsonschema_description:"The metric's value to hold: a fraction for cpu (default 0.7), milliseconds for p99, requests for inflight. Required for p99 and inflight."`
 	IntervalS          *int     `yaml:"interval_s,omitempty" json:"interval_s,omitempty" jsonschema:"minimum=5,default=15" jsonschema_description:"Seconds between decisions; the metric is averaged over this window. Kubernetes' default is 15."`
 	ScaleUpCooldownS   *int     `yaml:"scale_up_cooldown_s,omitempty" json:"scale_up_cooldown_s,omitempty" jsonschema:"minimum=0,default=0" jsonschema_description:"Seconds after a change before it scales up again. Kubernetes' default is 0; a cloud autoscaling group's cooldown, often 300, applies here too."`
+	StartupS           *int     `yaml:"startup_s,omitempty" json:"startup_s,omitempty" jsonschema:"minimum=0,maximum=600,default=30" jsonschema_description:"Seconds a new replica waits before its container starts, for what a laptop has already done: finding a node or a VM, pulling the image. The app's own start, its pools and health checks then run for real. Kubernetes on a node with the image is a few seconds; a new node or VM is one to several minutes."`
 	ScaleDownCooldownS *int     `yaml:"scale_down_cooldown_s,omitempty" json:"scale_down_cooldown_s,omitempty" jsonschema:"minimum=0,default=300" jsonschema_description:"Seconds after a change before it scales down. Kubernetes' scale-down stabilization window is 300."`
 }
 

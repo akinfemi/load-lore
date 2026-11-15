@@ -7,9 +7,13 @@ import (
 
 // Autoscale lag: the run broke while an autoscaled service's replicas were
 // saturated, CPU at AutoscaleSaturated of their limit or more in the
-// break's window, and its autoscaler hadn't caught up: it was still below
-// max (lag), or at max (ceiling).
-const AutoscaleSaturated = 0.9
+// break's window or the AutoscaleWindows after it (a spike can start
+// partway through a window), and its autoscaler hadn't caught up: it was
+// still below max (lag), or at max (ceiling).
+const (
+	AutoscaleSaturated = 0.9
+	AutoscaleWindows   = 2
+)
 
 func autoscaleLag(a *Analysis) []*Diagnosis {
 	var out []*Diagnosis
@@ -21,17 +25,27 @@ func autoscaleLag(a *Analysis) []*Diagnosis {
 	if k < 0 || k >= len(a.Windows) {
 		return out
 	}
-	w := a.Windows[k]
 	for _, s := range a.Plan.Services {
 		as := s.Autoscale
 		if as == nil {
 			continue
 		}
-		sw := w.Services[s.Name]
-		if sw == nil || sw.CPU == nil || *sw.CPU < AutoscaleSaturated {
+		// The most saturated window from the break on.
+		var w *Window
+		var sw *ServiceWindow
+		for i := k; i <= min(k+AutoscaleWindows, len(a.Windows)-1); i++ {
+			x := a.Windows[i].Services[s.Name]
+			if x != nil && x.CPU != nil && (sw == nil || *x.CPU > *sw.CPU) {
+				w, sw = a.Windows[i], x
+			}
+		}
+		if sw == nil || *sw.CPU < AutoscaleSaturated {
 			continue
 		}
 		running := sw.Replicas
+		if bw := a.Windows[k].Services[s.Name]; bw != nil && bw.Replicas > 0 {
+			running = bw.Replicas // as the break began
+		}
 		var steps, ready []string
 		reached, reachedAt := as.Start, -1.0
 		for _, e := range a.Timeline {
@@ -48,7 +62,7 @@ func autoscaleLag(a *Analysis) []*Diagnosis {
 		}
 		d := &Diagnosis{Rule: "autoscale-lag", From: b.At, To: b.At + WindowSeconds, comp: s.Name}
 		d.Evidence = append(d.Evidence,
-			Evidence{Text: fmt.Sprintf("%s CPU at %s of its limit at %s, over %d %s", s.Name, Pct(*sw.CPU), Clock(w.Start), running, plural(running, "replica", "replicas")), Source: SrcCPU})
+			Evidence{Text: fmt.Sprintf("%s CPU at %s of its limit at %s, over %d %s", s.Name, Pct(*sw.CPU), Clock(w.Start), sw.Replicas, plural(sw.Replicas, "replica", "replicas")), Source: SrcCPU})
 		for _, st := range steps {
 			d.Evidence = append(d.Evidence, Evidence{Text: "autoscale " + st, Source: "events.jsonl (Loadlore's autoscaler)"})
 		}

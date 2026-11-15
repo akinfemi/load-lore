@@ -28,12 +28,13 @@ func desiredReplicas(running int, value float64, a *plan.Autoscale) int {
 	return min(max(int(math.Ceil(float64(running)*ratio)), a.Min), a.Max)
 }
 
-// autoscale runs each autoscaled service's control loop for the load:
-// every interval it reads the metric over the running replicas and scales
-// toward the desired count, waiting each direction's cooldown after a
-// change. A scale-up runs in the background, so the loop keeps reading;
-// the replicas it starts count as running from the decision, as a
-// Deployment's or an autoscaling group's desired count does.
+// autoscale runs each autoscaled service's control loop for the load.
+// Every interval it reads the metric over the replicas taking traffic and
+// wants ceil(ready x value / target) of them, as Kubernetes' HPA does with
+// its ready pods. More than it has asked for: it asks for the difference,
+// and those start in the background while it goes on deciding. Fewer: it
+// scales down once nothing is still starting. Each direction waits its
+// cooldown after the last change.
 func autoscale(ctx context.Context, t0 time.Time, p *plan.Plan, drv driver.Driver, dir *rundir.Dir, out io.Writer) {
 	var wg sync.WaitGroup
 	for _, s := range p.Services {
@@ -47,54 +48,66 @@ func autoscale(ctx context.Context, t0 time.Time, p *plan.Plan, drv driver.Drive
 
 func autoscaleOne(ctx context.Context, t0 time.Time, service string, a *plan.Autoscale, drv driver.Driver, dir *rundir.Dir, out io.Writer) {
 	interval := time.Duration(a.IntervalS) * time.Second
-	running := a.Start
-	var last time.Time // the last change
-	var scaling sync.WaitGroup
-	busy := false
 	var mu sync.Mutex
+	asked, ready := a.Start, a.Start // replicas asked for, and taking traffic
+	scalingDown := false
+	var last time.Time // the last change
+	var bg sync.WaitGroup
+	defer bg.Wait()
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
-	defer scaling.Wait()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
 		}
-		mu.Lock()
-		inProgress := busy
-		mu.Unlock()
-		if inProgress {
-			continue
-		}
 		v, ok, err := drv.Metric(ctx, service, a.Metric, interval)
 		if err != nil || !ok {
 			continue
 		}
-		want := desiredReplicas(running, v, a)
+		mu.Lock()
+		cur, have, down := asked, ready, scalingDown
+		mu.Unlock()
+		want := desiredReplicas(have, v, a)
 		since := time.Since(last)
 		switch {
-		case want > running && (last.IsZero() || since >= time.Duration(a.UpCooldownS)*time.Second):
-		case want < running && (last.IsZero() || since >= time.Duration(a.DownCooldownS)*time.Second):
+		case want > cur && (last.IsZero() || since >= time.Duration(a.UpCooldownS)*time.Second):
+		case want < cur && have == cur && !down && (last.IsZero() || since >= time.Duration(a.DownCooldownS)*time.Second):
 		default:
 			continue
 		}
-		at := time.Since(t0).Seconds()
-		_ = dir.Event("autoscale", map[string]any{"service": service, "at_s": at, "from": running, "to": want, "metric": a.Metric, "value": v, "target": a.Target})
-		fmt.Fprintf(out, "[%s] autoscale: %s %d → %d replicas (%s %s, target %s)\n", clock(time.Since(t0)), service, running, want, a.Metric, metricText(a.Metric, v), metricText(a.Metric, a.Target))
-		from := running
-		running, last = want, time.Now()
+		_ = dir.Event("autoscale", map[string]any{"service": service, "at_s": time.Since(t0).Seconds(), "from": cur, "to": want, "ready": have, "metric": a.Metric, "value": v, "target": a.Target})
+		fmt.Fprintf(out, "[%s] autoscale: %s %d → %d replicas (%s %s over %d taking traffic, target %s)\n", clock(time.Since(t0)), service, cur, want, a.Metric, metricText(a.Metric, v), have, metricText(a.Metric, a.Target))
+		last = time.Now()
 		mu.Lock()
-		busy = true
+		asked = want
+		if want < cur {
+			scalingDown = true
+		}
 		mu.Unlock()
-		scaling.Go(func() {
-			defer func() { mu.Lock(); busy = false; mu.Unlock() }()
-			err := drv.Scale(ctx, service, want, func(c string, took time.Duration) {
-				fmt.Fprintf(out, "[%s] autoscale: %s took traffic %s after the decision\n", clock(time.Since(t0)), c, took.Round(100*time.Millisecond))
-			})
+		onReady := func(c string, took time.Duration) {
+			mu.Lock()
+			ready++
+			mu.Unlock()
+			fmt.Fprintf(out, "[%s] autoscale: %s took traffic %s after the decision\n", clock(time.Since(t0)), c, took.Round(100*time.Millisecond))
+		}
+		bg.Go(func() {
+			err := drv.Scale(ctx, service, want, onReady)
+			mu.Lock()
+			if want < cur {
+				scalingDown = false
+				if err == nil {
+					ready = want
+				}
+			}
+			if err != nil {
+				asked = cur
+			}
+			mu.Unlock()
 			if err != nil && ctx.Err() == nil {
-				_ = dir.Event("autoscale_error", map[string]any{"service": service, "from": from, "to": want, "error": err.Error()})
-				fmt.Fprintf(out, "autoscale: %s %d → %d failed: %v\n", service, from, want, err)
+				_ = dir.Event("autoscale_error", map[string]any{"service": service, "from": cur, "to": want, "error": err.Error()})
+				fmt.Fprintf(out, "autoscale: %s %d → %d failed: %v\n", service, cur, want, err)
 			}
 		})
 	}

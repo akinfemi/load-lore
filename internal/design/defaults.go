@@ -168,6 +168,7 @@ func defaultApp(s *Service, services map[string]*Service) {
 		setDefault(&a.IntervalS, DefaultAutoscaleIntervalS)
 		setDefault(&a.ScaleUpCooldownS, 0)
 		setDefault(&a.ScaleDownCooldownS, DefaultAutoscaleScaleDownS)
+		setDefault(&a.StartupS, DefaultAutoscaleStartupS)
 	}
 	if !s.IsSynthetic() {
 		return
@@ -271,4 +272,7 @@ const (
 	DefaultAutoscaleCPU        = 0.7
 	DefaultAutoscaleIntervalS  = 15
 	DefaultAutoscaleScaleDownS = 300
+	// DefaultAutoscaleStartupS stands in for scheduling and an image pull,
+	// which a laptop has already done; a guess, printed as an assumption.
+	DefaultAutoscaleStartupS = 30
 )

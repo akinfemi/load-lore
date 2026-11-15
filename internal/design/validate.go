@@ -1088,6 +1088,9 @@ func (v *validator) autoscale(name, p string, s *Service) {
 	if a.ScaleUpCooldownS != nil && *a.ScaleUpCooldownS < 0 {
 		v.errorf(pathKey(ap, "scale_up_cooldown_s"), CodeRange, "scale_up_cooldown_s can't be negative")
 	}
+	if a.StartupS != nil && (*a.StartupS < 0 || *a.StartupS > 600) {
+		v.errorf(pathKey(ap, "startup_s"), CodeRange, "startup_s must be 0 to 600, not %d", *a.StartupS)
+	}
 	if a.ScaleDownCooldownS != nil && *a.ScaleDownCooldownS < 0 {
 		v.errorf(pathKey(ap, "scale_down_cooldown_s"), CodeRange, "scale_down_cooldown_s can't be negative")
 	}

@@ -139,6 +139,9 @@ type Autoscale struct {
 	// Seconds after a change before scaling up again, and down.
 	UpCooldownS   int `json:"scale_up_cooldown_s"`
 	DownCooldownS int `json:"scale_down_cooldown_s"`
+	// StartupS: a new replica's container starts this long after the
+	// decision, standing in for scheduling and an image pull.
+	StartupS int `json:"startup_s"`
 }
 
 // Running is how many of s's containers run when the load starts: all of
@@ -468,7 +471,7 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 		n := *ds.Replicas
 		if a := ds.Autoscale; a != nil {
 			n = *a.Max
-			s.Autoscale = &Autoscale{Start: *ds.Replicas, Min: *a.Min, Max: *a.Max, Metric: a.Metric, Target: *a.Target, IntervalS: *a.IntervalS, UpCooldownS: *a.ScaleUpCooldownS, DownCooldownS: *a.ScaleDownCooldownS}
+			s.Autoscale = &Autoscale{Start: *ds.Replicas, Min: *a.Min, Max: *a.Max, Metric: a.Metric, Target: *a.Target, IntervalS: *a.IntervalS, UpCooldownS: *a.ScaleUpCooldownS, DownCooldownS: *a.ScaleDownCooldownS, StartupS: *a.StartupS}
 		}
 		for i := range n {
 			s.Containers = append(s.Containers, fmt.Sprintf("%s-%d", name, i))
@@ -1482,6 +1485,11 @@ func (p *Plan) assumeAutoscale(name string, ds *design.Service) {
 	p.Assumptions = append(p.Assumptions, Assumption{
 		Field: "services." + name + ".autoscale",
 		Value: fmt.Sprintf("%s, %d to %d replicas (starts with %d), every %d s, scale-up cooldown %d s, scale-down cooldown %d s", target, a.Min, a.Max, a.Start, a.IntervalS, a.UpCooldownS, a.DownCooldownS),
-		Why:   "as a Kubernetes HorizontalPodAutoscaler: it wants ceil(replicas × metric ÷ target), ignores changes within 10%, and decides nothing while a change is still starting replicas. Unset values are Kubernetes' defaults: 15 s, no wait to scale up, 300 s before scaling down",
+		Why:   "as a Kubernetes HorizontalPodAutoscaler: it wants ceil(replicas taking traffic × metric ÷ target), ignores changes within 10%, and goes on deciding while new replicas start, adding more if it wants more; it scales down only once none are starting. Unset values are Kubernetes' defaults: 15 s, no wait to scale up, 300 s before scaling down",
 	})
+	why := "set in the design"
+	if ds.Autoscale.StartupS == nil {
+		why = "Loadlore's guess: a new replica waits this long before its container starts, for finding capacity and pulling the image, which on this machine are already done; its own start, pools and health checks then run for real. Kubernetes with the image on the node takes seconds; a new node or VM, minutes"
+	}
+	p.Assumptions = append(p.Assumptions, Assumption{Field: "services." + name + ".autoscale.startup_s", Value: fmt.Sprintf("%d s", a.StartupS), Why: why})
 }

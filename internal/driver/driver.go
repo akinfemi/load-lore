@@ -35,9 +35,10 @@ type Driver interface {
 	// over its running replicas, averaged over the last window. ok is
 	// false while there's no data.
 	Metric(ctx context.Context, service, metric string, window time.Duration) (v float64, ok bool, err error)
-	// Scale makes an autoscaled service run n replicas, starting or
-	// draining and stopping them; ready is called as each new one takes
-	// traffic.
+	// Scale makes an autoscaled service run n replicas. New ones start in
+	// the background and ready is called as each takes traffic; Scale
+	// returns once they're under way. Fewer drains and stops the last ones,
+	// and fails while replicas are still starting.
 	Scale(ctx context.Context, service string, n int, ready func(container string, took time.Duration)) error
 	// Sample reads current numbers for progress output.
 	Sample(ctx context.Context, elapsed time.Duration) (*Sample, error)

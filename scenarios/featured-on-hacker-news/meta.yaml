@@ -1,0 +1,51 @@
+title: Featured on Hacker News
+level: 2
+concepts: [autoscaling, scale-up lag, scaling metrics, headroom]
+minutes: 40
+
+# Available to Docker at --scale 1, Loadlore's own containers included:
+# 7.3 CPUs, counting all six replicas the autoscaler may run.
+# reference and speed: the machine the scenario was checked on and the
+# host speed index loadl run printed there; it warns on a much slower host.
+host:
+  cpus: 8
+  memory: 8g
+  reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
+  speed: 987
+
+# Load generator VUs started before the load, at --scale 1, measured: the
+# most VUs busy at once in a whole run, as recovery claims judge the
+# windows after a break (3,600, with up to 4 s responses at 1,800 rps).
+load:
+  prealloc_vus: 4000
+  peak_vus: 3600
+  from: featured-on-hacker-news-scale-on-inflight-20261115-140046
+
+# What `loadl scenario check` verifies, at --scale 1.
+check:
+  problem:
+    verdict: broke
+    diagnoses: [autoscale-lag]
+    recovers: false
+  solutions:
+    # It still breaks as the surge lands, then has all six replicas at once.
+    scale-on-inflight: { verdict: broke, recovers: true }
+    # helps: holds the whole profile.
+    headroom: {}
+  variants:
+    # Deciding more often doesn't change what each decision can ask for.
+    faster-decisions: { verdict: broke, diagnoses: [autoscale-lag] }
+
+# What `loadl predict` asks before a run; each answer becomes an expect
+# line in design.yaml.
+predict:
+  - ask: At what offered load, in requests per second, will it break? The load holds at 200 rps, then climbs to 1,800 over 45 s. A rough guess is fine; answer never if you think it holds.
+    answer: rps
+    expect: break_load_rps within 25% of {answer}
+    never: break_load_rps none
+  - ask: How long after the surge starts will it run six replicas?
+    answer: text
+    expect: 'note: "six replicas after: {answer}"'
+  - ask: If the autoscaler decided every 5 s instead of every 15 s, what would change?
+    answer: text
+    expect: 'note: "deciding every 5 s: {answer}"'

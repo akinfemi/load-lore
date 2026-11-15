@@ -1,0 +1,49 @@
+version: 1
+name: featured-on-hacker-news-faster-decisions
+
+# A small product's api, autoscaled on CPU as the platform's defaults
+# suggest. It runs two replicas for its usual traffic. Then a post about
+# the product reaches the front page of Hacker News.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 1000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 1
+      calls:
+        - { target: db, op: read }
+      resilience:
+        timeout_ms: 2000
+    pools: { db: 10 }
+    autoscale: { max: 6, metric: cpu, target: 0.7, interval_s: 5 }   # was every 15 s
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 1, memory: 1g }
+    config: { max_connections: 100 }
+    dataset: { rows: 100000, row_bytes: 256 }
+
+workload:
+  entry: lb
+  profile:
+    - hold: { rps: 200, for: 1m }                  # a normal afternoon
+    - ramp: { from: 200, to: 1800, over: 45s }    # the post reaches the front page
+    - hold: { rps: 1800, for: 1m30s }
+
+assumptions:
+  - { field: services.api.behavior.cpu_ms, basis: guessed, why: "a JSON handler with some work in it: a replica of 0.5 CPU serves about 470 requests a second" }
+  - { field: workload.profile, basis: guessed, why: "a front-page surge: nine times the usual traffic in under a minute" }
+  - { field: services.api.autoscale.startup_s, basis: guessed, why: "a new pod waits about 30 s to be scheduled and pull its image" }
+
+# Your predictions, scored in the report. The line here is an example;
+# loadl predict design.yaml replaces it with your answers.
+expect:
+  - p99_ms < 500 until load_rps >= 1000
