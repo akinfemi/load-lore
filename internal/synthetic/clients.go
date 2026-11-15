@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -146,7 +147,7 @@ func (p *pgClient) do(ctx context.Context, c *Call, r request) (bool, error) {
 		payload, token := p.writePayload()
 		_, err = conn.Exec(ctx, dataset.Write, key, payload)
 		if err == nil && token != "" {
-			sessionOf(ctx).wrote(p.data, key, token)
+			writesOf(ctx).wrote(p.data, key, token)
 		}
 	case c.Query == "range":
 		var rows pgx.Rows
@@ -181,7 +182,7 @@ func (p *pgClient) do(ctx context.Context, c *Call, r request) (bool, error) {
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = nil
 		}
-		if token, ok := sessionOf(ctx).written(p.data, key); ok && err == nil {
+		if token, ok := writesOf(ctx).written(p.data, key); ok && err == nil {
 			result := "fresh"
 			if !strings.HasPrefix(payload, token) {
 				result = "stale"
@@ -252,7 +253,14 @@ func (p *pgClient) release(conn *pgxpool.Conn, since time.Time) {
 type session struct {
 	mu    sync.Mutex
 	conns map[string]*heldConn // by target
-	// writes are the tokens of the request's writes, by data and key.
+}
+
+// writeLog is the tokens of a request's writes to replicated data, by data
+// and key, so a later read of the key can be checked for the write. A
+// request has one; an async call gets a copy of it as it stood when the
+// call was made.
+type writeLog struct {
+	mu     sync.Mutex
 	writes map[writeKey]string
 }
 
@@ -261,33 +269,43 @@ type writeKey struct {
 	key  int64
 }
 
-// sessionOf is the request's session, or nil for a call outside one.
-func sessionOf(ctx context.Context) *session {
-	s, _ := ctx.Value(sessionKey{}).(*session)
-	return s
+type writeLogKey struct{}
+
+// writesOf is the write log for a call, or nil outside a request.
+func writesOf(ctx context.Context) *writeLog {
+	w, _ := ctx.Value(writeLogKey{}).(*writeLog)
+	return w
+}
+
+// withWrites gives ctx a write log: a new one, or a copy of from.
+func withWrites(ctx context.Context, from *writeLog) context.Context {
+	w := &writeLog{writes: map[writeKey]string{}}
+	if from != nil {
+		from.mu.Lock()
+		maps.Copy(w.writes, from.writes)
+		from.mu.Unlock()
+	}
+	return context.WithValue(ctx, writeLogKey{}, w)
 }
 
 // wrote records the token of a write the request made.
-func (s *session) wrote(data string, key int64, token string) {
-	if s == nil || data == "" {
+func (w *writeLog) wrote(data string, key int64, token string) {
+	if w == nil || data == "" {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.writes == nil {
-		s.writes = map[writeKey]string{}
-	}
-	s.writes[writeKey{data, key}] = token
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.writes[writeKey{data, key}] = token
 }
 
 // written is the token of the request's last write of key in data.
-func (s *session) written(data string, key int64) (string, bool) {
-	if s == nil || data == "" {
+func (w *writeLog) written(data string, key int64) (string, bool) {
+	if w == nil || data == "" {
 		return "", false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.writes[writeKey{data, key}]
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	t, ok := w.writes[writeKey{data, key}]
 	return t, ok
 }
 
@@ -303,6 +321,7 @@ type sessionKey struct{}
 // it holds.
 func withSession(ctx context.Context) (context.Context, func()) {
 	s := &session{conns: map[string]*heldConn{}}
+	ctx = withWrites(ctx, nil)
 	return context.WithValue(ctx, sessionKey{}, s), func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()

@@ -94,18 +94,27 @@ func TestReadAfterWriteTokens(t *testing.T) {
 	}
 	ctx, done := withSession(context.Background())
 	defer done()
-	s := sessionOf(ctx)
-	if _, ok := s.written("db", 7); ok {
+	w := writesOf(ctx)
+	if _, ok := w.written("db", 7); ok {
 		t.Error("a token before any write")
 	}
-	s.wrote("db", 7, ta)
-	if tok, ok := s.written("db", 7); !ok || tok != ta {
+	w.wrote("db", 7, ta)
+	if tok, ok := w.written("db", 7); !ok || tok != ta {
 		t.Errorf("written %q %v", tok, ok)
 	}
-	if _, ok := s.written("other", 7); ok {
+	if _, ok := w.written("other", 7); ok {
 		t.Error("a write to db counted for other data")
 	}
-	if _, ok := sessionOf(withoutSession(ctx)).written("db", 7); ok {
-		t.Error("an async call saw the request's writes")
+	// An async call gets the writes made before it, not later ones.
+	follow := writesOf(withWrites(withoutSession(ctx), w))
+	w.wrote("db", 8, tb)
+	if tok, ok := follow.written("db", 7); !ok || tok != ta {
+		t.Errorf("follow-up sees %q %v for key 7", tok, ok)
+	}
+	if _, ok := follow.written("db", 8); ok {
+		t.Error("a follow-up saw a write made after it was sent")
+	}
+	if writesOf(context.Background()) != nil {
+		t.Error("a write log outside a request")
 	}
 }

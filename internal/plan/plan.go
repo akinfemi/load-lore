@@ -811,6 +811,9 @@ func convertCalls(calls []*design.Call) []synthetic.Call {
 	out := make([]synthetic.Call, 0, len(calls))
 	for _, c := range calls {
 		sc := synthetic.Call{Target: c.Target, Op: c.Op, Count: *c.Count, When: c.When, Mode: c.Mode, Query: c.Query, OnMiss: convertCalls(c.OnMiss), Coalesce: c.Coalesce}
+		if c.AfterMs != nil {
+			sc.AfterMs = *c.AfterMs
+		}
 		if c.TTLS != nil {
 			sc.TTLS = *c.TTLS
 		}

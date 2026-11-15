@@ -237,10 +237,16 @@ func (s *Service) runCalls(ctx context.Context, calls []Call, req request) error
 		}
 		for range c.Count {
 			if c.Mode == "async" {
+				// It sees the request's writes so far, not later ones, and
+				// runs AfterMs later: a follow-up such as the next page load.
+				actx := withWrites(withoutSession(context.WithoutCancel(ctx)), writesOf(ctx))
 				s.async.Add(1)
 				go func() {
 					defer s.async.Done()
-					if err := s.call(withoutSession(context.WithoutCancel(ctx)), c, req); err != nil {
+					if c.AfterMs > 0 {
+						time.Sleep(time.Duration(c.AfterMs) * time.Millisecond)
+					}
+					if err := s.call(actx, c, req); err != nil {
 						s.m.asyncDropped.Inc()
 					}
 				}()

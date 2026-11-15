@@ -57,6 +57,8 @@ type Call struct {
 	TTLS     int    `json:"ttl_s,omitempty"`
 	Query    string `json:"query,omitempty"` // point | range | scan
 	Rows     int    `json:"rows,omitempty"`
+	// AfterMs delays an async call: the request doesn't wait for it.
+	AfterMs int `json:"after_ms,omitempty"`
 }
 
 // Resilience settings for every outbound call.

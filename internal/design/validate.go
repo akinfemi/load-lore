@@ -307,6 +307,12 @@ func (v *validator) call(caller, p string, c *Call) {
 	if c.Query != "" && c.Op != "read" {
 		v.errorf(pathKey(p, "query"), CodeNotApplicable, "query only applies to op read")
 	}
+	if c.AfterMs != nil && c.Mode != "async" {
+		v.errorf(pathKey(p, "after_ms"), CodeNotApplicable, "after_ms only applies to mode: async; a sync call that waited would hold the request open")
+	}
+	if c.AfterMs != nil && (*c.AfterMs < 0 || *c.AfterMs > 60000) {
+		v.errorf(pathKey(p, "after_ms"), CodeRange, "after_ms must be 0 to 60000, not %d", *c.AfterMs)
+	}
 	if c.Rows != nil && c.Query != "range" && c.Query != "batch" {
 		v.errorf(pathKey(p, "rows"), CodeNotApplicable, "rows only applies to query: range and query: batch")
 	}

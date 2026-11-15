@@ -79,6 +79,7 @@ Call fields:
 | `count` | `1` | Times per request |
 | `when` | `always` | `always`, `read`, `write` (from the workload mix) |
 | `mode` | `sync` | `sync` waits for the result; `async` fires and continues |
+| `after_ms` | none | `mode: async` only: milliseconds the call waits before it runs, while the request responds without it. Models a follow-up the client makes later, such as the page that loads after a form post: `{ target: ro, op: read, when: write, mode: async, after_ms: 50 }`. When the target has read replicas, a point read of a key the request wrote is checked for the write, including in a follow-up |
 | `on_miss` | none | Calls to run on a cache miss (`get` only) |
 | `coalesce` | `false` | `get` with `on_miss`: concurrent misses for the same key in one replica wait for one run of `on_miss` (request coalescing, single-flight). Each waiter still gives up at its own deadline |
 | `ttl_s` | none | For `set` only |

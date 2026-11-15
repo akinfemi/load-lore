@@ -104,6 +104,7 @@ type Call struct {
 	TTLS     *int   `yaml:"ttl_s,omitempty" json:"ttl_s,omitempty" jsonschema:"minimum=0" jsonschema_description:"Key TTL in seconds. set only."`
 	Query    string `yaml:"query,omitempty" json:"query,omitempty" jsonschema:"enum=point,enum=range,enum=batch,enum=scan,default=point" jsonschema_description:"Shape of a read: point (one row by key), range (rows in key order), batch (rows by key in one statement), scan (full table)."`
 	Rows     *int   `yaml:"rows,omitempty" json:"rows,omitempty" jsonschema:"minimum=1,default=10" jsonschema_description:"Rows returned by a range read, or keys fetched by a batch read."`
+	AfterMs  *int   `yaml:"after_ms,omitempty" json:"after_ms,omitempty" jsonschema:"minimum=0,maximum=60000" jsonschema_description:"mode async only: milliseconds the call waits before it runs, while the request goes on without it. A follow-up the client makes later, such as the page that loads after a form post; a read of a key the request wrote is checked for the write."`
 }
 
 // Resilience settings apply to every outbound call of the service.
