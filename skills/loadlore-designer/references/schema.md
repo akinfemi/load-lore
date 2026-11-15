@@ -239,6 +239,7 @@ Per-component metrics, written `<service>.<metric>`:
 | Component | Metrics |
 | --- | --- |
 | postgres | `connections`, `cpu`, `memory` |
+| postgres-replica | `connections`, `cpu`, `memory`, `replication_lag_ms`: how far behind its primary it is, as time since the last transaction it replayed while it had WAL left to replay (0 when caught up) |
 | redis | `hit_rate`, `memory`, `cpu` |
 | application services | `cpu`, `memory`, `p99_ms`, `error_rate`, `inflight` |
 

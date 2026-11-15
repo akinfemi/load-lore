@@ -157,6 +157,13 @@ type ServiceWindow struct {
 	// Postgres: backends waiting on a heavyweight lock, such as a row lock,
 	// on average over the window's scrapes.
 	LockWaits *float64 `json:"lock_waits,omitempty"`
+	// Postgres read replicas: how far behind the primary it was, at most
+	// over the window's scrapes. ReplicationLagS is time since the last
+	// transaction it replayed, while it had WAL left to replay (0 when
+	// caught up); ReplicationLagBytes is the WAL the primary had written
+	// that the replica hadn't replayed.
+	ReplicationLagS     *float64 `json:"replication_lag_s,omitempty"`
+	ReplicationLagBytes *float64 `json:"replication_lag_bytes,omitempty"`
 
 	// Redis.
 	HitRate   *float64 `json:"hit_rate,omitempty"`
@@ -695,6 +702,14 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 		if _, mean, ok := st.gaugeSum("pg_lock_waits_waiting", svc, wa, wb); ok {
 			sw.LockWaits = num(mean, true)
 		}
+		if s.Primary != "" {
+			if mx, _, ok := st.gaugeSum("pg_replication_lag_seconds", svc, wa, wb); ok {
+				sw.ReplicationLagS = num(mx, true)
+			}
+			if mx, _, ok := st.gaugeSum("pg_stat_replication_pg_wal_lsn_diff", eq("service", s.Primary, "application_name", s.Name), wa, wb); ok {
+				sw.ReplicationLagBytes = num(mx, true)
+			}
+		}
 	case "pgbouncer":
 		db := and(svc, eq("database", plan.DBName))
 		active, _, ok1 := st.gaugeSum("pgbouncer_pools_client_active_connections", db, wa, wb)
@@ -893,6 +908,8 @@ const (
 	SrcPoolConnect      = "loadlore_pool_connect_seconds (new connections the pools opened, and how long each took)"
 	SrcPoolHeld         = "loadlore_call_duration_seconds minus loadlore_pool_wait_seconds, per call (time with a connection)"
 	SrcPGConns          = "pg_stat_activity_count and pg_settings_max_connections (postgres_exporter)"
+	SrcReplLagS         = "pg_replication_lag_seconds (postgres_exporter, on the replica): time since its last replayed transaction while WAL is left to replay"
+	SrcReplLagBytes     = "pg_stat_replication_pg_wal_lsn_diff (postgres_exporter, on the primary): WAL written that the replica hasn't replayed"
 	SrcHitRate          = "redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter)"
 	SrcLBRequests       = "haproxy_backend_http_requests_total (HAProxy)"
 	SrcLBHealthy        = "haproxy_backend_active_servers (HAProxy)"

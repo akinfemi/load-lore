@@ -42,9 +42,10 @@ var RunMetrics = map[string]MetricKind{
 // <service>.<metric>, by component class. Each must map to a series the run
 // collects. cpu and memory are utilization of the container's limit.
 var ComponentMetrics = map[string]map[string]MetricKind{
-	"postgres": {"connections": MetricCount, "cpu": MetricRatio, "memory": MetricRatio},
-	"redis":    {"hit_rate": MetricRatio, "memory": MetricRatio, "cpu": MetricRatio},
-	"service":  {"cpu": MetricRatio, "memory": MetricRatio, "p99_ms": MetricLatency, "error_rate": MetricRatio, "inflight": MetricCount},
+	"postgres":         {"connections": MetricCount, "cpu": MetricRatio, "memory": MetricRatio},
+	"postgres-replica": {"connections": MetricCount, "cpu": MetricRatio, "memory": MetricRatio, "replication_lag_ms": MetricLatency},
+	"redis":            {"hit_rate": MetricRatio, "memory": MetricRatio, "cpu": MetricRatio},
+	"service":          {"cpu": MetricRatio, "memory": MetricRatio, "p99_ms": MetricLatency, "error_rate": MetricRatio, "inflight": MetricCount},
 }
 
 // metricClass is the ComponentMetrics key for a service.
@@ -52,8 +53,6 @@ func (s *Service) metricClass() string {
 	switch s.Kind {
 	case "":
 		return "service"
-	case "postgres-replica":
-		return "postgres"
 	}
 	return s.Kind
 }

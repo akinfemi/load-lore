@@ -192,6 +192,9 @@ func diagramSection(d *doc, a *analysis.Analysis) {
 	if kinds["postgres"] {
 		src = append(src, "conns from "+analysis.SrcPGConns)
 	}
+	if hasReplica(a.Plan) {
+		src = append(src, "a replica's lag from "+analysis.SrcReplLagS)
+	}
 	if kinds["pgbouncer"] {
 		src = append(src, "PgBouncer's client conns from "+analysis.SrcPgbClients+", its server pools from "+analysis.SrcPgbPool+" and "+analysis.SrcPgbWaiting+", and transactions/s on its edges from pgbouncer_stats_totals_sql_transactions_pooled_total")
 	}
@@ -240,6 +243,9 @@ func annotations(a *analysis.Analysis, w *analysis.Window) *diagram.Annotations 
 		switch {
 		case sw.Connections != nil && sw.MaxConnections != nil:
 			lines = append(lines, fmt.Sprintf("conns %s/%s", analysis.Count(*sw.Connections), analysis.Count(*sw.MaxConnections)))
+			if sw.ReplicationLagS != nil {
+				lines = append(lines, "lag "+analysis.Ms(*sw.ReplicationLagS*1000))
+			}
 		case sw.HitRate != nil:
 			lines = append(lines, "hit rate "+analysis.Pct(*sw.HitRate))
 		case sw.Healthy != nil && s.LB != nil:
@@ -788,6 +794,14 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 				}
 				return "–"
 			}})
+			if s.Primary != "" {
+				cols = append(cols, col{name + " lag", func(w *analysis.Window) string {
+					if sw := w.Services[name]; sw != nil && sw.ReplicationLagS != nil {
+						return analysis.Ms(*sw.ReplicationLagS * 1000)
+					}
+					return "–"
+				}})
+			}
 		case "redis":
 			cols = append(cols, col{name + " hit rate", func(w *analysis.Window) string {
 				if sw := w.Services[name]; sw != nil {
@@ -875,6 +889,9 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 		conns += "; a PgBouncer's are its clients, from " + analysis.SrcPgbClients
 		pools += "; a PgBouncer's are its server connections, from " + analysis.SrcPgbPool + ", and its wait " + analysis.SrcPgbWait
 	}
+	if hasReplica(a.Plan) {
+		conns += "; a replica's lag is from " + analysis.SrcReplLagS
+	}
 	d.line("Columns: offered is %s; served is %s; dropped is %s; errors are %s; p50 and p99 are from %s; CPU is %s, mean over the window; conns are %s; hit rate is from %s; up is %s; pools are %s; k6 and Toxiproxy CPU are against their budgets.",
 		analysis.SrcOffered, analysis.SrcRPS, analysis.SrcDropped, analysis.SrcErrors, analysis.SrcK6Latency, analysis.SrcCPU, conns, analysis.SrcHitRate, analysis.SrcLBHealthy, pools)
 	if hostSampled {
@@ -914,4 +931,9 @@ func errorCauses(d *doc, ws []*analysis.Window) {
 	}
 	d.line("")
 	d.p("<sub>Why requests failed, over the whole run (%s). A request that failed after retries counts once, by its last attempt's cause.</sub>", analysis.SrcErrorCauses)
+}
+
+// hasReplica is whether the plan has a postgres read replica.
+func hasReplica(p *plan.Plan) bool {
+	return slices.ContainsFunc(p.Services, func(s *plan.Service) bool { return s.Primary != "" })
 }
