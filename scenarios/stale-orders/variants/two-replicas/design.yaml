@@ -1,0 +1,57 @@
+version: 1
+name: stale-orders-two-replicas
+
+# An online shop's orders api. To take load off the database, the team
+# added a read replica and moved the reads to it: browsing, and the order
+# confirmation page that loads after a customer places an order. The
+# replica was bought as a smaller instance than the primary, on the same
+# kind of cloud disk.
+
+services:
+  api:
+    image: loadlore/synthetic
+    resources: { cpu: 2, memory: 1g }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: ro, op: read, when: read }                                # browsing
+        - { target: db, op: write, when: write }                              # place an order
+        - { target: ro, op: read, when: write, mode: async, after_ms: 200 }   # the confirmation page loads
+      resilience:
+        timeout_ms: 2000
+    pools:
+      db: { size: 80, min: 40 }   # under the primary's max_connections
+      ro: { size: 80, min: 40 }
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 1, memory: 2g }
+    config: { max_connections: 100, shared_buffers: 512MB }
+    dataset: { rows: 2000000, row_bytes: 512 }   # about 1.1 GB with its index
+    # No disk block: its data fits in its memory, so its disk isn't the point.
+
+  ro:
+    kind: postgres-replica
+    primary: db
+    replicas: 2   # was 1: each takes half the reads
+    resources: { cpu: 0.75, memory: 512m }
+    config: { max_connections: 100, shared_buffers: 128MB }
+    disk: {}   # a general-purpose volume at its baseline: about 1 ms a read, 3,000 IOPS
+
+workload:
+  entry: api
+  profile:
+    - ramp: { from: 200, to: 1800, over: 3m }
+  mix: { read: 0.5, write: 0.5 }
+
+assumptions:
+  - { field: services.api.behavior.cpu_ms, basis: guessed, why: "a small JSON handler" }
+  - { field: workload.mix, basis: guessed, why: "during the sale, half the requests place an order" }
+  - { field: workload.keys, basis: guessed, why: "orders and pages spread over all 5 million customers" }
+  - { field: services.api.behavior.calls, basis: guessed, why: "the confirmation page loads about 200 ms after the order is placed" }
+
+# Your predictions, scored in the report. The line here is an example;
+# loadl predict design.yaml replaces it with your answers.
+expect:
+  - p99_ms < 500 until load_rps >= 1000

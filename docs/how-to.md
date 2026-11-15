@@ -33,7 +33,7 @@ Loadlore runs your design on real containers, so it needs Docker. There are no p
 
 ## 2. Work through a scenario
 
-Scenarios are guided experiments: a starting design that breaks, a story, questions to answer before you run it, hints, and worked solutions. Nine are built:
+Scenarios are guided experiments: a starting design that breaks, a story, questions to answer before you run it, hints, and worked solutions. Ten are built:
 
 | Scenario | Level | Teaches |
 | --- | --- | --- |
@@ -46,6 +46,7 @@ Scenarios are guided experiments: a starting design that breaks, a story, questi
 | [The live vote](../scenarios/live-vote/) | 2 | row locks, hot rows, lock contention that burns CPU |
 | [Statement day](../scenarios/statement-day/) | 2 | the buffer cache, working sets, a cloud disk's IOPS limit |
 | [The slow disk](../scenarios/slow-disk/) | 3 | fsync and commit latency, connection pools, group commit, `synchronous_commit` |
+| [Stale orders](../scenarios/stale-orders/) | 3 | read replicas, replication lag, read-your-writes |
 
 `loadl scenarios` lists them; `loadl scenarios retry` searches names, titles and concepts.
 

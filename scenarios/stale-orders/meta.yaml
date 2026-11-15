@@ -1,0 +1,53 @@
+title: Stale orders
+level: 3
+concepts: [read replicas, replication lag, read-your-writes, single-threaded replay]
+minutes: 50
+
+# Available to Docker at --scale 1, Loadlore's own containers included:
+# 6.65 CPUs for the starting design, 7.5 for variants/two-replicas.
+# reference and speed: the machine the scenario was checked on and the
+# host speed index loadl run printed there; it warns on a much slower host.
+host:
+  cpus: 8
+  memory: 8g
+  reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
+  speed: 996
+
+# Load generator VUs started before the load, at --scale 1, measured: the
+# larger of the peak rate x slo.p99_ms (1,800 x 0.5 s) and 1.5 x the most
+# VUs busy at once in any of the check's runs (134).
+load:
+  prealloc_vus: 900
+  peak_vus: 134
+  from: stale-orders-two-replicas-20261115-124239
+
+# What `loadl scenario check` verifies, at --scale 1. The starting design
+# holds: its problem is the confirmation pages the replica serves stale.
+check:
+  problem:
+    verdict: held
+    diagnoses: [replication-lag]
+  solutions:
+    # The replica still lags; the pages after an order no longer read it.
+    read-your-writes:
+      expect: [stale_read_rate < 1%]
+    # helps: holds, and the replica keeps up.
+    bigger-replica: {}
+  variants:
+    # Every replica replays every write: a second one takes reads, not
+    # replaying.
+    two-replicas: { verdict: held, diagnoses: [replication-lag] }
+
+# What `loadl predict` asks before a run; each answer becomes an expect
+# line in design.yaml. The load ramps from 200 to 1,800 rps.
+predict:
+  - ask: At what offered load, in requests per second, will it break? The ramp goes from 200 to 1,800 rps. A rough guess is fine; answer never if you think it holds.
+    answer: rps
+    expect: break_load_rps within 25% of {answer}
+    never: break_load_rps none
+  - ask: Of the confirmation pages that load 200 ms after an order, what share will show the order, at the top of the ramp?
+    answer: text
+    expect: 'note: "confirmation pages showing the order at the top of the ramp: {answer}"'
+  - ask: If you added a second replica, what would happen to that share?
+    answer: text
+    expect: 'note: "with a second replica: {answer}"'
