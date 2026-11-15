@@ -113,6 +113,11 @@ type World struct {
 
 	// LockWaits, when set, is db's backends waiting on locks.
 	LockWaits func(t float64) float64
+
+	// ReplicaLagS, when set, adds ro, a read replica of db, this many
+	// seconds behind it; StaleShare, with it, is the share of api's reads
+	// after a write from ro, 100 a second, that miss the write.
+	ReplicaLagS, StaleShare func(t float64) float64
 }
 
 // Event is an events.jsonl line at At seconds into the load.
@@ -163,6 +168,9 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 	if w.RetryMax > 0 {
 		src = strings.Replace(src, "behavior: { calls: [ { target: db, op: read } ] }",
 			fmt.Sprintf("behavior: { calls: [ { target: db, op: read } ], resilience: { retries: { max: %d } } }", w.RetryMax), 1)
+	}
+	if w.ReplicaLagS != nil {
+		src = strings.Replace(src, "workload:\n", "  ro:\n    kind: postgres-replica\n    primary: db\nworkload:\n", 1)
 	}
 	d, diags := design.Load([]byte(src))
 	if diags.HasErrors() {
@@ -259,6 +267,12 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 	var lockWaits *counter
 	if w.LockWaits != nil {
 		lockWaits = newC(gauges, "pg_lock_waits_waiting", map[string]string{"service": "db"})
+	}
+	var lag, rawFresh, rawStale *counter
+	if w.ReplicaLagS != nil {
+		lag = newC(gauges, "pg_replication_lag_seconds", map[string]string{"service": "ro", "instance": "lore-pgexp-ro:9187"})
+		rawFresh = newC(counters, "loadlore_read_after_write_total", map[string]string{"service": "api", "target": "ro", "result": "fresh"})
+		rawStale = newC(counters, "loadlore_read_after_write_total", map[string]string{"service": "api", "target": "ro", "result": "stale"})
 	}
 	var hits, misses, cacheCalls, dbCalls *counter
 	if w.CacheHit != nil {
@@ -382,6 +396,15 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			set(inUse, w.InUse(el))
 			if lockWaits != nil {
 				set(lockWaits, w.LockWaits(el))
+			}
+			if lag != nil {
+				set(lag, w.ReplicaLagS(el))
+				share := 0.0
+				if w.StaleShare != nil {
+					share = w.StaleShare(el)
+				}
+				add(rawStale, 100*share)
+				add(rawFresh, 100*(1-share))
 			}
 			set(pending, w.Pending(el))
 			// 98% of requests at p50, 2% at p99, in narrow buckets.

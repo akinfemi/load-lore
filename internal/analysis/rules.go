@@ -64,7 +64,7 @@ const (
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
-const RuleVersion = "10"
+const RuleVersion = "11"
 
 func diagnose(a *Analysis) []*Diagnosis {
 	out := []*Diagnosis{}
@@ -74,6 +74,7 @@ func diagnose(a *Analysis) []*Diagnosis {
 	out = append(out, coldCache(a)...)
 	out = append(out, workingSet(a)...)
 	out = append(out, hotRows(a)...)
+	out = append(out, replicationLag(a)...)
 	// A knee named after a pool whose target kept up is pool-exhausted's
 	// case; when that rule fired for the pool, the knee would only repeat it.
 	storms := retryStorm(a)

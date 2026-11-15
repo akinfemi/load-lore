@@ -1428,3 +1428,43 @@ func TestHotRowsBurnCPU(t *testing.T) {
 		t.Errorf("first diagnosis %s, want hot-rows", a.Diagnoses[0].Rule)
 	}
 }
+
+// From 1:00 the replica falls 3 s behind and 40% of reads after a write
+// from it are stale: replication lag. Lag under a second with no stale
+// reads doesn't fire.
+func TestReplicationLag(t *testing.T) {
+	w := analysistest.Healthy()
+	w.ReplicaLagS = func(t float64) float64 {
+		if t > 60 {
+			return 3
+		}
+		return 0.002
+	}
+	w.StaleShare = func(t float64) float64 {
+		if t > 60 {
+			return 0.4
+		}
+		return 0
+	}
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	i := slices.IndexFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "replication-lag" })
+	if i < 0 {
+		t.Fatalf("no replication-lag diagnosis: %+v", a.Diagnoses)
+	}
+	d := a.Diagnoses[i]
+	if d.From != 60 || !strings.Contains(d.Summary, "ro fell behind db, by up to 3.0 s") || !strings.Contains(d.Summary, "40% of the reads after a write") || !strings.Contains(d.Next, "read-your-writes") {
+		t.Errorf("diagnosis %+v", d)
+	}
+	if sw := a.Windows[8].Services["ro"]; sw == nil || sw.StaleReadRate == nil || math.Abs(*sw.StaleReadRate-0.4) > 0.01 || sw.ReplicationLagS == nil || *sw.ReplicationLagS != 3 {
+		t.Errorf("window 8 ro %+v", sw)
+	}
+	// Stale reads alone fire it; a small lag alone doesn't.
+	w.ReplicaLagS = func(float64) float64 { return 0.2 }
+	if a := analyze(t, analysistest.WriteRun(t, w, 1)); !slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "replication-lag" }) {
+		t.Error("40% stale reads didn't fire it")
+	}
+	w.StaleShare = func(float64) float64 { return 0.01 }
+	if a := analyze(t, analysistest.WriteRun(t, w, 1)); slices.ContainsFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "replication-lag" }) {
+		t.Error("fired at 200 ms lag and 1% stale")
+	}
+}

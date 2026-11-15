@@ -173,7 +173,7 @@ func Check(ctx context.Context, s *Scenario, dir string, run RunFunc) *CheckResu
 	failed := !res.Problem.OK || len(res.Solutions) != len(s.Solutions) || len(res.Variants) != len(s.Variants)
 	inconclusive := false
 	for _, rc := range res.Solutions {
-		solutionClaims(rc, s.Meta.Check.Solutions[rc.Name], res.Problem)
+		solutionClaims(rc, s.Meta.Check.Solutions[rc.Name], res.Problem, s.Meta.Check.Problem.Diagnoses)
 		failed = failed || rc.Status == StatusFailed
 		inconclusive = inconclusive || rc.Status == StatusInconclusive
 	}
@@ -362,7 +362,11 @@ func (rc *RunCheck) recoveryClaim(c Claim) {
 	rc.claim(name, rc.recovered() == *c.Recovers, detail)
 }
 
-func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck) {
+// solutionClaims judges a solution against the starting design's run. When
+// the starting design held, the problem is the diagnoses claimed for it
+// (stale reads from a replica that fell behind, say): the solution helps
+// when it holds and none of them fire.
+func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck, problemDiagnoses []string) {
 	defer rc.settle()
 	// Still apart after a re-run, the two runs can't be compared: whatever
 	// the claims say, the host's speed could be the difference.
@@ -390,6 +394,21 @@ func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck) {
 	}
 	held := rc.Verdict == string(analysis.VerdictHeld)
 	switch {
+	case problem != nil && problem.Verdict == string(analysis.VerdictHeld) && len(problemDiagnoses) > 0:
+		var still []string
+		for _, d := range problemDiagnoses {
+			if slices.Contains(rc.Diagnoses, d) {
+				still = append(still, d)
+			}
+		}
+		detail := fmt.Sprintf("held, and none of the starting design's %s fired", strings.Join(problemDiagnoses, ", "))
+		switch {
+		case !held:
+			detail = "it didn't hold: " + rc.Summary
+		case len(still) > 0:
+			detail = "still fired: " + strings.Join(still, ", ")
+		}
+		rc.claim("helps (clears "+strings.Join(problemDiagnoses, ", ")+")", held && len(still) == 0, detail)
 	case problem == nil || problem.BreakLoad == nil || problem.PeakRPS == nil:
 		rc.claim("helps", false, "the starting design didn't break in its own run, so there's nothing to improve on")
 	case held:

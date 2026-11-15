@@ -367,8 +367,30 @@ func TestRecoveryDoubt(t *testing.T) {
 	problem := down()
 	problem.BreakLoad, problem.PeakRPS = &load, &rps
 	sol := &RunCheck{Verdict: string(analysis.VerdictBroke), BreakAt: &at, RecoveredAt: &rec, PeakRPS: &rps}
-	solutionClaims(sol, Claim{Verdict: "broke", Recovers: &yes}, problem)
+	solutionClaims(sol, Claim{Verdict: "broke", Recovers: &yes}, problem, nil)
 	if sol.Status != StatusInconclusive || !strings.Contains(sol.Inconclusive, "the starting design's not recovering can't be compared with") {
 		t.Errorf("helps by recovering: %s %q %+v", sol.Status, sol.Inconclusive, sol.Claims)
+	}
+}
+
+// When the starting design held with a problem the rules name (stale reads
+// from a lagging replica), a solution helps by holding without it.
+func TestSolutionClearsHeldProblem(t *testing.T) {
+	held := string(analysis.VerdictHeld)
+	problem := &RunCheck{Verdict: held, Diagnoses: []string{"replication-lag"}}
+	for _, tc := range []struct {
+		name    string
+		sol     *RunCheck
+		ok      bool
+		snippet string
+	}{
+		{"clears it", &RunCheck{Verdict: held}, true, "none of the starting design's replication-lag fired"},
+		{"still lags", &RunCheck{Verdict: held, Diagnoses: []string{"replication-lag"}}, false, "still fired: replication-lag"},
+		{"breaks", &RunCheck{Verdict: string(analysis.VerdictBroke), Summary: "Broke at 0:30"}, false, "it didn't hold: Broke at 0:30"},
+	} {
+		solutionClaims(tc.sol, Claim{}, problem, []string{"replication-lag"})
+		if tc.sol.OK != tc.ok || len(tc.sol.Claims) != 1 || !strings.Contains(tc.sol.Claims[0].Detail, tc.snippet) {
+			t.Errorf("%s: ok %v, claims %+v", tc.name, tc.sol.OK, tc.sol.Claims)
+		}
 	}
 }

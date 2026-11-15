@@ -228,6 +228,7 @@ The report is made from the run folder alone, so `loadl report <run>` can rewrit
   | Retry storm | Retries multiplied the calls to a failing or slow dependency, keeping it overloaded. |
   | Cold cache | A cache's misses multiplied, as after a restart, and they all went to the database at once. |
   | Working set doesn't fit | Postgres read from outside its memory while latency climbed; with a disk block, its reads also slowed. |
+  | Replication lag | A read replica fell a second or more behind its primary, or reads after a write from it missed the write. |
   | Hot rows | Writes queued on row locks for the same few rows. Reads of those rows can slow too, and past a point the contention burns the database's CPU. |
 
   Two diagnoses can both be true, one causing the other; the report says when it sees that.
