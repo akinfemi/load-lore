@@ -1,0 +1,54 @@
+title: Statement day
+level: 2
+concepts: [buffer cache, working set, cache hit rate, disk IOPS]
+minutes: 40
+
+# Available to Docker at --scale 1, Loadlore's own containers included:
+# 6.8 CPUs for the starting design, 7.8 for variants/bigger-db.
+# reference and speed: the machine the scenario was checked on and the
+# host speed index loadl run printed there; it warns on a much slower host.
+host:
+  cpus: 8
+  memory: 8g
+  reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
+  speed: 1021
+
+# Load generator VUs started before the load, at --scale 1, measured: the
+# larger of the peak rate x slo.p99_ms (3,500 x 0.5 s) and 1.5 x the most
+# VUs busy at once before a break in any of the check's runs (284).
+load:
+  prealloc_vus: 1750
+  peak_vus: 284
+  from: statement-day-20261115-063556
+
+# What `loadl scenario check` verifies, at --scale 1.
+check:
+  problem:
+    verdict: broke
+    diagnoses: [working-set]
+  solutions:
+    # helps: holds the whole ramp.
+    more-memory: {}
+    provisioned-iops: {}
+  variants:
+    # The database's CPU was mostly idle: twice of it still breaks on the
+    # working set.
+    bigger-db: { verdict: broke, diagnoses: [working-set] }
+
+# What `loadl predict` asks before a run; each answer becomes an expect
+# line in design.yaml. A load guess scores right within 25%, too high or
+# too low both count as wrong. The load ramps from 200 to 3,500 rps.
+predict:
+  - ask: At what offered load, in requests per second, will it break? The ramp goes from 200 to 3,500 rps. A rough guess is fine; answer never if you think it holds.
+    answer: rps
+    expect: break_load_rps within 25% of {answer}
+    never: break_load_rps none
+  - ask: Which component gives out first?
+    answer: service
+    expect: 'note: "{answer} gives out first"'
+  - ask: How busy is the database's CPU when it does?
+    answer: text
+    expect: 'note: "database CPU when it gives out: {answer}"'
+  - ask: If you gave the database twice the CPU, what would happen?
+    answer: text
+    expect: 'note: "twice the CPU: {answer}"'

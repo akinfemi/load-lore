@@ -1,0 +1,52 @@
+version: 1
+name: statement-day-more-memory
+
+# A bank's statements api. On the first of the month the bank emails every
+# one of its 5 million customers that their statement is ready, and each
+# click opens the statement page, which reads that customer's row. On a
+# normal day a few hundred thousand busy customers make most of the
+# traffic; today every customer is as likely as any other.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 1, memory: 512m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: db, op: read }   # the customer's statement row
+      resilience:
+        timeout_ms: 2000
+    pools:
+      db: { size: 40, min: 40 }   # opened at start; 2 replicas x 40 = 80 connections, under max_connections
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 1, memory: 4g }   # was 512m
+    config: { max_connections: 100, shared_buffers: 1GB }   # was 128MB
+    dataset: { rows: 5000000, row_bytes: 512 }   # about 2.5 GB with its index
+    disk: {}   # a cloud volume: about 1 ms per read, 3,000 IOPS (gp3's baseline)
+
+workload:
+  entry: lb
+  profile:
+    - ramp: { from: 200, to: 3500, over: 3m }
+  mix: { read: 1.0 }
+  keys: { distribution: uniform }   # the email went to everyone
+
+assumptions:
+  - { field: services.api.behavior.cpu_ms, basis: guessed, why: "a small JSON handler" }
+  - { field: workload.keys, basis: guessed, why: "every customer got the email, so any one is as likely to click as another" }
+  - { field: services.db.disk, basis: guessed, why: "a general-purpose cloud volume at its baseline" }
+
+# Your predictions, scored in the report. The line here is an example;
+# loadl predict design.yaml replaces it with your answers.
+expect:
+  - p99_ms < 100 until load_rps >= 1000
