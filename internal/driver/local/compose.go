@@ -199,7 +199,7 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 				vol := "data-" + name
 				cf.Volumes[vol] = &composeVolume{External: true, Name: in.DataVols[name]}
 				c.Volumes = []string{vol + ":" + pgDataPath(s.Version)}
-				if dev := in.DiskDevs[s.Name]; s.Disk != nil && dev != "" {
+				if dev := in.DiskDevs[name]; s.Disk != nil && dev != "" {
 					rate := []composeDeviceRate{{Path: dev, Rate: s.Disk.IOPS}}
 					c.BlkioConfig = &composeBlkio{DeviceReadIOPS: rate, DeviceWriteIOPS: rate}
 				}

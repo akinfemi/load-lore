@@ -159,8 +159,8 @@ func (v *validator) service(name string, s *Service) {
 	if s.Kind == "postgres-replica" {
 		v.replica(name, p, s)
 	}
-	notFor("disk", s.Disk != nil && s.Kind != "postgres", "it is for postgres")
-	if dk := s.Disk; dk != nil && s.Kind == "postgres" {
+	notFor("disk", s.Disk != nil && !s.IsPostgres(), "it is for postgres")
+	if dk := s.Disk; dk != nil && s.IsPostgres() {
 		if dk.ReadMs != nil && (*dk.ReadMs < 0 || *dk.ReadMs > 100) {
 			v.errorf(pathKey(p, "disk.read_ms"), CodeRange, "read_ms must be 0 to 100 whole milliseconds, not %d", *dk.ReadMs)
 		}

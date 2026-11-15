@@ -614,3 +614,23 @@ func TestReadReplicas(t *testing.T) {
 		t.Errorf("total CPU %v, want %v", got, want)
 	}
 }
+
+// A replica's disk block is its own: each of its containers gets a slow
+// disk, and its reads are timed.
+func TestReplicaDisk(t *testing.T) {
+	d := loadFile(t, "../../examples/read-replica.yaml")
+	iops, n := 1000, 2
+	d.Services["ro"].Disk = &design.Disk{IOPS: &iops}
+	d.Services["ro"].Replicas = &n
+	p, err := Build(d, Options{RunID: "r", Scale: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ro, db := p.Service("ro"), p.Service("db")
+	if ro.Disk == nil || *ro.Disk != (Disk{ReadMs: 1, IOPS: 1000}) || !ro.SlowDisk || ro.Config["track_io_timing"] != "on" {
+		t.Errorf("replica disk %+v, slow %v, config %v", ro.Disk, ro.SlowDisk, ro.Config)
+	}
+	if db.Disk != nil || db.SlowDisk {
+		t.Errorf("the primary got the replica's disk: %+v", db.Disk)
+	}
+}

@@ -67,7 +67,7 @@ func (d *Driver) prepareData(ctx context.Context, s *plan.Service, container str
 	progress(fmt.Sprintf("copying %s's cached data into a fresh volume", container))
 	start := time.Now()
 	if s.SlowDisk {
-		if err := d.slowDiskVolume(ctx, s, run); err != nil {
+		if err := d.slowDiskVolume(ctx, s, container, run); err != nil {
 			return "", fmt.Errorf("%s's slow disk: %w", s.Name, err)
 		}
 	} else if _, err := d.docker(ctx, "volume", "create", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID, run); err != nil {

@@ -27,10 +27,11 @@ const slowDiskTools = "apk add -q --no-progress device-mapper e2fsprogs util-lin
 // slowDiskName is the dm device for one run's service.
 func (d *Driver) slowDiskName(svc string) string { return "lore-" + d.runID + "-" + svc }
 
-// slowDiskVolume makes vol an ext4 volume on a new dm-delay device for s,
-// sized well above its dataset, with no delay yet.
-func (d *Driver) slowDiskVolume(ctx context.Context, s *plan.Service, vol string) error {
-	name := d.slowDiskName(s.Name)
+// slowDiskVolume makes vol an ext4 volume on a new dm-delay device for one
+// container of s (each of several read replicas has its own), sized well
+// above its dataset, with no write delay yet.
+func (d *Driver) slowDiskVolume(ctx context.Context, s *plan.Service, container, vol string) error {
+	name := d.slowDiskName(container)
 	img := vol + "-img"
 	read, loop := 0, ""
 	if s.Disk != nil {
@@ -70,7 +71,7 @@ echo "minor=$(dmsetup info -c --noheadings -o minor %s)"`, slowDiskTools, size, 
 	if d.diskDevs == nil {
 		d.diskDevs = map[string]string{}
 	}
-	d.diskDevs[s.Name] = dev
+	d.diskDevs[container] = dev
 	_, err = d.docker(ctx, "volume", "create", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID,
 		"--driver", "local", "--opt", "type=ext4", "--opt", "device="+dev, vol)
 	return err

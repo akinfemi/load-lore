@@ -169,6 +169,7 @@ func TestValidationDiagnostics(t *testing.T) {
 		{"after_ms async", map[string]string{"services.api.behavior.calls[1]": "{target: db, op: read, mode: async, after_ms: 50}"}, []string{}},
 		{"after_ms sync", map[string]string{"services.api.behavior.calls[1]": "{target: db, op: read, after_ms: 50}"}, []string{"error services.api.behavior.calls[1].after_ms not-applicable"}},
 		{"after_ms range", map[string]string{"services.api.behavior.calls[1]": "{target: db, op: read, mode: async, after_ms: 70000}"}, []string{"error services.api.behavior.calls[1].after_ms range"}},
+		{"disk on replica", map[string]string{"services.ro": "{kind: postgres-replica, primary: db, disk: {iops: 1000}}", "services.api.behavior.calls[1]": "{target: ro, op: read}"}, []string{}},
 		{"disk_slow on replica", map[string]string{"services.ro": "{kind: postgres-replica, primary: db}", "scenario": "[{at: 10s, inject: disk_slow, target: ro, add_ms: 5}]"}, []string{"error scenario[0].target op-target"}},
 		{"kill one replica", map[string]string{"services.ro": "{kind: postgres-replica, primary: db, replicas: 2}", "services.api.behavior.calls[1]": "{target: ro, op: read}", "scenario": "[{at: 10s, inject: kill, target: 'ro[1]'}]"}, []string{}},
 		{"pgbouncer to replicas", map[string]string{"services.ro": "{kind: postgres-replica, primary: db, replicas: 2}", "services.pgb": "{kind: pgbouncer, target: ro}"}, []string{"error services.pgb.target op-target"}},

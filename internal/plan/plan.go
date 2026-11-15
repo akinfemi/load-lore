@@ -438,6 +438,8 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 		// service is built (replicas).
 		s.Kind, s.Port, minMem = "postgres", PostgresPort, minMemoryPG
 		s.Version, s.Primary = ds.Version, ds.Primary
+		s.Disk = planDisk(ds.Disk, scale)
+		s.SlowDisk = s.Disk != nil
 		// One replica keeps the service's name, as a primary does; several
 		// are numbered, as an application's replicas are.
 		s.Containers = []string{name}
@@ -465,17 +467,8 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 			spec.Rows = max(1, int64(math.Round(float64(spec.Rows)*scale)))
 		}
 		s.Dataset = &spec
-		if dk := ds.Disk; dk != nil {
-			disk := Disk{ReadMs: DefaultDiskReadMs, IOPS: DefaultDiskIOPS}
-			if dk.ReadMs != nil {
-				disk.ReadMs = *dk.ReadMs
-			}
-			if dk.IOPS != nil {
-				disk.IOPS = *dk.IOPS
-			}
-			disk.IOPS = max(1, int(math.Round(float64(disk.IOPS)*scale)))
-			s.Disk, s.SlowDisk = &disk, true
-		}
+		s.Disk = planDisk(ds.Disk, scale)
+		s.SlowDisk = s.Disk != nil
 	case ds.Kind == "redis":
 		s.Kind, s.Port, minMem = "redis", RedisPort, minMemoryRedis
 		s.Version = ds.Version
@@ -1403,4 +1396,21 @@ func exporters(s *Service) int {
 		return 1
 	}
 	return 0
+}
+
+// planDisk is a postgres's disk block with its defaults, IOPS scaled; nil
+// without one.
+func planDisk(dk *design.Disk, scale float64) *Disk {
+	if dk == nil {
+		return nil
+	}
+	disk := Disk{ReadMs: DefaultDiskReadMs, IOPS: DefaultDiskIOPS}
+	if dk.ReadMs != nil {
+		disk.ReadMs = *dk.ReadMs
+	}
+	if dk.IOPS != nil {
+		disk.IOPS = *dk.IOPS
+	}
+	disk.IOPS = max(1, int(math.Round(float64(disk.IOPS)*scale)))
+	return &disk
 }
