@@ -74,6 +74,8 @@ func metricFor(a *Analysis, m design.MetricRef) (metricFn, bool) {
 			return metricFn{func(w *Window) *float64 { return w.RPS }, design.MetricRate, SrcRPS}, true
 		case "load_rps":
 			return metricFn{func(w *Window) *float64 { v := w.Offered; return &v }, design.MetricRate, SrcOffered}, true
+		case "stale_read_rate":
+			return metricFn{func(w *Window) *float64 { return w.StaleReadRate }, design.MetricRatio, SrcStaleReads}, true
 		}
 		return metricFn{}, false
 	}
@@ -244,4 +246,19 @@ func score(a *Analysis, e *design.Expectation, ws []*Window) ExpectResult {
 		r.Message += n
 	}
 	return r
+}
+
+// ScoreLine scores one expect line, which needn't be in the run's design,
+// against the run: scenario check uses it for claims about a run.
+func ScoreLine(a *Analysis, line string) (ExpectResult, error) {
+	p, err := design.ParseExpect(line)
+	if err != nil {
+		return ExpectResult{}, err
+	}
+	e := &design.Expectation{Text: line, Prediction: p}
+	ws := a.Windows[:min(a.Analyzed, len(a.Windows))]
+	if _, ok := design.RunMetrics[p.Subject.Metric]; ok && p.Subject.Service == "" {
+		return scoreRun(a, e, ws), nil
+	}
+	return score(a, e, ws), nil
 }

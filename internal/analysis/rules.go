@@ -35,7 +35,7 @@ type Evidence struct {
 
 // RuleIDs are the diagnosis rules this version runs, by the id a
 // Diagnosis carries in Rule.
-var RuleIDs = []string{"pool-exhausted", "queueing-knee", "connection-storm", "retry-storm", "cold-cache", "working-set", "hot-rows"}
+var RuleIDs = []string{"pool-exhausted", "queueing-knee", "connection-storm", "retry-storm", "cold-cache", "working-set", "hot-rows", "replication-lag"}
 
 // Rule thresholds. Rules are deterministic and versioned with the code.
 const (

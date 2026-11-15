@@ -117,6 +117,11 @@ func (s *Scenario) Lint() []Problem {
 		if c.MinGain != nil && *c.MinGain <= 1 {
 			bad(MetaFile, "%s.min_gain must be above 1", at)
 		}
+		for i, line := range c.Expect {
+			if _, err := design.ParseExpect(line); err != nil {
+				bad(MetaFile, "%s.expect[%d]: %v", at, i, err)
+			}
+		}
 	}
 
 	if l := s.Meta.Load; l != nil {

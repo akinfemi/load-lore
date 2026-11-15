@@ -111,6 +111,8 @@ type RunCheck struct {
 	Replaced   []Rerun `json:"replaced"`              // earlier runs of this design that a re-run replaced
 
 	rerun bool // this solution's one re-run, its own or the starting design's, is spent
+
+	analysis *analysis.Analysis // the run's, for expect claims
 }
 
 // Rerun is a run replaced by a re-run of the same design: its host speed
@@ -270,6 +272,7 @@ func runOne(ctx context.Context, run RunFunc, name, designPath string, coolTo in
 		rc.Error = err.Error()
 		return rc
 	}
+	rc.analysis = a
 	rc.Verdict, rc.Summary = string(a.Verdict.Kind), a.Verdict.Summary
 	if h := a.Environment.Host; h != nil && h.Speed != nil {
 		rc.SpeedIndex = h.Speed.Index
@@ -328,6 +331,7 @@ func ownClaims(rc *RunCheck, c Claim) {
 	}
 	rc.claim("verdict "+c.Verdict, rc.Verdict == c.Verdict, rc.Summary)
 	rc.diagnosisClaims(c)
+	rc.expectClaims(c)
 	rc.signalClaims(c)
 	rc.recoveryClaim(c)
 }
@@ -365,7 +369,9 @@ func (rc *RunCheck) recoveryClaim(c Claim) {
 // solutionClaims judges a solution against the starting design's run. When
 // the starting design held, the problem is the diagnoses claimed for it
 // (stale reads from a replica that fell behind, say): the solution helps
-// when it holds and none of them fire.
+// when it holds and none of them fire, or, when it has expect lines, when
+// it holds and they do (a fix that leaves the replica lagging but reads a
+// request's own writes from the primary).
 func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck, problemDiagnoses []string) {
 	defer rc.settle()
 	// Still apart after a re-run, the two runs can't be compared: whatever
@@ -385,6 +391,7 @@ func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck, problemDiagnoses [
 		rc.claim("verdict "+c.Verdict, rc.Verdict == c.Verdict, rc.Summary)
 	}
 	rc.diagnosisClaims(c)
+	rc.expectClaims(c)
 	rc.signalClaims(c)
 	rc.recoveryClaim(c)
 
@@ -394,6 +401,13 @@ func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck, problemDiagnoses [
 	}
 	held := rc.Verdict == string(analysis.VerdictHeld)
 	switch {
+	case problem != nil && problem.Verdict == string(analysis.VerdictHeld) && len(c.Expect) > 0:
+		// Its expect lines, judged above, say how it helps; it must hold too.
+		detail := "held"
+		if !held {
+			detail = "it didn't hold: " + rc.Summary
+		}
+		rc.claim("helps (holds, with its expect lines)", held, detail)
 	case problem != nil && problem.Verdict == string(analysis.VerdictHeld) && len(problemDiagnoses) > 0:
 		var still []string
 		for _, d := range problemDiagnoses {
@@ -428,6 +442,32 @@ func solutionClaims(rc *RunCheck, c Claim, problem *RunCheck, problemDiagnoses [
 			detail += fmt.Sprintf("; it broke at %s rps offered, the starting design at %s", analysis.Rate(*rc.BreakLoad), analysis.Rate(*problem.BreakLoad))
 		}
 		rc.claim(fmt.Sprintf("helps (serves %gx the peak throughput or more)", gain), ratio >= gain, detail)
+	}
+}
+
+// expectClaims scores each of the claim's expect lines against the run.
+func (rc *RunCheck) expectClaims(c Claim) {
+	for _, line := range c.Expect {
+		if rc.analysis == nil {
+			rc.claim("expect "+line, false, "no analysis of the run")
+			continue
+		}
+		r, err := analysis.ScoreLine(rc.analysis, line)
+		switch {
+		case err != nil:
+			rc.claim("expect "+line, false, err.Error())
+		case r.Status == analysis.ExpectHeld:
+			rc.claim("expect "+line, true, "held: worst "+r.Shown)
+		default:
+			detail := string(r.Status)
+			if r.Shown != "" {
+				detail += ": worst " + r.Shown
+			}
+			if r.Message != "" {
+				detail += "; " + r.Message
+			}
+			rc.claim("expect "+line, false, detail)
+		}
 	}
 }
 

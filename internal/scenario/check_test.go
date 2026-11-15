@@ -394,3 +394,19 @@ func TestSolutionClearsHeldProblem(t *testing.T) {
 		}
 	}
 }
+
+// A solution with expect lines helps a held problem by holding with them,
+// whatever still fires.
+func TestSolutionExpectClaims(t *testing.T) {
+	held := string(analysis.VerdictHeld)
+	problem := &RunCheck{Verdict: held, Diagnoses: []string{"replication-lag"}}
+	sol := &RunCheck{Verdict: held, Diagnoses: []string{"replication-lag"}}
+	solutionClaims(sol, Claim{Expect: []string{"stale_read_rate < 1%"}}, problem, []string{"replication-lag"})
+	var names []string
+	for _, c := range sol.Claims {
+		names = append(names, c.Claim)
+	}
+	if len(sol.Claims) != 2 || sol.Claims[0].OK || !strings.Contains(sol.Claims[0].Detail, "no analysis") || !sol.Claims[1].OK || sol.Claims[1].Claim != "helps (holds, with its expect lines)" {
+		t.Errorf("claims %v %+v", names, sol.Claims)
+	}
+}

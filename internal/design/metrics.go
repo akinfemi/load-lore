@@ -26,6 +26,9 @@ var EndToEndMetrics = map[string]MetricKind{
 	"error_rate": MetricRatio,
 	"rps":        MetricRate,
 	"load_rps":   MetricRate,
+	// stale_read_rate: reads after a write that missed it, over every
+	// database; designs with read replicas check them.
+	"stale_read_rate": MetricRatio,
 }
 
 // RunMetrics are about the whole run, not a window: the offered load at

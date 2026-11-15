@@ -106,6 +106,10 @@ type Window struct {
 	P95       *float64 `json:"p95_ms"`
 	P99       *float64 `json:"p99_ms"`
 	MeanMs    *float64 `json:"mean_ms"`
+	// StaleReadRate is the share of point reads of a key the same request
+	// had just written, from any database, that missed the write. Only
+	// designs with read replicas check reads after writes.
+	StaleReadRate *float64 `json:"stale_read_rate,omitempty"`
 
 	Services map[string]*ServiceWindow `json:"services"`
 	Pools    []*PoolWindow             `json:"pools"`
@@ -534,6 +538,11 @@ func (b *builder) window(i int) *Window {
 	bs, sum, count := st.nativeBuckets("k6_http_req_duration_seconds", nil, wa, wb)
 	w.P50, w.P95, w.P99 = ms(quantile(bs, 0.5)), ms(quantile(bs, 0.95)), ms(quantile(bs, 0.99))
 	w.MeanMs = num(sum/count*1000, count > 0)
+	stale, ok1 := st.increase("loadlore_read_after_write_total", eq("result", "stale"), wa, wb)
+	fresh, ok2 := st.increase("loadlore_read_after_write_total", eq("result", "fresh"), wa, wb)
+	if ok1 || ok2 {
+		w.StaleReadRate = num(stale/(stale+fresh), stale+fresh > 0)
+	}
 	if b.p.Workload.Entry != "" {
 		w.Edges = append(w.Edges, &EdgeWindow{From: "load", To: b.p.Workload.Entry, RPS: w.Completed, ErrorRate: w.ErrorRate, P99: w.P99, P99Source: SrcK6Latency})
 	}

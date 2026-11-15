@@ -147,6 +147,10 @@ type Claim struct {
 	// recovered. A solution also helps when it recovers and the starting
 	// design didn't: the lesson of a fault that turns into an outage.
 	Recovers *bool `yaml:"recovers,omitempty" json:"recovers,omitempty"`
+	// Expect lines must each hold in the run, scored as a design's are:
+	// for what the verdict and the rules don't say, such as a solution's
+	// reads after writes no longer coming back stale.
+	Expect []string `yaml:"expect,omitempty" json:"expect,omitempty"`
 }
 
 // Hint is one "## " section of hints.md.
