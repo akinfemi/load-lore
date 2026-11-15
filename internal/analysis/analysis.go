@@ -158,10 +158,9 @@ type ServiceWindow struct {
 	// on average over the window's scrapes.
 	LockWaits *float64 `json:"lock_waits,omitempty"`
 	// Postgres read replicas: how far behind the primary it was, at most
-	// over the window's scrapes. ReplicationLagS is time since the last
-	// transaction it replayed, while it had WAL left to replay (0 when
-	// caught up); ReplicationLagBytes is the WAL the primary had written
-	// that the replica hadn't replayed.
+	// over the window's scrapes. ReplicationLagBytes is the WAL the primary
+	// had written that the replica hadn't replayed; ReplicationLagS is that
+	// in seconds of the primary's writing (0 when caught up).
 	ReplicationLagS     *float64 `json:"replication_lag_s,omitempty"`
 	ReplicationLagBytes *float64 `json:"replication_lag_bytes,omitempty"`
 	// Postgres read replicas: point reads, per second, of keys the same
@@ -710,12 +709,26 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 		}
 		if s.Primary != "" {
 			// Several replicas lag separately: the worst one's is the lag.
-			if lag := st.gaugeEach("pg_replication_lag_seconds", svc, "instance", wa, wb); len(lag) > 0 {
-				sw.ReplicationLagS = num(maxOf(lag), true)
+			// In time, it is the WAL the replica hadn't replayed over the
+			// rate the primary wrote WAL: how many seconds of the primary's
+			// writes it was missing. The replica's own figure, time since
+			// its last replayed commit, counts only WAL it has received, so
+			// it reads 0 while the replica is still receiving what it lacks.
+			mine := func(l map[string]string) bool {
+				return l["service"] == s.Primary && slices.Contains(s.Containers, l["application_name"])
 			}
-			mine := func(l map[string]string) bool { return l["service"] == s.Primary && slices.Contains(s.Containers, l["application_name"]) }
 			if behind := st.gaugeEach("pg_stat_replication_pg_wal_lsn_diff", mine, "application_name", wa, wb); len(behind) > 0 {
 				sw.ReplicationLagBytes = num(maxOf(behind), true)
+				if rates := st.increaseBy("pg_stat_replication_pg_current_wal_lsn_bytes", mine, "application_name", wa, wb); len(rates) > 0 {
+					if rate := maxOf(rates) / (wb - wa); rate > 0 {
+						sw.ReplicationLagS = num(*sw.ReplicationLagBytes/rate, true)
+					}
+				}
+			}
+			if sw.ReplicationLagS == nil {
+				if lag := st.gaugeEach("pg_replication_lag_seconds", svc, "instance", wa, wb); len(lag) > 0 {
+					sw.ReplicationLagS = num(maxOf(lag), true)
+				}
 			}
 			stale, ok1 := st.increase("loadlore_read_after_write_total", eq("target", s.Name, "result", "stale"), wa, wb)
 			fresh, ok2 := st.increase("loadlore_read_after_write_total", eq("target", s.Name, "result", "fresh"), wa, wb)
@@ -922,7 +935,7 @@ const (
 	SrcPoolConnect      = "loadlore_pool_connect_seconds (new connections the pools opened, and how long each took)"
 	SrcPoolHeld         = "loadlore_call_duration_seconds minus loadlore_pool_wait_seconds, per call (time with a connection)"
 	SrcPGConns          = "pg_stat_activity_count and pg_settings_max_connections (postgres_exporter)"
-	SrcReplLagS         = "pg_replication_lag_seconds (postgres_exporter, on the replica): time since its last replayed transaction while WAL is left to replay"
+	SrcReplLagS         = "pg_stat_replication_pg_wal_lsn_diff ÷ the rate of pg_stat_replication_pg_current_wal_lsn_bytes (postgres_exporter, on the primary): the WAL the replica hadn't replayed, in seconds of the primary's writing; without them, pg_replication_lag_seconds on the replica"
 	SrcStaleReads       = "loadlore_read_after_write_total (the synthetic service): point reads of a key the same request had just written, stale when they didn't see the write"
 	SrcReplLagBytes     = "pg_stat_replication_pg_wal_lsn_diff (postgres_exporter, on the primary): WAL written that the replica hasn't replayed"
 	SrcHitRate          = "redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter)"
