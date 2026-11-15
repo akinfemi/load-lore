@@ -801,6 +801,17 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 					}
 					return "–"
 				}})
+				if slices.ContainsFunc(a.Windows, func(w *analysis.Window) bool {
+					sw := w.Services[name]
+					return sw != nil && sw.StaleReadRate != nil
+				}) {
+					cols = append(cols, col{name + " stale", func(w *analysis.Window) string {
+						if sw := w.Services[name]; sw != nil {
+							return opt(sw.StaleReadRate, analysis.Pct)
+						}
+						return "–"
+					}})
+				}
 			}
 		case "redis":
 			cols = append(cols, col{name + " hit rate", func(w *analysis.Window) string {
@@ -890,7 +901,7 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 		pools += "; a PgBouncer's are its server connections, from " + analysis.SrcPgbPool + ", and its wait " + analysis.SrcPgbWait
 	}
 	if hasReplica(a.Plan) {
-		conns += "; a replica's lag is from " + analysis.SrcReplLagS
+		conns += "; a replica's lag is from " + analysis.SrcReplLagS + ", and its stale share of reads after writes from " + analysis.SrcStaleReads
 	}
 	d.line("Columns: offered is %s; served is %s; dropped is %s; errors are %s; p50 and p99 are from %s; CPU is %s, mean over the window; conns are %s; hit rate is from %s; up is %s; pools are %s; k6 and Toxiproxy CPU are against their budgets.",
 		analysis.SrcOffered, analysis.SrcRPS, analysis.SrcDropped, analysis.SrcErrors, analysis.SrcK6Latency, analysis.SrcCPU, conns, analysis.SrcHitRate, analysis.SrcLBHealthy, pools)

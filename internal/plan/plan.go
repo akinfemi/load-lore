@@ -742,12 +742,14 @@ func (p *Plan) syntheticConfigs(d *design.Design, name string, s *Service, byNam
 			st.Kind = synthetic.KindPostgres
 			st.Database, st.User, st.Password = DBName, DBUser, DBPassword
 			st.Rows, st.RowBytes = max(t.Dataset.Rows, 1), t.Dataset.RowBytes
+			st.Data = p.replicatedData(t)
 		case "pgbouncer":
 			// Through PgBouncer to its Postgres, whose dataset it reads.
 			db := byName[t.PgBouncer.Target]
 			st.Kind = synthetic.KindPostgres
 			st.Database, st.User, st.Password = DBName, DBUser, DBPassword
 			st.Rows, st.RowBytes = max(db.Dataset.Rows, 1), db.Dataset.RowBytes
+			st.Data = p.replicatedData(db)
 			// The client prepares statements as it does against Postgres:
 			// PgBouncer tracks them across server connections in every
 			// pool mode (max_prepared_statements).
@@ -1366,4 +1368,17 @@ func (p *Plan) assumeReplica(name string, ds *design.Service) {
 	if !slices.ContainsFunc(p.Assumptions, func(a Assumption) bool { return a.Field == field }) {
 		p.Assumptions = append(p.Assumptions, Assumption{Field: field, Value: keep, Why: why})
 	}
+}
+
+// replicatedData is the primary whose data postgres service s serves, if
+// that primary has read replicas: then the synthetic service checks reads
+// after writes there. Empty otherwise.
+func (p *Plan) replicatedData(s *Service) string {
+	switch {
+	case s.Primary != "":
+		return s.Primary
+	case len(p.Replicas(s.Name)) > 0:
+		return s.Name
+	}
+	return ""
 }

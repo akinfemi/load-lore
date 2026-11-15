@@ -53,6 +53,7 @@ func newClient(name string, t Target, timeout time.Duration, m *metrics) (client
 
 type pgClient struct {
 	name    string
+	data    string // the postgres whose rows it serves (Target.Data)
 	min     int
 	hold    string
 	pool    *pgxpool.Pool
@@ -61,6 +62,29 @@ type pgClient struct {
 	m       *metrics
 	pending atomic.Int64
 }
+
+// writeTokens number this process's writes, so a read can tell whether it
+// sees a particular one; with the process's start time they don't repeat
+// across replicas or restarts.
+var writeTokens atomic.Uint64
+
+// tokenLen is the start of a written payload that identifies the write.
+const tokenLen = 16
+
+// writePayload is a payload of the dataset's size that starts with a token
+// no other write uses, when reads of the target's data are checked (Data
+// set). Otherwise, or when the payload has no room for one, it is the
+// constant payload and token is "".
+func (p *pgClient) writePayload() (payload, token string) {
+	if p.data == "" || len(p.payload) < tokenLen {
+		return p.payload, ""
+	}
+	n := writeTokens.Add(1)
+	token = fmt.Sprintf("%08x%08x", uint32(tokenEpoch), uint32(n))
+	return token + p.payload[tokenLen:], token
+}
+
+var tokenEpoch = time.Now().UnixNano()
 
 func newPGClient(name string, t Target, m *metrics) (*pgClient, error) {
 	u := url.URL{
@@ -92,7 +116,7 @@ func newPGClient(name string, t Target, m *metrics) (*pgClient, error) {
 	spec := dataset.Spec{Rows: t.Rows, RowBytes: t.RowBytes}
 	return &pgClient{
 		name: name, min: t.PoolMin, hold: t.Hold, pool: pool, spec: spec, m: m,
-		payload: strings.Repeat("w", spec.PayloadLen()),
+		payload: strings.Repeat("w", spec.PayloadLen()), data: t.Data,
 	}, nil
 }
 
@@ -106,7 +130,11 @@ func (p *pgClient) do(ctx context.Context, c *Call, r request) (bool, error) {
 	key := clampKey(r.key, p.spec.Rows)
 	switch {
 	case c.Op == "write":
-		_, err = conn.Exec(ctx, dataset.Write, key, p.payload)
+		payload, token := p.writePayload()
+		_, err = conn.Exec(ctx, dataset.Write, key, payload)
+		if err == nil && token != "" {
+			sessionOf(ctx).wrote(p.data, key, token)
+		}
 	case c.Query == "range":
 		var rows pgx.Rows
 		rows, err = conn.Query(ctx, dataset.RangeRead, key, c.Rows)
@@ -139,6 +167,13 @@ func (p *pgClient) do(ctx context.Context, c *Call, r request) (bool, error) {
 		err = conn.QueryRow(ctx, dataset.PointRead, key).Scan(&payload)
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = nil
+		}
+		if token, ok := sessionOf(ctx).written(p.data, key); ok && err == nil {
+			result := "fresh"
+			if !strings.HasPrefix(payload, token) {
+				result = "stale"
+			}
+			p.m.readAfterWrite.WithLabelValues(p.name, result).Inc()
 		}
 	}
 	return false, err
@@ -203,6 +238,43 @@ func (p *pgClient) release(conn *pgxpool.Conn, since time.Time) {
 type session struct {
 	mu    sync.Mutex
 	conns map[string]*heldConn // by target
+	// writes are the tokens of the request's writes, by data and key.
+	writes map[writeKey]string
+}
+
+type writeKey struct {
+	data string
+	key  int64
+}
+
+// sessionOf is the request's session, or nil for a call outside one.
+func sessionOf(ctx context.Context) *session {
+	s, _ := ctx.Value(sessionKey{}).(*session)
+	return s
+}
+
+// wrote records the token of a write the request made.
+func (s *session) wrote(data string, key int64, token string) {
+	if s == nil || data == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.writes == nil {
+		s.writes = map[writeKey]string{}
+	}
+	s.writes[writeKey{data, key}] = token
+}
+
+// written is the token of the request's last write of key in data.
+func (s *session) written(data string, key int64) (string, bool) {
+	if s == nil || data == "" {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.writes[writeKey{data, key}]
+	return t, ok
 }
 
 type heldConn struct {

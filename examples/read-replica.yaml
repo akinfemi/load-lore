@@ -1,7 +1,8 @@
 version: 1
 name: read-replica
 
-# Reads go to a streaming read replica, writes to its primary.
+# Reads go to a streaming read replica, writes to its primary. A write
+# request reads its row back from the replica, which may not have it yet.
 
 services:
   lb:
@@ -17,6 +18,7 @@ services:
       calls:
         - { target: ro, op: read, when: read }    # reads from the replica
         - { target: db, op: write, when: write }  # writes to the primary
+        - { target: ro, op: read, when: write }   # then reads it back, as a page after a form post does
     pools: { db: 20, ro: 20 }
 
   db:
@@ -39,3 +41,4 @@ workload:
 
 expect:
   - ro.replication_lag_ms < 100
+  - ro.stale_read_rate < 1%

@@ -79,3 +79,33 @@ func TestHTTPTargetPoolWait(t *testing.T) {
 		t.Errorf("pool wait %.3fs is implausibly long", waited)
 	}
 }
+
+// Writes to replicated data carry a token a later read in the same request
+// is checked for; other writes keep the constant payload.
+func TestReadAfterWriteTokens(t *testing.T) {
+	p := &pgClient{data: "db", payload: strings.Repeat("w", 64)}
+	a, ta := p.writePayload()
+	b, tb := p.writePayload()
+	if len(a) != 64 || len(b) != 64 || len(ta) != tokenLen || ta == tb || !strings.HasPrefix(a, ta) {
+		t.Fatalf("payloads %q %q, tokens %q %q", a, b, ta, tb)
+	}
+	if got, tok := (&pgClient{payload: strings.Repeat("w", 64)}).writePayload(); tok != "" || got != strings.Repeat("w", 64) {
+		t.Errorf("unreplicated write %q token %q", got, tok)
+	}
+	ctx, done := withSession(context.Background())
+	defer done()
+	s := sessionOf(ctx)
+	if _, ok := s.written("db", 7); ok {
+		t.Error("a token before any write")
+	}
+	s.wrote("db", 7, ta)
+	if tok, ok := s.written("db", 7); !ok || tok != ta {
+		t.Errorf("written %q %v", tok, ok)
+	}
+	if _, ok := s.written("other", 7); ok {
+		t.Error("a write to db counted for other data")
+	}
+	if _, ok := sessionOf(withoutSession(ctx)).written("db", 7); ok {
+		t.Error("an async call saw the request's writes")
+	}
+}

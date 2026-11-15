@@ -164,6 +164,11 @@ type ServiceWindow struct {
 	// that the replica hadn't replayed.
 	ReplicationLagS     *float64 `json:"replication_lag_s,omitempty"`
 	ReplicationLagBytes *float64 `json:"replication_lag_bytes,omitempty"`
+	// Postgres read replicas: point reads, per second, of keys the same
+	// request had just written to the primary, and the share of them that
+	// didn't see the write.
+	ReadsAfterWrite *float64 `json:"reads_after_write,omitempty"`
+	StaleReadRate   *float64 `json:"stale_read_rate,omitempty"`
 
 	// Redis.
 	HitRate   *float64 `json:"hit_rate,omitempty"`
@@ -709,6 +714,12 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 			if mx, _, ok := st.gaugeSum("pg_stat_replication_pg_wal_lsn_diff", eq("service", s.Primary, "application_name", s.Name), wa, wb); ok {
 				sw.ReplicationLagBytes = num(mx, true)
 			}
+			stale, ok1 := st.increase("loadlore_read_after_write_total", eq("target", s.Name, "result", "stale"), wa, wb)
+			fresh, ok2 := st.increase("loadlore_read_after_write_total", eq("target", s.Name, "result", "fresh"), wa, wb)
+			if ok1 || ok2 {
+				sw.ReadsAfterWrite = num((stale+fresh)/(wb-wa), true)
+				sw.StaleReadRate = num(stale/(stale+fresh), stale+fresh > 0)
+			}
 		}
 	case "pgbouncer":
 		db := and(svc, eq("database", plan.DBName))
@@ -909,6 +920,7 @@ const (
 	SrcPoolHeld         = "loadlore_call_duration_seconds minus loadlore_pool_wait_seconds, per call (time with a connection)"
 	SrcPGConns          = "pg_stat_activity_count and pg_settings_max_connections (postgres_exporter)"
 	SrcReplLagS         = "pg_replication_lag_seconds (postgres_exporter, on the replica): time since its last replayed transaction while WAL is left to replay"
+	SrcStaleReads       = "loadlore_read_after_write_total (the synthetic service): point reads of a key the same request had just written, stale when they didn't see the write"
 	SrcReplLagBytes     = "pg_stat_replication_pg_wal_lsn_diff (postgres_exporter, on the primary): WAL written that the replica hasn't replayed"
 	SrcHitRate          = "redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter)"
 	SrcLBRequests       = "haproxy_backend_http_requests_total (HAProxy)"

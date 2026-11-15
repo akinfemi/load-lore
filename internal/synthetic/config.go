@@ -122,6 +122,13 @@ type Target struct {
 	User           string `json:"user,omitempty"`
 	Password       string `json:"password,omitempty"`
 	SimpleProtocol bool   `json:"simple_protocol,omitempty"` // for pgbouncer in transaction mode
+	// Data names the postgres whose rows the target serves when it has
+	// read replicas: the primary, for the primary itself, its replicas and
+	// a PgBouncer in front of either. A point read of a key the request
+	// wrote, through any target with the same Data, is checked for the
+	// write (read after write). Empty otherwise, and writes keep their
+	// constant payload.
+	Data string `json:"data,omitempty"`
 
 	// Dataset shape, for payload sizes and user_id scans (postgres), and
 	// cache value sizes (redis).

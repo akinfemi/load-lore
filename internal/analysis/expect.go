@@ -100,6 +100,8 @@ func metricFor(a *Analysis, m design.MetricRef) (metricFn, bool) {
 		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.Connections }), design.MetricCount, connSource(a, m.Service)}, true
 	case "hit_rate":
 		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.HitRate }), design.MetricRatio, SrcHitRate}, true
+	case "stale_read_rate":
+		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.StaleReadRate }), design.MetricRatio, SrcStaleReads}, true
 	case "replication_lag_ms":
 		return metricFn{svc(func(s *ServiceWindow) *float64 {
 			if s.ReplicationLagS == nil {

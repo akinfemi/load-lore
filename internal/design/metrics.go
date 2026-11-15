@@ -43,7 +43,7 @@ var RunMetrics = map[string]MetricKind{
 // collects. cpu and memory are utilization of the container's limit.
 var ComponentMetrics = map[string]map[string]MetricKind{
 	"postgres":         {"connections": MetricCount, "cpu": MetricRatio, "memory": MetricRatio},
-	"postgres-replica": {"connections": MetricCount, "cpu": MetricRatio, "memory": MetricRatio, "replication_lag_ms": MetricLatency},
+	"postgres-replica": {"connections": MetricCount, "cpu": MetricRatio, "memory": MetricRatio, "replication_lag_ms": MetricLatency, "stale_read_rate": MetricRatio},
 	"redis":            {"hit_rate": MetricRatio, "memory": MetricRatio, "cpu": MetricRatio},
 	"service":          {"cpu": MetricRatio, "memory": MetricRatio, "p99_ms": MetricLatency, "error_rate": MetricRatio, "inflight": MetricCount},
 }
