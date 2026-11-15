@@ -15,11 +15,11 @@ host:
 
 # Load generator VUs started before the load, at --scale 1, measured: the
 # larger of the peak rate x slo.p99_ms (3,500 x 0.5 s) and 1.5 x the most
-# VUs busy at once before a break in any of the check's runs (284).
+# VUs busy at once before a break in any of the check's runs (213).
 load:
   prealloc_vus: 1750
-  peak_vus: 284
-  from: statement-day-20261115-063556
+  peak_vus: 213
+  from: statement-day-20261115-065859
 
 # What `loadl scenario check` verifies, at --scale 1.
 check:
