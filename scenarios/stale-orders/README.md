@@ -19,7 +19,9 @@ flowchart LR
     db -.->|"streams WAL"| ro
 ```
 
-The primary has 2 GB of memory for a table and index of about 1.1 GB, so its data sits in memory. The replica has 512 MB, on a general-purpose cloud volume at its baseline: about a millisecond for each read from the disk, and 3,000 reads and 3,000 writes a second. The confirmation page loads 200 ms after the order (`after_ms: 200`): the request that places the order has already answered by then.
+The primary has 2 GB of memory for a table and index of about 1.1 GB, so its data sits in memory. The replica has 512 MB, on a general-purpose cloud volume at its baseline: about a millisecond for each read from the disk, and 3,000 reads and 3,000 writes a second.
+
+One thing to know about this lab: the primary's disk isn't modelled. Its writes go to the Docker host's disk, with no cap, because with a modelled disk on every database they slowed each other down on the one disk underneath, which separate cloud volumes don't. Only the replica's disk is capped, for reads and for writes, and it writes everything the primary writes. So part of what holds the replica back is a disk the primary doesn't have to share its limits with. In production that's often true too: the primary gets the provisioned volume and the replica the baseline one. The confirmation page loads 200 ms after the order (`after_ms: 200`): the request that places the order has already answered by then.
 
 Today there's a sale. Traffic climbs from 200 to 1,800 requests a second over three minutes, half of them orders. The team wants to know the shop will take it.
 
