@@ -492,6 +492,16 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 			s.Config[k] = v
 		}
 	}
+	if s.Disk != nil {
+		// Times each block read, so the analysis can tell reads that wait
+		// for the disk from ones the page cache answers.
+		if _, set := s.Config["track_io_timing"]; !set {
+			if s.Config == nil {
+				s.Config = map[string]string{}
+			}
+			s.Config["track_io_timing"] = "on"
+		}
+	}
 	if s.Kind == "redis" {
 		p.redisMemory(name, s)
 	}

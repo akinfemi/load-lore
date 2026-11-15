@@ -151,6 +151,9 @@ type ServiceWindow struct {
 	// blocks per second it read from outside them (the OS cache or disk).
 	BufferHitRate *float64 `json:"buffer_hit_rate,omitempty"`
 	BlockReads    *float64 `json:"block_reads,omitempty"`
+	// Postgres with track_io_timing on (a design's disk block turns it on):
+	// the mean milliseconds a block read from outside shared_buffers took.
+	BlockReadMs *float64 `json:"block_read_ms,omitempty"`
 	// Postgres: backends waiting on a heavyweight lock, such as a row lock,
 	// on average over the window's scrapes.
 	LockWaits *float64 `json:"lock_waits,omitempty"`
@@ -684,6 +687,10 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 		if ok1 && ok2 {
 			sw.BlockReads = num(read/(wb-wa), true)
 			sw.BufferHitRate = num(hit/(hit+read), hit+read > 0)
+			// blk_read_time stays 0 with track_io_timing off.
+			if ms, ok := st.increase("pg_stat_database_blk_read_time", lab, wa, wb); ok && ms > 0 && read > 0 {
+				sw.BlockReadMs = num(ms/read, true)
+			}
 		}
 		if _, mean, ok := st.gaugeSum("pg_lock_waits_waiting", svc, wa, wb); ok {
 			sw.LockWaits = num(mean, true)

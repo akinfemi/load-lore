@@ -541,6 +541,9 @@ func TestDisk(t *testing.T) {
 	if db.Disk == nil || *db.Disk != (Disk{ReadMs: 4, IOPS: 1500}) || !db.SlowDisk {
 		t.Fatalf("disk %+v, slow disk %v", db.Disk, db.SlowDisk)
 	}
+	if db.Config["track_io_timing"] != "on" {
+		t.Errorf("track_io_timing %q with a disk block", db.Config["track_io_timing"])
+	}
 	a := findAssumption(p, "services.db.disk")
 	if a == nil || a.Value != "4 ms per read, 1500 IOPS" || !strings.Contains(a.Why, "default") || !strings.Contains(a.Why, "the wait not") {
 		t.Errorf("disk assumption %+v", a)

@@ -103,6 +103,9 @@ type World struct {
 	// BufferHit, when set, is db's share of block reads from
 	// shared_buffers, with BlockReads blocks a second read from outside.
 	BufferHit, BlockReads func(t float64) float64
+	// BlockReadMs, when set with BufferHit, is the milliseconds each of
+	// those reads took (track_io_timing on).
+	BlockReadMs func(t float64) float64
 
 	// ReadMs and WriteMs, when set (and HeldS isn't), are api's time per
 	// read and per write call to db; a tenth of requests write.
@@ -247,10 +250,11 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 		wSum = newC(counters, "loadlore_call_duration_seconds_sum", map[string]string{"service": "api", "target": "db", "op": "write"})
 		wCnt = newC(counters, "loadlore_call_duration_seconds_count", map[string]string{"service": "api", "target": "db", "op": "write"})
 	}
-	var blksHit, blksRead *counter
+	var blksHit, blksRead, blkReadTime *counter
 	if w.BufferHit != nil {
 		blksHit = newC(counters, "pg_stat_database_blks_hit", map[string]string{"service": "db", "datname": plan.DBName})
 		blksRead = newC(counters, "pg_stat_database_blks_read", map[string]string{"service": "db", "datname": plan.DBName})
+		blkReadTime = newC(counters, "pg_stat_database_blk_read_time", map[string]string{"service": "db", "datname": plan.DBName})
 	}
 	var lockWaits *counter
 	if w.LockWaits != nil {
@@ -316,6 +320,11 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 				h := w.BufferHit(el)
 				add(blksRead, r)
 				add(blksHit, r*h/(1-h))
+				if w.BlockReadMs != nil {
+					add(blkReadTime, r*w.BlockReadMs(el))
+				} else {
+					add(blkReadTime, 0)
+				}
 			}
 			if hits != nil {
 				h := w.CacheHit(el)

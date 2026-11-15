@@ -146,7 +146,7 @@ disk: { read_ms: 1, iops: 3000 }
 | `read_ms` | `1` | Milliseconds every read from the disk waits, whole milliseconds, 0 to 100. A gp3 volume takes about 1. |
 | `iops` | `3000` | Reads a second the disk serves, and writes a second, each; at least 100. gp3's baseline is 3000. Scaled with `--scale`. |
 
-Reads that miss shared_buffers and the database container's own page cache wait `read_ms`, and queue once they reach `iops`. Loadlore empties the Docker host's page cache after copying the dataset in, so the container's memory limit holds. A `disk_slow` fault on the same database adds its write delay on top.
+Reads that miss shared_buffers and the database container's own page cache wait `read_ms`, and queue once they reach `iops`. Loadlore empties the Docker host's page cache after copying the dataset in, so the container's memory limit holds, and turns on `track_io_timing` (unless `config` sets it) so the report can tell reads that waited for the disk from ones memory answered. A `disk_slow` fault on the same database adds its write delay on top.
 
 There is deliberately no field for hit rate, capacity or failure point. Those emerge from the run, and `loadl validate` rejects such fields with an explanation.
 

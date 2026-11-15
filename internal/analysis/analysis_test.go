@@ -557,6 +557,50 @@ func TestWorkingSet(t *testing.T) {
 	}
 }
 
+// With read timing on, a low hit rate fires only when the reads slowed:
+// here the slowdown comes while each read still takes 1 ms, as when a
+// cache that fits is warming and something else stalls.
+func TestWorkingSetTimedReads(t *testing.T) {
+	w := analysistest.Healthy()
+	w.BufferHit = func(t float64) float64 {
+		if t > 60 {
+			return 0.7
+		}
+		return 0.8
+	}
+	w.BlockReads = func(t float64) float64 { return 200 + 10*t }
+	w.P99 = func(t float64) float64 {
+		if t > 60 {
+			return 0.08
+		}
+		return 0.005
+	}
+	w.BlockReadMs = func(float64) float64 { return 1 }
+	fired := func(a *Analysis) *Diagnosis {
+		if i := slices.IndexFunc(a.Diagnoses, func(d *Diagnosis) bool { return d.Rule == "working-set" }); i >= 0 {
+			return a.Diagnoses[i]
+		}
+		return nil
+	}
+	if d := fired(analyze(t, analysistest.WriteRun(t, w, 1))); d != nil {
+		t.Errorf("fired while reads stayed at 1 ms: %+v", d)
+	}
+	// Reads queue for the disk from 1:00: 20 ms each.
+	w.BlockReadMs = func(t float64) float64 {
+		if t > 60 {
+			return 20
+		}
+		return 1
+	}
+	d := fired(analyze(t, analysistest.WriteRun(t, w, 1)))
+	if d == nil {
+		t.Fatal("no working-set diagnosis with reads at 20 ms")
+	}
+	if d.From != 60 || !strings.Contains(d.Summary, "each taking 20 ms against 1.0 ms at low load") || !strings.Contains(d.Summary, "wait for the disk") {
+		t.Errorf("diagnosis %+v", d)
+	}
+}
+
 // From 1:00 writes take 20 ms while reads stay at 1 ms, db has CPU to
 // spare and 6 backends wait on locks: writes queue on row locks.
 func TestHotRows(t *testing.T) {
