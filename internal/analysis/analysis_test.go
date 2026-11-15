@@ -1468,3 +1468,21 @@ func TestReplicationLag(t *testing.T) {
 		t.Error("fired at 200 ms lag and 1% stale")
 	}
 }
+
+// A claim's expect line is scored against the run, its value in the
+// metric's units: 40% stale reads hold "< 50%" and break "< 10%".
+func TestScoreLine(t *testing.T) {
+	w := analysistest.Healthy()
+	w.ReplicaLagS = func(float64) float64 { return 2 }
+	w.StaleShare = func(float64) float64 { return 0.4 }
+	a := analyze(t, analysistest.WriteRun(t, w, 1))
+	for line, want := range map[string]ExpectStatus{"stale_read_rate < 50%": ExpectHeld, "stale_read_rate < 10%": ExpectBroken, "ro.replication_lag_ms < 3s": ExpectHeld} {
+		r, err := ScoreLine(a, line)
+		if err != nil || r.Status != want {
+			t.Errorf("%s: %s %v (%+v)", line, r.Status, err, r)
+		}
+	}
+	if _, err := ScoreLine(a, "db.stale_read_rate < 1%"); err == nil {
+		t.Error("a metric the primary doesn't have was accepted")
+	}
+}

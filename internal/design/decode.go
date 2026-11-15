@@ -49,8 +49,8 @@ var plannedFields = map[string]string{
 // plannedValues are enum values documented for a later phase.
 var plannedValues = map[string]map[string]string{
 	"kind": {
-		"kafka":            "queues (kafka, rabbitmq) are planned for phase 2",
-		"rabbitmq":         "queues (kafka, rabbitmq) are planned for phase 2",
+		"kafka":    "queues (kafka, rabbitmq) are planned for phase 2",
+		"rabbitmq": "queues (kafka, rabbitmq) are planned for phase 2",
 	},
 	"role": {"worker": "worker services that consume from queues are planned for phase 2"},
 	"op":   {"publish": "publishing to queues is planned for phase 2"},

@@ -251,11 +251,14 @@ func score(a *Analysis, e *design.Expectation, ws []*Window) ExpectResult {
 // ScoreLine scores one expect line, which needn't be in the run's design,
 // against the run: scenario check uses it for claims about a run.
 func ScoreLine(a *Analysis, line string) (ExpectResult, error) {
-	p, err := design.ParseExpect(line)
+	if a.Design == nil {
+		return ExpectResult{}, fmt.Errorf("the run has no design to check %q against", line)
+	}
+	e, err := a.Design.Expectation(line)
 	if err != nil {
 		return ExpectResult{}, err
 	}
-	e := &design.Expectation{Text: line, Prediction: p}
+	p := e.Prediction
 	ws := a.Windows[:min(a.Analyzed, len(a.Windows))]
 	if _, ok := design.RunMetrics[p.Subject.Metric]; ok && p.Subject.Service == "" {
 		return scoreRun(a, e, ws), nil

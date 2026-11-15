@@ -2,6 +2,7 @@ package design
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -412,4 +413,23 @@ func (Expectation) JSONSchema() *jsonschema.Schema {
 			},
 		},
 	}
+}
+
+// Expectation parses one expect line and checks it against d as if it
+// were in d's expect block: the metric must exist, and its value is put
+// in the metric's units. scenario check scores claim lines this way.
+func (d *Design) Expectation(line string) (*Expectation, error) {
+	p, err := ParseExpect(line)
+	if err != nil {
+		return nil, err
+	}
+	e := &Expectation{Text: line, Prediction: p}
+	cp := *d
+	cp.Expect = []*Expectation{e}
+	v := &validator{d: &cp}
+	v.expect()
+	if errs := v.diags.Errors(); len(errs) > 0 {
+		return nil, errors.New(errs[0].Message)
+	}
+	return e, nil
 }
