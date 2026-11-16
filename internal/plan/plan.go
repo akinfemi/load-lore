@@ -141,6 +141,10 @@ type Service struct {
 type Consume struct {
 	Queue       string `json:"queue"`
 	Concurrency int    `json:"concurrency"`
+	// RetryMax is how many times a failed job is retried before it is
+	// dead; 0 drops it at its first failure.
+	RetryMax    int `json:"retry_max,omitempty"`
+	RetryBaseMs int `json:"retry_base_ms,omitempty"`
 }
 
 // Every worker of a queue takes jobs from one consumer group, so each job
@@ -884,6 +888,10 @@ func (p *Plan) syntheticConfigs(d *design.Design, name string, s *Service, byNam
 	if c := ds.Consume; c != nil && ds.Role == "worker" {
 		consume = &synthetic.Consume{Target: c.From, Concurrency: *c.Concurrency}
 		s.Role, s.Consume = "worker", &Consume{Queue: c.From, Concurrency: *c.Concurrency}
+		if r := c.Retries; r != nil {
+			consume.Retries = &synthetic.JobRetries{Max: r.Max, BaseMs: *r.BaseMs}
+			s.Consume.RetryMax, s.Consume.RetryBaseMs = r.Max, *r.BaseMs
+		}
 	}
 	for i, container := range s.Containers {
 		cfg := &synthetic.Config{
@@ -1191,6 +1199,16 @@ func (p *Plan) assume(d *design.Design) {
 				why = fmt.Sprintf("Sidekiq's default: each replica runs up to %d jobs from %s at once, and the rest wait in the queue", *s.Consume.Concurrency, s.Consume.From)
 			}
 			p.Assumptions = append(p.Assumptions, Assumption{Field: "services." + name + ".consume.concurrency", Value: strconv.Itoa(*s.Consume.Concurrency), Why: why})
+			a := Assumption{Field: "services." + name + ".consume.retries", Value: "none",
+				Why: "not set in the design: a job whose calls fail is dropped, not retried. Real job systems retry (Sidekiq up to 25 times), so add retries to see the backlog retries make"}
+			if r := s.Consume.Retries; r != nil {
+				a.Value = fmt.Sprintf("%d, from %s", r.Max, msDuration(*r.BaseMs))
+				a.Why = fmt.Sprintf("set in the design: a failed job goes back on %s after %s, give or take a quarter, doubling for each retry after; after %d retries it is set aside as dead", s.Consume.From, msDuration(*r.BaseMs), r.Max)
+				if *r.BaseMs == design.DefaultJobRetryBaseMs {
+					a.Why += fmt.Sprintf(". The first wait, %s, is close to Sidekiq's first waits", msDuration(*r.BaseMs))
+				}
+			}
+			p.Assumptions = append(p.Assumptions, a)
 		}
 		if s := d.Services[name]; s.Kind == "lb" {
 			p.Assumptions = append(p.Assumptions, Assumption{
@@ -1606,4 +1624,10 @@ func (p *Plan) assumeAutoscale(name string, ds *design.Service) {
 		why = "Loadlore's guess: a new replica waits this long before its container starts, for finding capacity and pulling the image, which on this machine are already done; its own start, pools and health checks then run for real. Kubernetes with the image on the node takes seconds; a new node or VM, minutes"
 	}
 	p.Assumptions = append(p.Assumptions, Assumption{Field: "services." + name + ".autoscale.startup_s", Value: fmt.Sprintf("%d s", a.StartupS), Why: why})
+}
+
+// msDuration is a whole number of milliseconds as a short duration: 15s,
+// 1m30s, 250ms.
+func msDuration(ms int) string {
+	return (time.Duration(ms) * time.Millisecond).String()
 }

@@ -1257,6 +1257,14 @@ func (v *validator) worker(p string, s *Service) {
 	if c := s.Consume.Concurrency; c != nil && *c < 1 {
 		v.errorf(pathKey(cp, "concurrency"), CodeRange, "concurrency must be at least 1")
 	}
+	if r := s.Consume.Retries; r != nil && !v.failed[pathKey(cp, "retries")] {
+		if r.Max < 1 {
+			v.errorf(pathKey(cp, "retries.max"), CodeRange, "max must be at least 1; for no retries, leave retries out")
+		}
+		if r.BaseMs != nil && *r.BaseMs < 100 {
+			v.errorf(pathKey(cp, "retries.base_ms"), CodeRange, "base_ms must be at least 100")
+		}
+	}
 	if s.Concurrency != nil && s.Concurrency.Max != nil {
 		v.errorf(pathKey(p, "concurrency.max"), CodeNotApplicable, "a worker runs consume.concurrency jobs at once; set that instead")
 	}

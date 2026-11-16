@@ -48,6 +48,10 @@ type metrics struct {
 	jobDuration   *prometheus.HistogramVec // queue
 	jobsRunning   prometheus.Gauge
 	runnerBusy    prometheus.Counter
+	jobsRetried   *prometheus.CounterVec
+	jobsRequeued  *prometheus.CounterVec
+	jobsDead      *prometheus.CounterVec
+	retryPending  *prometheus.GaugeVec
 }
 
 // jobWaitBuckets reach further than latencyBuckets: a backed-up queue
@@ -110,6 +114,12 @@ func newMetrics(cfg *Config, pools func() []poolSnapshot) *metrics {
 		m.jobWait = hist("job_wait_seconds", "Time from a job's publish to a worker taking it: its wait in the queue.", jobWaitBuckets, "queue")
 		m.jobDuration = hist("job_duration_seconds", "Time a worker spent running each job, its calls included.", latencyBuckets, "queue")
 		m.jobsRunning = gauge("jobs_running", "Jobs a worker replica is running now.")
+		m.jobsRetried = counter("jobs_retried_total", "Failed jobs put in the queue's retry set, to go back on the queue after their wait.", "queue")
+		m.jobsRequeued = counter("jobs_requeued_total", "Retries moved from the retry set back onto the queue, once due: they count among the queue's added entries, but aren't new jobs.", "queue")
+		m.jobsDead = counter("jobs_dead_total", "Failed jobs given up on: out of retries (onto the dead list), or dropped by a worker without retries.", "queue")
+		rp := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: metricPrefix + "job_retries_pending", Help: "Jobs in the queue's retry set, waiting for their retry: the same set for every replica of the worker.", ConstLabels: labels}, []string{"queue"})
+		f(rp)
+		m.retryPending = rp
 		m.runnerBusy = counter("job_runner_busy_seconds_total", "Seconds the worker's job runners spent on jobs, summed over its runners: taking each job from the queue, running it and acknowledging it. Time spent waiting for a job to arrive isn't counted.").WithLabelValues()
 	}
 	f(&poolCollector{labels: labels, snapshots: pools})

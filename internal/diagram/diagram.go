@@ -214,10 +214,14 @@ func consumersOf(d *design.Design, queue string) []string {
 
 // consumeLabel is how a worker takes jobs: consume, 5 at a time.
 func consumeLabel(c *design.Consume) string {
-	if c.Concurrency == nil {
-		return "consume"
+	l := "consume"
+	if c.Concurrency != nil {
+		l = fmt.Sprintf("consume, %d at a time", *c.Concurrency)
 	}
-	return fmt.Sprintf("consume, %d at a time", *c.Concurrency)
+	if r := c.Retries; r != nil {
+		l += fmt.Sprintf("<br/>%d %s on failure", r.Max, map[bool]string{true: "retry", false: "retries"}[r.Max == 1])
+	}
+	return l
 }
 
 type callEdge struct {

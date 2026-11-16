@@ -115,7 +115,7 @@ func TestDroppedNote(t *testing.T) {
 	}
 	// Three windows of 50 jobs a second, a fifth of them failing: 300.
 	n := droppedNote(a)
-	if !strings.Contains(n, "300 jobs from jobs failed (up to 20% of a window's jobs) and were dropped") || !strings.Contains(n, "doesn't retry failed jobs yet") {
+	if !strings.Contains(n, "300 jobs from jobs failed (up to 20% of a window's jobs) and were dropped") || !strings.Contains(n, "don't retry failed jobs (consume.retries)") {
 		t.Errorf("note %q", n)
 	}
 	// A trickle under the bar stays quiet.
@@ -125,6 +125,25 @@ func TestDroppedNote(t *testing.T) {
 	}
 	if n := droppedNote(a); n != "" {
 		t.Errorf("note under the bar: %q", n)
+	}
+
+	// With retries: the failed runs went to the retry set, some jobs ran
+	// out of tries, and some still waited at the end.
+	a.Plan.Services[1].Consume.RetryMax = 3
+	again, dead := 2.0, 0.0
+	for i, w := range a.Windows {
+		sw := w.Services["jobs"]
+		sw.Retried = &again
+		if i >= 8 {
+			d := float64(i-7) * 4
+			dead = d
+		}
+		dt, waiting := dead, 9.0
+		sw.DeadTotal, sw.Retrying = &dt, &waiting
+	}
+	n = droppedNote(a)
+	if want := " Retries: 240 failed runs of jobs from jobs went to the retry set, to go back on the queue after their wait; 16 jobs failed all 4 tries and are dead; 9 were still waiting to retry when the load ended."; n != want {
+		t.Errorf("with retries %q\nwant %q", n, want)
 	}
 }
 
@@ -174,5 +193,23 @@ func TestConsumerLagRoundTrips(t *testing.T) {
 	d := consumerLag(a)
 	if len(d) != 1 || !strings.Contains(d[0].Summary, "A runner took 102 ms per job, but ran each for only 30 ms: the rest went on the queue's round trips") || !strings.Contains(d[0].Next, "more runners make more round trips at once") {
 		t.Fatalf("round trips: %+v", d)
+	}
+}
+
+// Most jobs failing in the lag: it's put on the failing calls, and the
+// advice depends on whether the worker retries.
+func TestConsumerLagFailingJobs(t *testing.T) {
+	a := queueRun(190, 98, 0.5)
+	fail := 0.9
+	for _, w := range a.Windows[5:] {
+		w.Services["jobs"].JobErrorRate = &fail
+	}
+	d := consumerLag(a)
+	if len(d) != 1 || !strings.Contains(d[0].Summary, "90% of sender's jobs failed at 0:50") || !strings.Contains(d[0].Next, "Without consume.retries the failed jobs were dropped") {
+		t.Fatalf("failing jobs: %+v", d)
+	}
+	a.Plan.Services[1].Consume.RetryMax = 3
+	if d := consumerLag(a); len(d) != 1 || !strings.Contains(d[0].Next, "Retries bring the failed jobs back") {
+		t.Errorf("with retries: %+v", d)
 	}
 }

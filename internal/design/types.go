@@ -55,6 +55,17 @@ type Service struct {
 type Consume struct {
 	From        string `yaml:"from" json:"from" jsonschema:"required" jsonschema_description:"The kind: queue service it takes jobs from."`
 	Concurrency *int   `yaml:"concurrency,omitempty" json:"concurrency,omitempty" jsonschema:"minimum=1,default=5" jsonschema_description:"Jobs each replica runs at once, as Sidekiq's concurrency or a Celery worker's: 5 is Sidekiq's default."`
+	// Retries, when set, puts a failed job back on the queue after a
+	// growing wait, up to Max times, then sets it aside as dead. Without
+	// it a failed job is dropped.
+	Retries *JobRetries `yaml:"retries,omitempty" json:"retries,omitempty" jsonschema_description:"Retry failed jobs: each failure waits base_ms, then twice as long each time, give or take a quarter, before the job goes back on the queue; after max retries it is set aside as dead. Default: none, a failed job is dropped."`
+}
+
+// JobRetries is how a worker retries a failed job, as Sidekiq does: from
+// a retry set, after a growing wait, then into a dead set.
+type JobRetries struct {
+	Max    int  `yaml:"max" json:"max" jsonschema:"required,minimum=1" jsonschema_description:"Retries after the first attempt; then the job is dead. Sidekiq's default is 25."`
+	BaseMs *int `yaml:"base_ms,omitempty" json:"base_ms,omitempty" jsonschema:"minimum=100,default=15000" jsonschema_description:"The wait before the first retry, doubling for each one after it: 15000 is close to Sidekiq's first waits (about 16 s, then 31 s and 96 s)."`
 }
 
 // Disk models a postgres's data disk. Profile names a disk from

@@ -74,3 +74,20 @@ func TestWorkerConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestJobBackoff(t *testing.T) {
+	r := &JobRetries{Max: 5, BaseMs: 1000}
+	for n, want := range map[int]time.Duration{1: time.Second, 2: 2 * time.Second, 3: 4 * time.Second} {
+		lo, mid, hi := jobBackoff(r, n, func() float64 { return 0 }), jobBackoff(r, n, func() float64 { return 0.5 }), jobBackoff(r, n, func() float64 { return 1 })
+		if mid != want || lo != want*3/4 || hi != want*5/4 {
+			t.Errorf("retry %d: %v, %v, %v; want %v give or take a quarter", n, lo, mid, hi, want)
+		}
+	}
+	m := retryMember(request{typ: "write", key: 42}, 2, "1-0")
+	if r, a, ok := parseRetryMember(m); !ok || r.key != 42 || r.typ != "write" || a != 2 {
+		t.Errorf("round trip %q: %+v %d %v", m, r, a, ok)
+	}
+	if _, _, ok := parseRetryMember("bad|1|x|y"); ok {
+		t.Error("parsed a bad member")
+	}
+}

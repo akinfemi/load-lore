@@ -196,6 +196,17 @@ type ServiceWindow struct {
 	QueueUsed     *float64 `json:"queue_used,omitempty"`
 	PublishErrors *float64 `json:"publish_errors,omitempty"`
 	QueueFull     *float64 `json:"queue_full,omitempty"`
+	// Retries, for a worker with retries: Retried failed jobs a second put
+	// in the retry set, Requeued retries a second moved back onto the
+	// queue (left out of Published, which is new jobs), Dead jobs a second
+	// given up on (out of retries, or dropped without them), DeadTotal the
+	// dead so far by the window's end, and Retrying the jobs waiting in
+	// the retry set at most.
+	Retried   *float64 `json:"retried,omitempty"`
+	Requeued  *float64 `json:"requeued,omitempty"`
+	Dead      *float64 `json:"dead,omitempty"`
+	DeadTotal *float64 `json:"dead_total,omitempty"`
+	Retrying  *float64 `json:"retrying,omitempty"`
 
 	// Workers: jobs a second finished, the mean time one took, and the jobs
 	// running at once (peak and mean, summed over replicas).
@@ -1021,10 +1032,32 @@ func (b *builder) queue(sw *ServiceWindow, s *plan.Service, wa, wb float64) {
 		}
 	}
 	sw.OldestJobS = num(oldest, seen)
-	if n, ok := st.increase("redis_stream_entries_added_total", stream, wa, wb); ok {
-		sw.Published = num(n/(wb-wa), true)
-	}
 	q := eq("queue", s.Name)
+	requeued, hasRequeued := st.increase("loadlore_jobs_requeued_total", q, wa, wb)
+	if n, ok := st.increase("redis_stream_entries_added_total", stream, wa, wb); ok {
+		sw.Published = num(math.Max(0, n-requeued)/(wb-wa), true)
+	}
+	if hasRequeued {
+		sw.Requeued = num(requeued/(wb-wa), true)
+	}
+	if n, ok := st.increase("loadlore_jobs_retried_total", q, wa, wb); ok {
+		sw.Retried = num(n/(wb-wa), true)
+	}
+	if n, ok := st.increase("loadlore_jobs_dead_total", q, wa, wb); ok {
+		sw.Dead = num(n/(wb-wa), true)
+	}
+	if n, ok := st.increase("loadlore_jobs_dead_total", q, 0, wb); ok {
+		sw.DeadTotal = num(n, true)
+	}
+	// Every replica of the worker reports the same retry set: the most
+	// any reported, not their sum.
+	if grid := st.gaugeGrid("loadlore_job_retries_pending", q, wa, wb); len(grid) > 0 {
+		mx := 0.0
+		for _, v := range grid {
+			mx = math.Max(mx, v)
+		}
+		sw.Retrying = num(mx, true)
+	}
 	if total, ok := st.increase("loadlore_jobs_total", q, wa, wb); ok {
 		bad, _ := st.increase("loadlore_jobs_total", and(q, eq("result", "error")), wa, wb)
 		sw.Finished = num(total/(wb-wa), true)
@@ -1100,7 +1133,8 @@ const (
 	SrcHitRate          = "redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter)"
 	SrcQueueDepth       = "redis_stream_length (redis_exporter): jobs published and not yet finished, waiting or running"
 	SrcOldestJob        = "redis_stream_first_entry_id (redis_exporter): the oldest unfinished job's publish time"
-	SrcPublished        = "redis_stream_entries_added_total (redis_exporter)"
+	SrcPublished        = "redis_stream_entries_added_total (redis_exporter), less loadlore_jobs_requeued_total (retries put back)"
+	SrcJobRetries       = "loadlore_jobs_retried_total, loadlore_jobs_dead_total and loadlore_job_retries_pending (the worker's own counts)"
 	SrcJobs             = "loadlore_jobs_total (the workers' finished jobs, by result)"
 	SrcJobWait          = "loadlore_job_wait_seconds (the workers' histogram: publish to start)"
 	SrcJobDuration      = "loadlore_job_duration_seconds (the workers' histogram: time to run a job)"

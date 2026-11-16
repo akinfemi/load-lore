@@ -50,8 +50,9 @@ var ComponentMetrics = map[string]map[string]MetricKind{
 	"redis":            {"hit_rate": MetricRatio, "memory": MetricRatio, "cpu": MetricRatio},
 	// queue: depth is the jobs not yet finished, oldest_job_ms how long
 	// the oldest had waited, job_wait_p99_ms the p99 wait of the jobs
-	// workers took, publish to start.
-	"queue":   {"depth": MetricCount, "oldest_job_ms": MetricLatency, "job_wait_p99_ms": MetricLatency, "memory": MetricRatio, "cpu": MetricRatio},
+	// workers took, publish to start; retrying the jobs waiting in its
+	// retry set, dead_jobs the jobs given up on so far.
+	"queue":   {"depth": MetricCount, "oldest_job_ms": MetricLatency, "job_wait_p99_ms": MetricLatency, "retrying": MetricCount, "dead_jobs": MetricCount, "memory": MetricRatio, "cpu": MetricRatio},
 	"service": {"cpu": MetricRatio, "memory": MetricRatio, "p99_ms": MetricLatency, "error_rate": MetricRatio, "inflight": MetricCount},
 }
 

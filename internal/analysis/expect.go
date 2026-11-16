@@ -106,6 +106,10 @@ func metricFor(a *Analysis, m design.MetricRef) (metricFn, bool) {
 		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.StaleReadRate }), design.MetricRatio, SrcStaleReads}, true
 	case "depth":
 		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.Depth }), design.MetricCount, SrcQueueDepth}, true
+	case "retrying":
+		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.Retrying }), design.MetricCount, SrcJobRetries}, true
+	case "dead_jobs":
+		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.DeadTotal }), design.MetricCount, SrcJobRetries}, true
 	case "oldest_job_ms":
 		return metricFn{svc(func(s *ServiceWindow) *float64 {
 			if s.OldestJobS == nil {

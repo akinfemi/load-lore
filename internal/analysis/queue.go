@@ -116,6 +116,12 @@ func lagDiagnosis(a *Analysis, q *plan.Service, workers []*plan.Service, runners
 		d.Evidence = append(d.Evidence,
 			Evidence{Text: fmt.Sprintf("%s jobs a second published to %s at %s", Rate(*gsw.Published), q.Name, Clock(gw.Start)), Source: SrcPublished},
 			Evidence{Text: fmt.Sprintf("%s jobs a second finished by %s at %s", Rate(*gsw.Finished), who, Clock(gw.Start)), Source: SrcJobs})
+		// Published is new jobs; retries put back are on top of them, and
+		// a failed run that goes to retry isn't done.
+		if gsw.Retried != nil && *gsw.Retried >= 0.5 {
+			rates += fmt.Sprintf(", %s of them failed runs sent to wait for a retry", Rate(*gsw.Retried))
+			d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf("%s failed runs a second sent to %s's retry set at %s, and %s retries a second put back", Rate(*gsw.Retried), q.Name, Clock(gw.Start), Rate(deref0(gsw.Requeued))), Source: SrcJobRetries})
+		}
 	}
 	grew := ""
 	if sw.Depth != nil {
@@ -124,6 +130,10 @@ func lagDiagnosis(a *Analysis, q *plan.Service, workers []*plan.Service, runners
 		if old := maxOldest(ws, q.Name, from); old > 0 {
 			grew += fmt.Sprintf(", and the oldest had waited %s", secondsText(old))
 			d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf("the oldest unfinished job had waited %s", secondsText(old)), Source: SrcOldestJob})
+		}
+		if sw.Retrying != nil && *sw.Retrying >= 1 {
+			grew += fmt.Sprintf(", with %s more waiting to retry", Count(*sw.Retrying))
+			d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf("%s jobs in %s's retry set at %s", Count(*sw.Retrying), q.Name, Clock(w.Start)), Source: SrcJobRetries})
 		}
 		grew += "."
 	}
@@ -160,7 +170,27 @@ func lagDiagnosis(a *Analysis, q *plan.Service, workers []*plan.Service, runners
 				Evidence{Text: fmt.Sprintf("%s's writes to %s took %s at %s, against %s before the lag", wk.Name, hot.db, Ms(hot.write), Clock(w.Start), Ms(hot.base)), Source: SrcOpTime},
 				Evidence{Text: fmt.Sprintf("%s backends of %s waiting on locks at %s, on average", lockText(hot.locks), hot.db, Clock(w.Start)), Source: SrcLockWaits})
 		}
+		// The lag window where the most of the jobs failed.
+		fail, fi := 0.0, from
+		for i := from; i <= to && i < len(ws); i++ {
+			if qs := at(i); qs != nil && qs.JobErrorRate != nil && *qs.JobErrorRate > fail {
+				fail, fi = *qs.JobErrorRate, i
+			}
+		}
 		switch {
+		case fail >= JobFailingShare && hot == nil:
+			took := ""
+			if fw := ws[fi].Services[wk.Name]; fw != nil && fw.JobMeanMs != nil && base > 0 {
+				took = fmt.Sprintf(" (a job took %s against %s before)", Ms(*fw.JobMeanMs), Ms(base))
+			}
+			d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf("%s of the jobs %s finished at %s failed", Pct(fail), wk.Name, Clock(ws[fi].Start)), Source: SrcJobs})
+			why = fmt.Sprintf(" %s of %s's jobs failed at %s, each holding its runner until its calls gave up%s: the runners spent the lag on calls that failed, not on finishing jobs.", Pct(fail), wk.Name, Clock(ws[fi].Start), took)
+			next = fmt.Sprintf("The backlog came from the failing calls, not from too few runners: fix what %s's jobs call, or fail those calls sooner (a shorter timeout, or a circuit breaker) so the runners move on.%s", wk.Name, peak)
+			if wk.Consume.RetryMax > 0 {
+				next += " Retries bring the failed jobs back once the calls answer: check the oldest job's wait, and that none went dead."
+			} else {
+				next += " Without consume.retries the failed jobs were dropped; real workers would retry them, and the backlog would have grown more."
+			}
 		case hot != nil:
 			why = fmt.Sprintf(" %s's writes to %s took %s against %s before the lag, with %s backends of %s waiting on locks: its jobs update the same rows, and a row takes one write at a time, each keeping its lock until it commits. More job runners would only wait in line for the same rows.", wk.Name, hot.db, Ms(hot.write), Ms(hot.base), lockText(hot.locks), hot.db)
 			next = fmt.Sprintf("Don't add job runners or replicas to %s: the hot rows set its pace. Make the writes to them fewer or cheaper: apply many jobs in one write (a batch), or spread them over more rows.%s If that pace catches up after the peak, the queue is doing its job: check that the oldest job's wait is one your users accept.", wk.Name, peak)
@@ -354,38 +384,78 @@ func queueNote(a *Analysis) string {
 // from which droppedNote speaks up.
 const DroppedJobShare = 0.01
 
-// droppedNote is the verdict's word on failed jobs: a worker drops a job
-// whose calls fail, where real job systems retry it (Sidekiq up to 25
-// times), so the jobs would have come back and the queue would have held
-// more than this run shows. Empty when no window had DroppedJobShare of
-// its jobs fail.
+// JobFailingShare is the share of a window's finished jobs that failed
+// for consumer lag to put the lag on the failing calls.
+const JobFailingShare = 0.2
+
+// droppedNote is the verdict's word on failed jobs. Without retries a
+// worker drops a job whose calls fail, where real job systems retry it
+// (Sidekiq up to 25 times), so the jobs would have come back and the queue
+// would have held more than this run shows; it says so when a window had
+// DroppedJobShare of its jobs fail. With retries it says how many failed
+// runs went to the retry set, how many jobs ran out of retries and are
+// dead, and how many still waited to retry when the load ended.
 func droppedNote(a *Analysis) string {
 	if a.Plan == nil {
 		return ""
 	}
-	var notes []string
+	var dropped, retried []string
 	for _, q := range a.Plan.Services {
 		if q.Kind != "queue" {
 			continue
 		}
-		failed, worst := 0.0, 0.0
+		maxRetries := 0
+		for _, w := range a.Plan.Services {
+			if w.Consume != nil && w.Consume.Queue == q.Name {
+				maxRetries = max(maxRetries, w.Consume.RetryMax)
+			}
+		}
+		failed, worst, again, dead, waiting := 0.0, 0.0, 0.0, 0.0, 0.0
 		for _, w := range a.Windows {
 			sw := w.Services[q.Name]
-			if sw == nil || sw.Finished == nil || sw.JobErrorRate == nil {
+			if sw == nil {
 				continue
 			}
-			failed += *sw.Finished * *sw.JobErrorRate * WindowSeconds
-			worst = math.Max(worst, *sw.JobErrorRate)
+			if sw.Finished != nil && sw.JobErrorRate != nil {
+				failed += *sw.Finished * *sw.JobErrorRate * WindowSeconds
+				worst = math.Max(worst, *sw.JobErrorRate)
+			}
+			if sw.Retried != nil {
+				again += *sw.Retried * WindowSeconds
+			}
+			if sw.DeadTotal != nil {
+				dead = *sw.DeadTotal
+			}
+			if sw.Retrying != nil {
+				waiting = *sw.Retrying
+			}
 		}
-		if worst < DroppedJobShare || failed < 1 {
+		if maxRetries == 0 {
+			if worst >= DroppedJobShare && failed >= 1 {
+				dropped = append(dropped, fmt.Sprintf("%s jobs from %s failed (up to %s of a window's jobs) and were dropped", Count(failed), q.Name, Pct(worst)))
+			}
 			continue
 		}
-		notes = append(notes, fmt.Sprintf("%s jobs from %s failed (up to %s of a window's jobs) and were dropped", Count(failed), q.Name, Pct(worst)))
+		if again < 1 && dead < 1 {
+			continue
+		}
+		n := fmt.Sprintf("%s failed runs of jobs from %s went to the retry set, to go back on the queue after their wait", Count(again), q.Name)
+		if dead >= 1 {
+			n += fmt.Sprintf("; %s jobs failed all %d tries and are dead", Count(dead), maxRetries+1)
+		}
+		if waiting >= 1 {
+			n += fmt.Sprintf("; %s were still waiting to retry when the load ended", Count(waiting))
+		}
+		retried = append(retried, n)
 	}
-	if len(notes) == 0 {
-		return ""
+	out := ""
+	if len(retried) > 0 {
+		out += fmt.Sprintf(" Retries: %s.", strings.Join(retried, ". "))
 	}
-	return fmt.Sprintf(" %s: Loadlore doesn't retry failed jobs yet, so real workers retrying them would have had a bigger backlog than this run shows.", strings.Join(notes, "; "))
+	if len(dropped) > 0 {
+		out += fmt.Sprintf(" %s: this design's workers don't retry failed jobs (consume.retries), so real workers retrying them would have had a bigger backlog than this run shows.", strings.Join(dropped, "; "))
+	}
+	return out
 }
 
 // hotWrites is a worker's writes to a Postgres slowed by row locks.
@@ -434,4 +504,12 @@ func hotJobs(a *Analysis, wk *plan.Service, i, from int) *hotWrites {
 		}
 	}
 	return nil
+}
+
+// deref0 is *p, or 0 for nil.
+func deref0(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

@@ -54,6 +54,17 @@ type Consume struct {
 	Target      string `json:"target"`
 	Concurrency int    `json:"concurrency"`
 	Consumer    string `json:"consumer"`
+	// Retries, when set, retries a failed job after a growing wait; nil
+	// drops it.
+	Retries *JobRetries `json:"retries,omitempty"`
+}
+
+// JobRetries: a failed job waits BaseMs (doubling each retry, give or take
+// a quarter) in the queue's retry set, then goes back on the queue; after
+// Max retries it goes to the dead set.
+type JobRetries struct {
+	Max    int `json:"max"`
+	BaseMs int `json:"base_ms"`
 }
 
 // Concurrency models the service runtime.
@@ -306,6 +317,9 @@ func (c *Config) Validate() error {
 		}
 		if c.Consume.Concurrency < 1 || c.Consume.Consumer == "" {
 			bad("consume %+v", *c.Consume)
+		}
+		if r := c.Consume.Retries; r != nil && (r.Max < 1 || r.BaseMs < 1) {
+			bad("consume retries %+v", *r)
 		}
 	}
 	if r := c.Resilience.Retries; r != nil {

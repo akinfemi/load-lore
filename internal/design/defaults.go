@@ -46,6 +46,10 @@ const (
 // Sidekiq's default.
 const DefaultConsumeConcurrency = 5
 
+// DefaultJobRetryBaseMs is the wait before a failed job's first retry:
+// close to Sidekiq's first waits (about 16 s, then 31 s and 96 s).
+const DefaultJobRetryBaseMs = 15000
+
 // DefaultConcurrencyMax is the default max for each concurrency model.
 var DefaultConcurrencyMax = map[string]int{"threads": 200, "event-loop": 0, "workers": 4}
 
@@ -155,6 +159,9 @@ func defaultApp(s *Service, services map[string]*Service) {
 	}
 	if c := s.Consume; c != nil {
 		setDefault(&c.Concurrency, DefaultConsumeConcurrency)
+		if r := c.Retries; r != nil {
+			setDefault(&r.BaseMs, DefaultJobRetryBaseMs)
+		}
 	}
 	if s.Concurrency == nil {
 		s.Concurrency = &Concurrency{}

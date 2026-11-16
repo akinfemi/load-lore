@@ -124,7 +124,7 @@ Evidence:
 
 **Try next:** Add PgBouncer, or resize the pools across replicas: 1 replica × 10 connections = 10.
 
-<sub>Rules version 16. Rules are deterministic and offline; their thresholds are listed below.</sub>
+<sub>Rules version 17. Rules are deterministic and offline; their thresholds are listed below.</sub>
 
 ## Predictions
 

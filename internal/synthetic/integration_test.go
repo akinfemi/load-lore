@@ -462,6 +462,72 @@ func TestIntegrationQueue(t *testing.T) {
 	}
 }
 
+// A job whose calls fail goes to the retry set, back on the queue once
+// due, and onto the dead list after its last retry: with max 2, each job
+// runs three times, and the stream and retry set end empty.
+func TestIntegrationQueueRetries(t *testing.T) {
+	addr := startRedis(t)
+	api := newService(t, &Config{
+		Service: "api", Resilience: Resilience{TimeoutMs: 5000},
+		Targets: map[string]Target{"jobs": queueTarget(addr, 2)},
+		Calls:   []Call{call("jobs", "publish")},
+	})
+	ctx := context.Background()
+	const n = 5
+	for i := range n {
+		if err := api.handle(ctx, request{typ: "write", key: int64(i + 1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := newService(t, &Config{
+		Service: "sender", Role: RoleWorker, Resilience: Resilience{TimeoutMs: 500},
+		Consume: &Consume{Target: "jobs", Concurrency: 2, Consumer: "sender-0", Retries: &JobRetries{Max: 2, BaseMs: 100}},
+		// Nothing listens on port 1: every call fails at once.
+		Targets: map[string]Target{"jobs": queueTarget(addr, 3), "provider": {Kind: KindHTTP, Addrs: []string{"127.0.0.1:1"}, Pool: 2}},
+		Calls:   []Call{call("provider", "http")},
+	})
+	wctx, stop := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- w.RunWorker(wctx) }()
+	deadline := time.Now().Add(15 * time.Second)
+	for metricValue(t, w, "loadlore_jobs_dead_total", map[string]string{"queue": "jobs"}) < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("dead %v, retried %v of %d jobs", metricValue(t, w, "loadlore_jobs_dead_total", nil), metricValue(t, w, "loadlore_jobs_retried_total", nil), n)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	stop()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]float64{
+		"loadlore_jobs_retried_total":  2 * n,
+		"loadlore_jobs_requeued_total": 2 * n,
+		"loadlore_jobs_dead_total":     n,
+	} {
+		if got := metricValue(t, w, name, map[string]string{"queue": "jobs"}); got != want {
+			t.Errorf("%s = %v, want %v", name, got, want)
+		}
+	}
+	if got := metricValue(t, w, "loadlore_jobs_total", map[string]string{"queue": "jobs", "result": "error"}); got != 3*n {
+		t.Errorf("failed runs %v, want %d (three per job)", got, 3*n)
+	}
+	q := w.clients["jobs"].(*queueClient)
+	if l, err := q.rdb.XLen(ctx, "jobs").Result(); err != nil || l != 0 {
+		t.Errorf("stream length %d (%v), want 0", l, err)
+	}
+	if l, err := q.rdb.ZCard(ctx, q.retryKey()).Result(); err != nil || l != 0 {
+		t.Errorf("retry set %d (%v), want 0", l, err)
+	}
+	dead, err := q.rdb.LRange(ctx, q.deadKey(), 0, -1).Result()
+	if err != nil || len(dead) != n {
+		t.Fatalf("dead list %v (%v), want %d", dead, err, n)
+	}
+	if r, attempt, ok := parseRetryMember(dead[0]); !ok || attempt != 3 || r.typ != "write" {
+		t.Errorf("dead member %q: %+v attempt %d", dead[0], r, attempt)
+	}
+}
+
 // A full queue refuses jobs, and the publish fails with queue_full: the
 // request fails with it.
 func TestIntegrationQueueFull(t *testing.T) {
