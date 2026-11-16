@@ -27,7 +27,7 @@ Before you run anything, write down your guesses. Don't work them out: a gut ans
 2. Which component gives out first, and how busy is the database's CPU when it does?
 3. If you gave the database twice the CPU, what would happen?
 
-Loads depend on your machine: slower cores break the same design at a lower load, so a guess can miss even when the reasoning behind it is right.
+Loads depend on your machine: slower cores break the same design at a lower load, so a guess can miss even when the reasoning behind it is right. If it breaks, where it breaks also moves from run to run on the same machine, by up to a quarter of the load, so run it twice before reading much into one break point; the break guess scores right within 35% for that reason.
 
 `loadl predict design.yaml` asks questions like these and writes your answers into the `expect` block at the bottom of `design.yaml`, or write them there yourself. The report scores each one against what the run measured. The line already there is an example; the grammar is in the [design file reference](../../skills/loadlore-designer/references/schema.md).
 

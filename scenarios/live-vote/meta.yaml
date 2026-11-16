@@ -35,9 +35,15 @@ check:
     bigger-db: { verdict: broke, diagnoses: [hot-rows] }
 
 # What `loadl predict` asks before a run; each answer becomes an expect
-# line in design.yaml. A load guess scores right within 25%, too high or
-# too low both count as wrong. The load ramps from 200 to 4,500 rps over
-# 4 minutes, then holds 4,500 for a minute. The hold is there so a late
+# line in design.yaml. A load guess scores right within 35% here, not the
+# usual 25%, too high or too low both count as wrong: the breaks moved
+# between about 3,335 and 4,410 rps over the checks, and at 25% a guess
+# equal to one run's break (3,335) would score wrong against another's
+# (4,410, +32%). At 35%, every break seen scores right against every
+# other.
+#
+# The load ramps from 200 to 4,500 rps over 4 minutes, then holds 4,500
+# for a minute. The hold is there so a late
 # break counts: hot rows tip over at a load that moves from run to run
 # (2:50 to 3:50 into the ramp over three checks on the reference machine,
 # 3:10 to 3:50 for bigger-db), and a design that gave out in the ramp's
@@ -45,7 +51,7 @@ check:
 predict:
   - ask: At what offered load, in requests per second, will it break? The load ramps from 200 to 4,500 rps, then holds there for a minute. A rough guess is fine; answer never if you think it holds.
     answer: rps
-    expect: break_load_rps within 25% of {answer}
+    expect: break_load_rps within 35% of {answer}
     never: break_load_rps none
   - ask: Which component gives out first?
     answer: service
