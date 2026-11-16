@@ -79,7 +79,7 @@ func TestQueueFull(t *testing.T) {
 	a.Windows[9].Services["jobs"].QueueUsed = &used
 	a.Windows[9].Services["jobs"].QueueFull = &refused
 	d := consumerLag(a)
-	if len(d) != 1 || d[0].Title != "Queue full (jobs)" || !strings.Contains(d[0].Summary, "By 1:30 it was full (95% of its maxmemory), and it refused 40 new jobs a second") {
+	if len(d) != 1 || d[0].Title != "Queue full (jobs)" || !strings.Contains(d[0].Summary, "By 1:30 it was full (95% of its maxmemory), and it refused up to 40 new jobs a second") {
 		t.Fatalf("full: %+v", d)
 	}
 }

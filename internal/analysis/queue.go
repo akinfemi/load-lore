@@ -90,6 +90,15 @@ func lagDiagnosis(a *Analysis, q *plan.Service, workers []*plan.Service, runners
 		}
 	}
 	w, sw := ws[worst], at(worst)
+	// The rates are clearest where published ran furthest ahead of
+	// finished; once a queue is full, it takes only what its workers free.
+	gap := from
+	for i := from; i < len(ws); i++ {
+		if gapOf(at(i)) > gapOf(at(gap)) {
+			gap = i
+		}
+	}
+	gw, gsw := ws[gap], at(gap)
 	names := make([]string, 0, len(workers))
 	for _, wk := range workers {
 		names = append(names, wk.Name)
@@ -101,11 +110,11 @@ func lagDiagnosis(a *Analysis, q *plan.Service, workers []*plan.Service, runners
 	d := &Diagnosis{Rule: "consumer-lag", Title: fmt.Sprintf("Consumer lag (%s)", q.Name), From: ws[from].Start, To: ws[to].Start + WindowSeconds, comp: q.Name}
 
 	rates := ""
-	if sw.Published != nil && sw.Finished != nil {
-		rates = fmt.Sprintf(": at %s, %s a second published against %s finished", Clock(w.Start), Rate(*sw.Published), Rate(*sw.Finished))
+	if gsw.Published != nil && gsw.Finished != nil {
+		rates = fmt.Sprintf(": at %s, %s a second published against %s finished", Clock(gw.Start), Rate(*gsw.Published), Rate(*gsw.Finished))
 		d.Evidence = append(d.Evidence,
-			Evidence{Text: fmt.Sprintf("%s jobs a second published to %s at %s", Rate(*sw.Published), q.Name, Clock(w.Start)), Source: SrcPublished},
-			Evidence{Text: fmt.Sprintf("%s jobs a second finished by %s at %s", Rate(*sw.Finished), who, Clock(w.Start)), Source: SrcJobs})
+			Evidence{Text: fmt.Sprintf("%s jobs a second published to %s at %s", Rate(*gsw.Published), q.Name, Clock(gw.Start)), Source: SrcPublished},
+			Evidence{Text: fmt.Sprintf("%s jobs a second finished by %s at %s", Rate(*gsw.Finished), who, Clock(gw.Start)), Source: SrcJobs})
 	}
 	grew := ""
 	if sw.Depth != nil {
@@ -172,9 +181,9 @@ func lagDiagnosis(a *Analysis, q *plan.Service, workers []*plan.Service, runners
 			full += fmt.Sprintf(" (%s of its maxmemory)", Pct(*fw.QueueUsed))
 			d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf("%s's memory at %s of its maxmemory at %s", q.Name, Pct(*fw.QueueUsed), Clock(ws[fi].Start)), Source: SrcQueueMemory})
 		}
-		if fw.QueueFull != nil && *fw.QueueFull > 0 {
-			full += fmt.Sprintf(", and it refused %s new jobs a second: the requests that published them failed", Rate(*fw.QueueFull))
-			d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf("%s publishes a second refused with queue_full at %s", Rate(*fw.QueueFull), Clock(ws[fi].Start)), Source: SrcPublishErrors})
+		if ri, refused := mostRefused(ws, q.Name, fi); refused > 0 {
+			full += fmt.Sprintf(", and it refused up to %s new jobs a second: the requests that published them failed", Rate(refused))
+			d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf("%s publishes a second refused with queue_full at %s", Rate(refused), Clock(ws[ri].Start)), Source: SrcPublishErrors})
 		}
 		full += "."
 	}
@@ -198,6 +207,30 @@ func depthOf(sw *ServiceWindow) float64 {
 		return math.Inf(-1)
 	}
 	return *sw.Depth
+}
+
+// gapOf is how far published ran ahead of finished in a window.
+func gapOf(sw *ServiceWindow) float64 {
+	if sw == nil || sw.Published == nil {
+		return math.Inf(-1)
+	}
+	f := 0.0
+	if sw.Finished != nil {
+		f = *sw.Finished
+	}
+	return *sw.Published - f
+}
+
+// mostRefused is the window from start with the most publishes a second
+// refused because the queue was full, and that rate.
+func mostRefused(ws []*Window, queue string, start int) (int, float64) {
+	at, mx := start, 0.0
+	for i := start; i < len(ws); i++ {
+		if sw := ws[i].Services[queue]; sw != nil && sw.QueueFull != nil && *sw.QueueFull > mx {
+			at, mx = i, *sw.QueueFull
+		}
+	}
+	return at, mx
 }
 
 func maxOldest(ws []*Window, queue string, from int) float64 {

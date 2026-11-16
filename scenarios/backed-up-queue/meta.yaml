@@ -1,0 +1,52 @@
+title: The backed-up queue
+level: 3
+concepts: [job queues, workers, consumer lag, Little's law, backpressure]
+minutes: 45
+
+# Available to Docker at --scale 1, Loadlore's own containers included:
+# 7.4 CPUs.
+# reference and speed: the machine the scenario was checked on and the
+# host speed index loadl run printed there; it warns on a much slower host.
+host:
+  cpus: 8
+  memory: 8g
+  reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
+  speed: 1028
+
+# Load generator VUs started before the load, at --scale 1, measured: the
+# larger of the peak rate x slo.p99_ms (600 x 0.5 s) and 1.5 x the most
+# VUs busy at once before a break in any of the check's runs (2).
+load:
+  prealloc_vus: 300
+  peak_vus: 2
+  from: backed-up-queue-more-runners-20261116-132248
+
+# What `loadl scenario check` verifies, at --scale 1.
+check:
+  problem:
+    verdict: broke
+    diagnoses: [consumer-lag]
+    signals: [errors]
+  solutions:
+    # helps: holds, and the emails go out within seconds.
+    more-runners:
+      expect: [emails.oldest_job_ms < 5s]
+  variants:
+    # A bigger queue keeps checkout up and lets the emails fall minutes
+    # behind instead.
+    bigger-queue: { verdict: held, diagnoses: [consumer-lag] }
+
+# What `loadl predict` asks before a run; each answer becomes an expect
+# line in design.yaml. The load holds at 150 rps for a minute, then ramps
+# to 600 rps over two minutes and holds there.
+predict:
+  - ask: At what offered load, in requests per second, will checkout start failing? The load holds at 150 rps, then climbs to 600 over two minutes. A rough guess is fine; answer never if you think it holds.
+    answer: rps
+    expect: errors_load_rps within 25% of {answer}
+    never: errors_load_rps none
+  - ask: At the peak, how long does the oldest confirmation email wait in the queue?
+    answer: text
+    expect: 'note: "oldest email wait at the peak: {answer}"'
+  - ask: If the queue had sixteen times the memory, what would change?
+    answer: text
+    expect: 'note: "sixteen times the memory: {answer}"'

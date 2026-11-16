@@ -1,0 +1,79 @@
+version: 1
+name: backed-up-queue
+
+# A shop's checkout. Each order is written to Postgres and its
+# confirmation email goes on a queue, so checkout doesn't wait for the
+# email provider. Two sender workers take the emails off the queue and
+# hand each one to the provider.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 0.5
+      calls:
+        - { target: db, op: read, when: read }          # product pages
+        - { target: db, op: write, when: write }        # the order
+        - { target: emails, op: publish, when: write }  # its confirmation email
+    pools: { db: 10, emails: 10 }
+
+  emails:
+    kind: queue
+    resources: { cpu: 0.5, memory: 64m }
+
+  sender:
+    image: loadlore/synthetic
+    role: worker
+    replicas: 2
+    resources: { cpu: 0.5, memory: 128m }
+    consume: { from: emails }   # 5 jobs at a time per replica, Sidekiq's default
+    behavior:
+      cpu_ms: 1
+      calls:
+        - { target: provider, op: http }   # hand the email to the provider
+    pools: { provider: 10 }
+
+  provider:
+    image: loadlore/synthetic
+    resources: { cpu: 0.5, memory: 256m }
+    behavior:
+      cpu_ms: 0.05
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 1, memory: 1g }
+    dataset: { rows: 100000, row_bytes: 512 }
+
+workload:
+  entry: lb
+  mix: { read: 0.7, write: 0.3 }
+  payload_kb: 8   # an order, and so its email job
+  profile:
+    - hold: { rps: 150, for: 1m }                 # a normal morning
+    - ramp: { from: 150, to: 600, over: 2m }      # the sale opens
+    - hold: { rps: 600, for: 2m }
+
+# The email provider is outside your system and takes about 150 ms to
+# accept an email, modeled as network latency on the way to it for the
+# whole run.
+scenario:
+  - { at: 0s, inject: latency, target: provider, add_ms: 150 }
+
+assumptions:
+  - { field: scenario, basis: guessed, why: "a transactional email API answers in about 150 ms" }
+  - { field: workload.payload_kb, basis: guessed, why: "an order with its items and address, which the email job carries" }
+  - { field: services.emails.resources.memory, basis: guessed, why: "a small managed Redis for background jobs" }
+  - { field: workload.profile, basis: guessed, why: "a sale that quadruples traffic over two minutes" }
+
+# Your predictions, scored in the report. The line here is an example;
+# loadl predict design.yaml replaces it with your answers.
+expect:
+  - error_rate < 1%

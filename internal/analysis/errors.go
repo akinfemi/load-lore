@@ -103,8 +103,10 @@ func causeMeaning(cause, target string) string {
 		return who + " refused connections: down, or nothing listening"
 	case "conn_reset":
 		return "connections" + to + " were reset or closed mid-call"
-	case "db_error", "cache_error":
+	case "db_error", "cache_error", "queue_error":
 		return who + " returned errors"
+	case "queue_full":
+		return who + " was full and refused new jobs"
 	case "upstream_error":
 		return who + " answered with error statuses"
 	case "circuit_open":
