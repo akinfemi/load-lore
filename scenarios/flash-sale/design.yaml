@@ -1,0 +1,63 @@
+version: 1
+name: flash-sale
+
+# A sneaker drop. At ten o'clock the shop starts selling one limited shoe.
+# Each purchase takes one from the shoe's stock, a row in Postgres, and
+# product pages read the stock back. During the drop, nineteen requests in
+# twenty are for the shoe.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 1, memory: 512m }
+    behavior:
+      cpu_ms: 0.3
+      calls:
+        - { target: db, op: read, when: read }    # a product page reads the stock
+        - { target: db, op: write, when: write }  # a purchase takes one from it
+      resilience:
+        timeout_ms: 2000
+    pools:
+      db: { size: 40, min: 40 }   # opened at start; 2 replicas x 40 = 80 connections, under max_connections
+
+  db:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 1, memory: 1g }
+    config: { max_connections: 100, shared_buffers: 256MB }
+    dataset: { rows: 1000, row_bytes: 256 }
+
+workload:
+  entry: lb
+  mix: { read: 0.4, write: 0.6 }
+  keys: { distribution: hotspot, share: 0.95, fraction: 0.001, count: 1000 }
+  profile:
+    - hold: { rps: 200, for: 1m }                # a normal morning
+    - ramp: { from: 200, to: 1500, over: 1m }    # the drop opens
+    - hold: { rps: 1500, for: 1m }
+    - ramp: { from: 1500, to: 200, over: 10s }   # sold out
+    - hold: { rps: 200, for: 2m }
+
+# The database's disk is a network-attached cloud volume: each commit waits
+# about a millisecond longer for its WAL to be written, modeled as a slow
+# disk for the whole run.
+scenario:
+  - { at: 0s, inject: disk_slow, target: db, add_ms: 1 }
+
+assumptions:
+  - { field: scenario, basis: guessed, why: "a commit on a network-attached volume such as gp3 waits about a millisecond more for the disk than on a laptop" }
+  - { field: services.api.behavior.cpu_ms, basis: guessed, why: "a small JSON handler" }
+  - { field: workload.mix, basis: guessed, why: "during the drop, most requests are purchases" }
+  - { field: workload.keys, basis: guessed, why: "one shoe in a catalog of a thousand takes nineteen requests in twenty" }
+  - { field: workload.profile, basis: guessed, why: "buyers arrive over the drop's first minute and leave once it sells out" }
+
+# Your predictions, scored in the report. The line here is an example;
+# loadl predict design.yaml replaces it with your answers.
+expect:
+  - error_rate < 1%

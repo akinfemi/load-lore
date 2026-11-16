@@ -1,0 +1,56 @@
+title: The flash sale
+level: 3
+concepts: [hot rows, row locks, commit latency, job queues, taking writes off the request path, Little's law]
+minutes: 45
+
+# Available to Docker at --scale 1, Loadlore's own containers included:
+# 6.8 CPUs for the starting design and variants/smaller-pool, 7.8 for
+# solutions/queue-the-orders.
+# reference and speed: the machine the scenario was checked on and the
+# host speed index loadl run printed there; it warns on a much slower host.
+host:
+  cpus: 8
+  memory: 8g
+  reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
+  speed: 1002
+
+# Load generator VUs started before the load, at --scale 1, measured: the
+# larger of the peak rate x slo.p99_ms (1,500 x 0.5 s) and 1.5 x the most
+# VUs busy at once before a break in any of the check's runs (87).
+load:
+  prealloc_vus: 750
+  peak_vus: 87
+  from: flash-sale-smaller-pool-20261116-160309
+
+# What `loadl scenario check` verifies, at --scale 1.
+check:
+  problem:
+    verdict: broke
+    diagnoses: [hot-rows]
+  solutions:
+    # helps: holds, and every purchase is applied within two minutes.
+    queue-the-orders:
+      diagnoses: [consumer-lag]
+      expect: [orders.oldest_job_ms < 120s]
+  variants:
+    # Fewer connections, so fewer purchases wait on the row at once, but
+    # checkout still waits for the row: it breaks on hot rows all the same.
+    smaller-pool: { verdict: broke, diagnoses: [hot-rows] }
+
+# What `loadl predict` asks before a run; each answer becomes an expect
+# line in design.yaml. The load holds at 200 rps for a minute, climbs to
+# 1,500 over a minute, holds there for a minute, then drops back to 200.
+# The row takes about 500 purchases a second (a write takes 2.0 ms at low
+# load), which the load reaches at about 880 rps; the reference check broke
+# at 958, both the starting design and variants/smaller-pool.
+predict:
+  - ask: At what offered load, in requests per second, will checkout break? The load holds at 200 rps, then climbs to 1,500 over a minute and holds there. A rough guess is fine; answer never if you think it holds.
+    answer: rps
+    expect: break_load_rps within 25% of {answer}
+    never: break_load_rps none
+  - ask: How many purchases a second can the shoe's stock row take?
+    answer: text
+    expect: 'note: "purchases a second the stock row takes: {answer}"'
+  - ask: If each api replica kept only 4 connections to the database instead of 40, what would happen?
+    answer: text
+    expect: 'note: "4 connections per replica: {answer}"'
