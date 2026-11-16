@@ -213,3 +213,13 @@ func TestConsumerLagFailingJobs(t *testing.T) {
 		t.Errorf("with retries: %+v", d)
 	}
 }
+
+// Jobs a killed worker left, picked up again: the verdict says so.
+func TestReclaimedNote(t *testing.T) {
+	a := queueRun(50, 50, 0.4)
+	r := 0.5
+	a.Windows[7].Services["jobs"].Reclaimed = &r
+	if n := droppedNote(a); !strings.Contains(n, "5 jobs from jobs that a worker took and never finished") || !strings.Contains(n, "after 30 s idle") {
+		t.Errorf("note %q", n)
+	}
+}

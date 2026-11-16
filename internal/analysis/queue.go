@@ -399,7 +399,7 @@ func droppedNote(a *Analysis) string {
 	if a.Plan == nil {
 		return ""
 	}
-	var dropped, retried []string
+	var dropped, retried, stalled []string
 	for _, q := range a.Plan.Services {
 		if q.Kind != "queue" {
 			continue
@@ -410,7 +410,7 @@ func droppedNote(a *Analysis) string {
 				maxRetries = max(maxRetries, w.Consume.RetryMax)
 			}
 		}
-		failed, worst, again, dead, waiting := 0.0, 0.0, 0.0, 0.0, 0.0
+		failed, worst, again, dead, waiting, reclaimed := 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 		for _, w := range a.Windows {
 			sw := w.Services[q.Name]
 			if sw == nil {
@@ -429,6 +429,12 @@ func droppedNote(a *Analysis) string {
 			if sw.Retrying != nil {
 				waiting = *sw.Retrying
 			}
+			if sw.Reclaimed != nil {
+				reclaimed += *sw.Reclaimed * WindowSeconds
+			}
+		}
+		if reclaimed >= 1 {
+			stalled = append(stalled, fmt.Sprintf("%s jobs from %s", Count(reclaimed), q.Name))
 		}
 		if maxRetries == 0 {
 			if worst >= DroppedJobShare && failed >= 1 {
@@ -451,6 +457,9 @@ func droppedNote(a *Analysis) string {
 	out := ""
 	if len(retried) > 0 {
 		out += fmt.Sprintf(" Retries: %s.", strings.Join(retried, ". "))
+	}
+	if len(stalled) > 0 {
+		out += fmt.Sprintf(" %s that a worker took and never finished, as a killed worker leaves them, were picked up again after 30 s idle: their wait includes those 30 s.", strings.Join(stalled, " and "))
 	}
 	if len(dropped) > 0 {
 		out += fmt.Sprintf(" %s: this design's workers don't retry failed jobs (consume.retries), so real workers retrying them would have had a bigger backlog than this run shows.", strings.Join(dropped, "; "))

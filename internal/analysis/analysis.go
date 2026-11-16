@@ -207,6 +207,9 @@ type ServiceWindow struct {
 	Dead      *float64 `json:"dead,omitempty"`
 	DeadTotal *float64 `json:"dead_total,omitempty"`
 	Retrying  *float64 `json:"retrying,omitempty"`
+	// Reclaimed is jobs a second picked up again after a runner took them
+	// and never acknowledged them, as a killed worker leaves them.
+	Reclaimed *float64 `json:"reclaimed,omitempty"`
 
 	// Workers: jobs a second finished, the mean time one took, and the jobs
 	// running at once (peak and mean, summed over replicas).
@@ -1045,6 +1048,9 @@ func (b *builder) queue(sw *ServiceWindow, s *plan.Service, wa, wb float64) {
 	}
 	if n, ok := st.increase("loadlore_jobs_dead_total", q, wa, wb); ok {
 		sw.Dead = num(n/(wb-wa), true)
+	}
+	if n, ok := st.increase("loadlore_jobs_reclaimed_total", q, wa, wb); ok {
+		sw.Reclaimed = num(n/(wb-wa), true)
 	}
 	if n, ok := st.increase("loadlore_jobs_dead_total", q, 0, wb); ok {
 		sw.DeadTotal = num(n, true)

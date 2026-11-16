@@ -38,6 +38,14 @@ const (
 	deadKeep  = 10000
 )
 
+// A job a runner took and never acknowledged, as when its worker was
+// killed mid-job, is picked up again once idle for stalledAfter: BullMQ's
+// default stalled-job interval. Variables so tests can shorten them.
+var (
+	stalledAfter = 30 * time.Second
+	reclaimEvery = 5 * time.Second
+)
+
 // readBlock is how long a job runner waits for a job before asking again.
 const readBlock = 2 * time.Second
 
@@ -238,6 +246,16 @@ func jobBackoff(r *JobRetries, n int, rnd func() float64) time.Duration {
 	return time.Duration(float64(d) * (0.75 + 0.5*rnd()))
 }
 
+// claimStalled claims, for consumer, up to 20 of the group's pending jobs
+// idle for stalledAfter or more.
+func (c *queueClient) claimStalled(ctx context.Context, consumer string) ([]redis.XMessage, error) {
+	msgs, _, err := c.rdb.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+		Stream: c.stream, Group: c.group, Consumer: consumer,
+		MinIdle: stalledAfter, Start: "0-0", Count: 20,
+	}).Result()
+	return msgs, err
+}
+
 // enqueuedAt is when Redis added the entry: the milliseconds part of its ID.
 func enqueuedAt(id string) (time.Time, bool) {
 	ms, _, ok := strings.Cut(id, "-")
@@ -292,6 +310,7 @@ func (s *Service) RunWorker(ctx context.Context) error {
 	if c.Retries != nil {
 		wg.Go(func() { s.pollRetries(ctx, q) })
 	}
+	wg.Go(func() { s.reclaimStalled(ctx, q, fmt.Sprintf("%s-reclaim", c.Consumer)) })
 	for i := range c.Concurrency {
 		consumer := fmt.Sprintf("%s-%d", c.Consumer, i)
 		wg.Go(func() { s.runJobs(ctx, q, consumer) })
@@ -368,22 +387,59 @@ func (s *Service) runJobs(ctx context.Context, q *queueClient, consumer string) 
 				busyFrom = at
 			}
 		}
-		// A job runs to the end once taken, even as the worker stops.
-		jctx := context.WithoutCancel(ctx)
-		start := time.Now()
-		err = s.runJob(jctx, jobRequest(msg))
-		result := "ok"
+		s.process(ctx, q, msg, busyFrom)
+	}
+}
+
+// process runs a job taken from the queue, retries or buries it if it
+// failed, and acknowledges it.
+func (s *Service) process(ctx context.Context, q *queueClient, msg *redis.XMessage, busyFrom time.Time) {
+	// A job runs to the end once taken, even as the worker stops.
+	jctx := context.WithoutCancel(ctx)
+	start := time.Now()
+	err := s.runJob(jctx, jobRequest(msg))
+	result := "ok"
+	if err != nil {
+		result = "error"
+		s.m.jobErrors.WithLabelValues(q.name, Cause(err)).Inc()
+		s.failed(jctx, q, msg, jobRequest(msg))
+	}
+	s.m.jobDuration.WithLabelValues(q.name).Observe(time.Since(start).Seconds())
+	if derr := q.done(jctx, msg.ID); derr != nil {
+		s.m.jobReadErrors.WithLabelValues(q.name, Cause(queueErr(derr))).Inc()
+	}
+	s.m.jobs.WithLabelValues(q.name, result).Inc()
+	s.m.runnerBusy.Add(max(0, time.Since(busyFrom).Seconds()))
+}
+
+// reclaimStalled picks up jobs another job runner took and never
+// acknowledged, idle for stalledAfter or more: a worker killed mid-job
+// leaves them pending in the group, where no other runner would read
+// them. Each replica checks every reclaimEvery and runs what it claims,
+// one at a time, as BullMQ's stalled-job check does.
+func (s *Service) reclaimStalled(ctx context.Context, q *queueClient, consumer string) {
+	t := time.NewTicker(reclaimEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		msgs, err := q.claimStalled(ctx, consumer)
 		if err != nil {
-			result = "error"
-			s.m.jobErrors.WithLabelValues(q.name, Cause(err)).Inc()
-			s.failed(jctx, q, msg, jobRequest(msg))
+			if ctx.Err() == nil {
+				s.m.jobReadErrors.WithLabelValues(q.name, Cause(queueErr(err))).Inc()
+			}
+			continue
 		}
-		s.m.jobDuration.WithLabelValues(q.name).Observe(time.Since(start).Seconds())
-		if derr := q.done(jctx, msg.ID); derr != nil {
-			s.m.jobReadErrors.WithLabelValues(q.name, Cause(queueErr(derr))).Inc()
+		for i := range msgs {
+			if ctx.Err() != nil {
+				return
+			}
+			s.m.jobsReclaimed.WithLabelValues(q.name).Inc()
+			s.process(ctx, q, &msgs[i], time.Now())
 		}
-		s.m.jobs.WithLabelValues(q.name, result).Inc()
-		s.m.runnerBusy.Add(max(0, time.Since(busyFrom).Seconds()))
 	}
 }
 

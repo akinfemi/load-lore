@@ -528,6 +528,67 @@ func TestIntegrationQueueRetries(t *testing.T) {
 	}
 }
 
+// Jobs a killed worker took and never acknowledged are picked up again
+// once idle: a consumer takes 3 and stops, and the next worker runs them
+// along with the rest, leaving nothing pending.
+func TestIntegrationQueueReclaim(t *testing.T) {
+	defer func(after, every time.Duration) { stalledAfter, reclaimEvery = after, every }(stalledAfter, reclaimEvery)
+	stalledAfter, reclaimEvery = 300*time.Millisecond, 100*time.Millisecond
+	env := startPostgres(t)
+	addr := startRedis(t)
+	api := newService(t, &Config{
+		Service: "api", Resilience: Resilience{TimeoutMs: 5000},
+		Targets: map[string]Target{"jobs": queueTarget(addr, 2)},
+		Calls:   []Call{call("jobs", "publish")},
+	})
+	ctx := context.Background()
+	const n = 10
+	for i := range n {
+		if err := api.handle(ctx, request{typ: "write", key: int64(i + 1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q := api.clients["jobs"].(*queueClient)
+	if err := q.ensureGroup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The killed worker: it takes three jobs and never finishes them.
+	for range 3 {
+		if m, err := q.next(ctx, "killed-0"); err != nil || m == nil {
+			t.Fatalf("taking a job: %v %v", m, err)
+		}
+	}
+	w := newService(t, &Config{
+		Service: "sender", Role: RoleWorker, Resilience: Resilience{TimeoutMs: 5000},
+		Consume: &Consume{Target: "jobs", Concurrency: 2, Consumer: "sender-0"},
+		Targets: map[string]Target{"jobs": queueTarget(addr, 3), "db": pgTarget(env, 2)},
+		Calls:   []Call{call("db", "read")},
+	})
+	wctx, stop := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- w.RunWorker(wctx) }()
+	deadline := time.Now().Add(15 * time.Second)
+	for metricValue(t, w, "loadlore_jobs_total", map[string]string{"queue": "jobs", "result": "ok"}) < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("worker finished %v of %d jobs, reclaimed %v", metricValue(t, w, "loadlore_jobs_total", nil), n, metricValue(t, w, "loadlore_jobs_reclaimed_total", nil))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	stop()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := metricValue(t, w, "loadlore_jobs_reclaimed_total", map[string]string{"queue": "jobs"}); got != 3 {
+		t.Errorf("reclaimed %v, want 3", got)
+	}
+	if pending, err := q.rdb.XPending(ctx, "jobs", "workers").Result(); err != nil || pending.Count != 0 {
+		t.Errorf("pending %+v (%v), want none", pending, err)
+	}
+	if l, err := q.rdb.XLen(ctx, "jobs").Result(); err != nil || l != 0 {
+		t.Errorf("stream length %d (%v), want 0", l, err)
+	}
+}
+
 // A full queue refuses jobs, and the publish fails with queue_full: the
 // request fails with it.
 func TestIntegrationQueueFull(t *testing.T) {

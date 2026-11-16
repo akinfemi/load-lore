@@ -51,6 +51,7 @@ type metrics struct {
 	jobsRetried   *prometheus.CounterVec
 	jobsRequeued  *prometheus.CounterVec
 	jobsDead      *prometheus.CounterVec
+	jobsReclaimed *prometheus.CounterVec
 	retryPending  *prometheus.GaugeVec
 }
 
@@ -116,6 +117,7 @@ func newMetrics(cfg *Config, pools func() []poolSnapshot) *metrics {
 		m.jobsRunning = gauge("jobs_running", "Jobs a worker replica is running now.")
 		m.jobsRetried = counter("jobs_retried_total", "Failed jobs put in the queue's retry set, to go back on the queue after their wait.", "queue")
 		m.jobsRequeued = counter("jobs_requeued_total", "Retries moved from the retry set back onto the queue, once due: they count among the queue's added entries, but aren't new jobs.", "queue")
+		m.jobsReclaimed = counter("jobs_reclaimed_total", "Jobs another job runner took and never acknowledged, picked up again after 30 s idle: a worker killed mid-job leaves them.", "queue")
 		m.jobsDead = counter("jobs_dead_total", "Failed jobs given up on: out of retries (onto the dead list), or dropped by a worker without retries.", "queue")
 		rp := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: metricPrefix + "job_retries_pending", Help: "Jobs in the queue's retry set, waiting for their retry: the same set for every replica of the worker.", ConstLabels: labels}, []string{"queue"})
 		f(rp)
