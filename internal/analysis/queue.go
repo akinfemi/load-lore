@@ -174,6 +174,16 @@ func lagDiagnosis(a *Analysis, q *plan.Service, workers []*plan.Service, runners
 		case ww != nil && ww.RunningMean != nil && runners > 0 && *ww.RunningMean >= WorkerBusyShare*float64(runners):
 			why = fmt.Sprintf(" All %d of %s's job runners were busy, while its CPU stayed below its limit: each job spent most of its time waiting on its calls.", runners, wk.Name)
 			next = fmt.Sprintf("Raise %s's consume.concurrency, or add replicas, if what its jobs call has room for more at once; otherwise speed up those calls.%s", wk.Name, peak)
+			// A runner's cycle is taking the job, running it and
+			// acknowledging it: when running it was under half of that,
+			// the queue's own round trips set the pace.
+			if ww.Jobs != nil && *ww.Jobs > 0 && ww.JobMeanMs != nil {
+				cycle := *ww.RunningMean / *ww.Jobs * 1000
+				if *ww.JobMeanMs < 0.5*cycle {
+					why = fmt.Sprintf(" All %d of %s's job runners were busy, while its CPU stayed below its limit. A runner took %s per job, but ran each for only %s: the rest went on the queue's round trips, taking each job and acknowledging it, one job at a time per runner.", runners, wk.Name, Ms(cycle), Ms(*ww.JobMeanMs))
+					next = fmt.Sprintf("Raise %s's consume.concurrency, or add replicas: more runners make more round trips at once.%s", wk.Name, peak)
+				}
+			}
 		default:
 			next = fmt.Sprintf("Find what limits %s: its CPU, its job runners (consume.concurrency) or the calls its jobs make, and give it room for the peak.%s", wk.Name, peak)
 		}

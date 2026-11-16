@@ -162,3 +162,17 @@ func TestConsumerLagHotRows(t *testing.T) {
 		t.Errorf("without hot rows: %+v", d)
 	}
 }
+
+// Runners all busy but running each job for under half their cycle: the
+// queue's round trips set the pace, and the summary says so.
+func TestConsumerLagRoundTrips(t *testing.T) {
+	a := queueRun(190, 98, 0.5)
+	for _, w := range a.Windows[5:] {
+		mean := 30.0 // 10 runners finishing 98 jobs/s: about 102 ms a cycle
+		w.Services["sender"].JobMeanMs = &mean
+	}
+	d := consumerLag(a)
+	if len(d) != 1 || !strings.Contains(d[0].Summary, "A runner took 102 ms per job, but ran each for only 30 ms: the rest went on the queue's round trips") || !strings.Contains(d[0].Next, "more runners make more round trips at once") {
+		t.Fatalf("round trips: %+v", d)
+	}
+}

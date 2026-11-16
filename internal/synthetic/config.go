@@ -72,11 +72,11 @@ type Call struct {
 	// sends it to every shard at once and waits for all of them.
 	Shards  []string `json:"shards,omitempty"`
 	ShardBy string   `json:"shard_by,omitempty"`
-	Op     string `json:"op"` // read | write | get | set | del | publish | http
-	Count  int    `json:"count"`
-	When   string `json:"when"` // always | read | write
-	Mode   string `json:"mode"` // sync | async
-	OnMiss []Call `json:"on_miss,omitempty"`
+	Op      string   `json:"op"` // read | write | get | set | del | publish | http
+	Count   int      `json:"count"`
+	When    string   `json:"when"` // always | read | write
+	Mode    string   `json:"mode"` // sync | async
+	OnMiss  []Call   `json:"on_miss,omitempty"`
 	// Coalesce: concurrent misses for the same key wait for one on_miss run.
 	Coalesce bool   `json:"coalesce,omitempty"`
 	TTLS     int    `json:"ttl_s,omitempty"`

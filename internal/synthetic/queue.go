@@ -194,6 +194,7 @@ func (s *Service) RunWorker(ctx context.Context) error {
 
 func (s *Service) runJobs(ctx context.Context, q *queueClient, consumer string) {
 	for ctx.Err() == nil {
+		fetched := time.Now()
 		msg, err := q.next(ctx, consumer)
 		if err != nil {
 			if ctx.Err() == nil {
@@ -206,8 +207,14 @@ func (s *Service) runJobs(ctx context.Context, q *queueClient, consumer string) 
 		if msg == nil {
 			continue
 		}
+		// The runner is busy from when it asked for this job, or from when
+		// the job arrived if it had to wait for one, until it's acknowledged.
+		busyFrom := fetched
 		if at, ok := enqueuedAt(msg.ID); ok {
 			s.m.jobWait.WithLabelValues(q.name).Observe(max(0, time.Since(at).Seconds()))
+			if at.After(busyFrom) {
+				busyFrom = at
+			}
 		}
 		// A job runs to the end once taken, even as the worker stops.
 		jctx := context.WithoutCancel(ctx)
@@ -223,6 +230,7 @@ func (s *Service) runJobs(ctx context.Context, q *queueClient, consumer string) 
 			s.m.jobReadErrors.WithLabelValues(q.name, Cause(queueErr(derr))).Inc()
 		}
 		s.m.jobs.WithLabelValues(q.name, result).Inc()
+		s.m.runnerBusy.Add(max(0, time.Since(busyFrom).Seconds()))
 	}
 }
 

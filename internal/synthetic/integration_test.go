@@ -446,6 +446,13 @@ func TestIntegrationQueue(t *testing.T) {
 	if got := metricValue(t, w, "loadlore_job_wait_seconds", map[string]string{"queue": "jobs"}); got != n {
 		t.Errorf("job waits observed: %v, want %d", got, n)
 	}
+	// Busy time covers the queue's round trips as well as the jobs, and
+	// never the waits for a job to arrive.
+	busy := metricValue(t, w, "loadlore_job_runner_busy_seconds_total", nil)
+	running := metricValue(t, w, "loadlore_job_duration_seconds", nil) // the count; the sum is below
+	if sum := histogramSum(t, w, "loadlore_job_duration_seconds", nil); busy < sum || busy <= 0 || running != n {
+		t.Errorf("runner busy %.4f s against %.4f s in jobs (%v jobs)", busy, sum, running)
+	}
 	q := w.clients["jobs"].(*queueClient)
 	if l, err := q.rdb.XLen(ctx, "jobs").Result(); err != nil || l != 0 {
 		t.Errorf("stream length %d (%v), want 0", l, err)

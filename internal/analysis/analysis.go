@@ -1056,6 +1056,13 @@ func (b *builder) worker(sw *ServiceWindow, s *plan.Service, wa, wb float64) {
 	if mx, mean, ok := st.gaugeSum("loadlore_jobs_running", svc, wa, wb); ok {
 		sw.Running, sw.RunningMean = num(mx, true), num(mean, true)
 	}
+	// Busy runners from the time they spent taking, running and
+	// acknowledging jobs: the running gauge leaves out the queue's round
+	// trips, which with fast jobs are most of a runner's cycle. Runs from
+	// before the counter keep the gauge's mean.
+	if busy, ok := st.increase("loadlore_job_runner_busy_seconds_total", svc, wa, wb); ok {
+		sw.RunningMean = num(busy/(wb-wa), true)
+	}
 }
 
 // Metric sources, cited wherever a number appears.
@@ -1097,7 +1104,7 @@ const (
 	SrcJobs             = "loadlore_jobs_total (the workers' finished jobs, by result)"
 	SrcJobWait          = "loadlore_job_wait_seconds (the workers' histogram: publish to start)"
 	SrcJobDuration      = "loadlore_job_duration_seconds (the workers' histogram: time to run a job)"
-	SrcJobsRunning      = "loadlore_jobs_running (summed over the worker's replicas)"
+	SrcJobsRunning      = "loadlore_job_runner_busy_seconds_total, or loadlore_jobs_running in runs from before it (summed over the worker's replicas)"
 	SrcQueueMemory      = "redis_memory_used_bytes ÷ redis_memory_max_bytes (redis_exporter)"
 	SrcPublishErrors    = `loadlore_call_errors_total{op="publish"} (the publishers' failed publishes, by cause)`
 	SrcLBRequests       = "haproxy_backend_http_requests_total (HAProxy)"

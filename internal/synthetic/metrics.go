@@ -47,6 +47,7 @@ type metrics struct {
 	jobWait       *prometheus.HistogramVec // queue
 	jobDuration   *prometheus.HistogramVec // queue
 	jobsRunning   prometheus.Gauge
+	runnerBusy    prometheus.Counter
 }
 
 // jobWaitBuckets reach further than latencyBuckets: a backed-up queue
@@ -109,6 +110,7 @@ func newMetrics(cfg *Config, pools func() []poolSnapshot) *metrics {
 		m.jobWait = hist("job_wait_seconds", "Time from a job's publish to a worker taking it: its wait in the queue.", jobWaitBuckets, "queue")
 		m.jobDuration = hist("job_duration_seconds", "Time a worker spent running each job, its calls included.", latencyBuckets, "queue")
 		m.jobsRunning = gauge("jobs_running", "Jobs a worker replica is running now.")
+		m.runnerBusy = counter("job_runner_busy_seconds_total", "Seconds the worker's job runners spent on jobs, summed over its runners: taking each job from the queue, running it and acknowledging it. Time spent waiting for a job to arrive isn't counted.").WithLabelValues()
 	}
 	f(&poolCollector{labels: labels, snapshots: pools})
 	return m
