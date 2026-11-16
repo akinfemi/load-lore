@@ -47,6 +47,7 @@ Scenarios are guided experiments: a starting design that breaks, a story, questi
 | [Featured on Hacker News](../scenarios/featured-on-hacker-news/) | 2 | autoscaling, scale-up lag, the metric it scales on, headroom |
 | [The backed-up queue](../scenarios/backed-up-queue/) | 3 | job queues and workers, consumer lag, Little's law for workers, what a buffer absorbs |
 | [The flash sale](../scenarios/flash-sale/) | 3 | hot rows under slow commits, taking writes off the request path with a queue, why fewer connections don't help |
+| [The viral post](../scenarios/viral-post/) | 3 | sharding by key, a hot key on one shard, why more shards buy little, caching popular reads |
 | [Statement day](../scenarios/statement-day/) | 2 | the buffer cache, working sets, a cloud disk's IOPS limit |
 | [The slow disk](../scenarios/slow-disk/) | 3 | fsync and commit latency, connection pools, group commit, `synchronous_commit` |
 | [Stale orders](../scenarios/stale-orders/) | 3 | read replicas, replication lag, read-your-writes |

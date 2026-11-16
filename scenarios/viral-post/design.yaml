@@ -1,0 +1,65 @@
+version: 1
+name: viral-post
+
+# The posts api of a social app. The posts table outgrew one database, so
+# it is split across two Postgres shards by post id; a post's comments and
+# counts live on its shard. Each post page reads seven rows from it. Tonight
+# a celebrity's post goes viral: six page views in ten are of that one post.
+
+services:
+  lb:
+    kind: lb
+    target: api
+    resources: { cpu: 0.4, memory: 256m }
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
+  api:
+    image: loadlore/synthetic
+    replicas: 2
+    resources: { cpu: 0.75, memory: 512m }
+    behavior:
+      cpu_ms: 0.05
+      calls:
+        # A post page: the post, its author, its counts and the top
+        # comments, seven rows read from the post's shard.
+        - { shards: [db0, db1], op: read, count: 7 }
+      resilience:
+        timeout_ms: 2000
+    pools:
+      db0: { size: 20, min: 20 }   # opened at start, per replica
+      db1: { size: 20, min: 20 }
+
+  db0:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 0.4, memory: 1g }
+    config: { shared_buffers: 256MB }
+    dataset: { rows: 500000, row_bytes: 512 }   # half of the million posts
+    disk: { profile: gp3 }
+  db1:
+    kind: postgres
+    version: "17"
+    resources: { cpu: 0.4, memory: 1g }
+    config: { shared_buffers: 256MB }
+    dataset: { rows: 500000, row_bytes: 512 }
+    disk: { profile: gp3 }
+
+workload:
+  entry: lb
+  mix: { read: 1, write: 0 }
+  # One post in a million takes six page views in ten.
+  keys: { distribution: hotspot, share: 0.6, fraction: 0.000001, count: 1000000 }
+  profile:
+    - ramp: { from: 200, to: 2900, over: 3m }   # the post spreads
+    - hold: { rps: 2900, for: 2m }
+
+assumptions:
+  - { field: services.api.behavior.cpu_ms, basis: guessed, why: "a thin handler: the page is mostly its reads" }
+  - { field: services.api.behavior.calls, basis: guessed, why: "a post page reads the post, its author, its counts and four top comments" }
+  - { field: workload.keys, basis: guessed, why: "a celebrity's post going viral: six views in ten are of it. No published figure; the hints and the variant's README show how the answer moves with this share" }
+  - { field: workload.mix, basis: guessed, why: "page views only; likes and comments are left out to keep one lesson" }
+
+# Your predictions, scored in the report. The line here is an example;
+# loadl predict design.yaml replaces it with your answers.
+expect:
+  - p99_ms < 100 until load_rps >= 1000

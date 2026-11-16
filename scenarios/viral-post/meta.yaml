@@ -1,0 +1,68 @@
+title: The viral post
+level: 3
+concepts: [sharding, hot keys, hot shards, caching popular reads]
+minutes: 45
+
+# Available to Docker at --scale 1, Loadlore's own containers included:
+# 7.1 CPUs for the starting design, 7.6 for variants/one-more-shard, 7.9
+# for solutions/cache-the-posts.
+# reference and speed: the machine the scenario was checked on and the
+# host speed index loadl run printed there; it warns on a much slower host.
+host:
+  cpus: 8
+  memory: 8g
+  reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
+  speed: 986
+
+# Load generator VUs started before the load, at --scale 1, measured: the
+# larger of the peak rate x slo.p99_ms (2,900 x 0.5 s) and 1.5 x the most
+# VUs busy at once before a break in any of the check's runs (397).
+load:
+  prealloc_vus: 1450
+  peak_vus: 397
+  from: viral-post-one-more-shard-20261116-214715
+
+# What `loadl scenario check` verifies, at --scale 1.
+check:
+  problem:
+    verdict: broke
+    diagnoses: [hot-shard]
+  solutions:
+    # helps: holds the ramp and the two minutes at its peak.
+    cache-the-posts: {}
+  variants:
+    # A third shard spreads the other posts thinner and leaves the viral
+    # one where it was: it still breaks on that shard.
+    one-more-shard: { verdict: broke, diagnoses: [hot-shard] }
+
+# What `loadl predict` asks before a run; each answer becomes an expect
+# line. The scored question is the relative one: whether a third shard
+# takes the traffic. Its answer goes into variants/one-more-shard, the
+# design with that change, and that run scores it.
+#
+# The result follows from the hot post's share s of the reads: with n
+# shards its shard takes s + (1 - s)/n of them, so from two shards more
+# shards can move the break by at most (s + (1 - s)/2) / s, 1.33x at
+# s = 0.6, and a third by (s + (1 - s)/2) / (s + (1 - s)/3), 1.09x. The
+# share is a guess, so the check was also run at other shares (16 Nov,
+# reference machine, the scenario's earlier sizing at 3,400 rps): at 0.45
+# three shards still ran the hot shard out of CPU near the peak (that run
+# came out inconclusive on a Toxiproxy stall), and at 0.3 they held. The
+# variant's README says so: the lesson is the limit, not that a shard never
+# helps.
+predict:
+  - ask: Which component gives out first?
+    answer: service
+    expect: 'note: "{answer} gives out first"'
+  - ask: How busy is the other shard's CPU when it does?
+    answer: text
+    expect: 'note: "the other shard when it gives out: {answer}"'
+  - ask: Would a third shard take the traffic without breaking? Answer yes or no. Your answer goes into variants/one-more-shard/design.yaml, this design with a third shard, and its run scores it.
+    answer: yesno
+    design: variants/one-more-shard/design.yaml
+    expect: break_load_rps none
+    no: break_load_rps any
+  - ask: At what offered load, in requests per second, will this design break? The load climbs from 200 to 2,900 rps, then holds there for two minutes. A rough guess is fine; answer never if you think it holds.
+    answer: rps
+    expect: break_load_rps within 25% of {answer}
+    never: break_load_rps none
