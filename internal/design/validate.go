@@ -1186,7 +1186,7 @@ func (v *validator) autoscale(name, p string, s *Service) {
 	}
 	switch {
 	case a.Target == nil:
-		v.errorf(pathKey(ap, "target"), CodeRequired, "autoscale on %s needs a target: %s", a.Metric, map[string]string{"p99": "the p99 in milliseconds to hold, such as 200", "inflight": "the requests in flight per replica to hold, such as 20"}[a.Metric])
+		v.errorf(pathKey(ap, "target"), CodeRequired, "autoscale on %s needs a target: %s", a.Metric, map[string]string{"p99": "the p99 in milliseconds to hold, such as 200", "inflight": "the requests in flight per replica to hold, such as 20", "queue_depth": "the jobs in the queue per replica to hold, such as 100"}[a.Metric])
 	case *a.Target <= 0:
 		v.errorf(pathKey(ap, "target"), CodeRange, "target must be above 0")
 	case a.Metric == "cpu" && *a.Target > 1:
@@ -1203,6 +1203,16 @@ func (v *validator) autoscale(name, p string, s *Service) {
 	}
 	if a.ScaleDownCooldownS != nil && *a.ScaleDownCooldownS < 0 {
 		v.errorf(pathKey(ap, "scale_down_cooldown_s"), CodeRange, "scale_down_cooldown_s can't be negative")
+	}
+	// A worker takes its share of the queue as soon as it starts: no lb.
+	if s.Role == "worker" {
+		if a.Metric != "cpu" && a.Metric != "queue_depth" {
+			v.errorf(pathKey(ap, "metric"), CodeNotApplicable, "a worker serves no requests, so it scales on cpu or queue_depth, not %s", a.Metric)
+		}
+		return
+	}
+	if a.Metric == "queue_depth" {
+		v.errorf(pathKey(ap, "metric"), CodeNotApplicable, "queue_depth is for workers (role: worker), which take the queue's jobs; a server scales on cpu, p99 or inflight")
 	}
 	fronted := false
 	for _, other := range v.d.Services {
@@ -1267,9 +1277,6 @@ func (v *validator) worker(p string, s *Service) {
 	}
 	if s.Concurrency != nil && s.Concurrency.Max != nil {
 		v.errorf(pathKey(p, "concurrency.max"), CodeNotApplicable, "a worker runs consume.concurrency jobs at once; set that instead")
-	}
-	if s.Autoscale != nil {
-		v.errorf(pathKey(p, "autoscale"), CodeNotApplicable, "workers can't autoscale yet: autoscaling adds replicas behind an lb")
 	}
 	if !s.IsSynthetic() {
 		v.errorf(pathKey(p, "role"), CodeNotApplicable, "role: worker needs %s, which takes the jobs from the queue and runs behavior for each", SyntheticImage)

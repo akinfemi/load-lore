@@ -41,12 +41,16 @@ func autoscale(ctx context.Context, t0 time.Time, p *plan.Plan, drv driver.Drive
 		if s.Autoscale == nil {
 			continue
 		}
-		wg.Go(func() { autoscaleOne(ctx, t0, s.Name, s.Autoscale, drv, dir, out) })
+		took := "took traffic"
+		if s.Role == "worker" {
+			took = "started taking jobs"
+		}
+		wg.Go(func() { autoscaleOne(ctx, t0, s.Name, took, s.Autoscale, drv, dir, out) })
 	}
 	wg.Wait()
 }
 
-func autoscaleOne(ctx context.Context, t0 time.Time, service string, a *plan.Autoscale, drv driver.Driver, dir *rundir.Dir, out io.Writer) {
+func autoscaleOne(ctx context.Context, t0 time.Time, service, took string, a *plan.Autoscale, drv driver.Driver, dir *rundir.Dir, out io.Writer) {
 	interval := time.Duration(a.IntervalS) * time.Second
 	var mu sync.Mutex
 	asked, ready := a.Start, a.Start // replicas asked for, and taking traffic
@@ -69,6 +73,9 @@ func autoscaleOne(ctx context.Context, t0 time.Time, service string, a *plan.Aut
 		mu.Lock()
 		cur, have, down := asked, ready, scalingDown
 		mu.Unlock()
+		if a.Metric == "queue_depth" {
+			v /= float64(max(1, have)) // the queue's jobs, per replica taking them
+		}
 		want := desiredReplicas(have, v, a)
 		since := time.Since(last)
 		switch {
@@ -78,7 +85,7 @@ func autoscaleOne(ctx context.Context, t0 time.Time, service string, a *plan.Aut
 			continue
 		}
 		_ = dir.Event("autoscale", map[string]any{"service": service, "at_s": time.Since(t0).Seconds(), "from": cur, "to": want, "ready": have, "metric": a.Metric, "value": v, "target": a.Target})
-		fmt.Fprintf(out, "[%s] autoscale: %s %d → %d replicas (%s %s over %d taking traffic, target %s)\n", clock(time.Since(t0)), service, cur, want, a.Metric, metricText(a.Metric, v), have, metricText(a.Metric, a.Target))
+		fmt.Fprintf(out, "[%s] autoscale: %s %d → %d replicas (%s %s over %d running, target %s)\n", clock(time.Since(t0)), service, cur, want, a.Metric, metricText(a.Metric, v), have, metricText(a.Metric, a.Target))
 		last = time.Now()
 		mu.Lock()
 		asked = want
@@ -86,11 +93,11 @@ func autoscaleOne(ctx context.Context, t0 time.Time, service string, a *plan.Aut
 			scalingDown = true
 		}
 		mu.Unlock()
-		onReady := func(c string, took time.Duration) {
+		onReady := func(c string, after time.Duration) {
 			mu.Lock()
 			ready++
 			mu.Unlock()
-			fmt.Fprintf(out, "[%s] autoscale: %s took traffic %s after the decision\n", clock(time.Since(t0)), c, took.Round(100*time.Millisecond))
+			fmt.Fprintf(out, "[%s] autoscale: %s %s %s after the decision\n", clock(time.Since(t0)), c, took, after.Round(100*time.Millisecond))
 		}
 		bg.Go(func() {
 			err := drv.Scale(ctx, service, want, onReady)
@@ -119,6 +126,8 @@ func metricText(metric string, v float64) string {
 		return fmt.Sprintf("%.0f%%", v*100)
 	case "p99":
 		return fmt.Sprintf("%.0f ms", v)
+	case "queue_depth":
+		return fmt.Sprintf("%.0f jobs a replica", v)
 	}
 	return fmt.Sprintf("%.1f in flight", v)
 }

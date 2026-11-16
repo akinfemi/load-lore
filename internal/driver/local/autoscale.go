@@ -41,6 +41,14 @@ func (d *Driver) Metric(ctx context.Context, service, metric string, window time
 		q = fmt.Sprintf(`histogram_quantile(0.99, sum by (le) (rate(loadlore_request_duration_seconds_bucket{service=%q}[%s]))) * 1000`, service, w)
 	case "inflight":
 		q = fmt.Sprintf(`avg(avg_over_time(loadlore_requests_inflight{service=%q}[%s]))`, service, w)
+	case "queue_depth":
+		// The whole queue's jobs, waiting or running; the autoscaler divides
+		// by the replicas taking them.
+		s := d.plan.Service(service)
+		if s == nil || s.Consume == nil {
+			return 0, false, fmt.Errorf("%s isn't a worker", service)
+		}
+		q = fmt.Sprintf(`max(avg_over_time(redis_stream_length{service=%q,stream=%q}[%s]))`, s.Consume.Queue, s.Consume.Queue, w)
 	default:
 		return 0, false, fmt.Errorf("no autoscale metric %q", metric)
 	}

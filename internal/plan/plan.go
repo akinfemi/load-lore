@@ -1613,6 +1613,8 @@ func (p *Plan) assumeAutoscale(name string, ds *design.Service) {
 		target = fmt.Sprintf("p99 %g ms", a.Target)
 	case "inflight":
 		target = fmt.Sprintf("%g requests in flight per replica", a.Target)
+	case "queue_depth":
+		target = fmt.Sprintf("%g jobs in %s per replica", a.Target, s.Consume.Queue)
 	}
 	p.Assumptions = append(p.Assumptions, Assumption{
 		Field: "services." + name + ".autoscale",
