@@ -396,7 +396,7 @@ func Analyze(dir string) (*Analysis, error) {
 		a.PeakVUsAll = maxPtr(a.PeakVUsAll, w.VUs)
 	}
 	a.Diagnoses = diagnose(a)
-	a.Verdict.Summary += staleNote(a) + queueNote(a)
+	a.Verdict.Summary += staleNote(a) + queueNote(a) + droppedNote(a)
 	a.Expect = scoreAll(a, a.Windows)
 	a.Windows = all
 	return a, nil

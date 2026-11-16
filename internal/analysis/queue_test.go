@@ -97,3 +97,32 @@ func TestQueueNote(t *testing.T) {
 		t.Errorf("note on a broken run: %q", n)
 	}
 }
+
+// Failed jobs are dropped, not retried, and the verdict says so.
+func TestDroppedNote(t *testing.T) {
+	a := queueRun(50, 50, 0.4)
+	if n := droppedNote(a); n != "" {
+		t.Errorf("note without failures: %q", n)
+	}
+	rate, none := 0.2, 0.0
+	for i, w := range a.Windows {
+		if i >= 6 && i < 9 {
+			w.Services["jobs"].JobErrorRate = &rate
+		} else {
+			w.Services["jobs"].JobErrorRate = &none
+		}
+	}
+	// Three windows of 50 jobs a second, a fifth of them failing: 300.
+	n := droppedNote(a)
+	if !strings.Contains(n, "300 jobs from jobs failed (up to 20% of a window's jobs) and were dropped") || !strings.Contains(n, "doesn't retry failed jobs yet") {
+		t.Errorf("note %q", n)
+	}
+	// A trickle under the bar stays quiet.
+	small := 0.005
+	for _, w := range a.Windows {
+		w.Services["jobs"].JobErrorRate = &small
+	}
+	if n := droppedNote(a); n != "" {
+		t.Errorf("note under the bar: %q", n)
+	}
+}

@@ -329,3 +329,41 @@ func queueNote(a *Analysis) string {
 	}
 	return ""
 }
+
+// DroppedJobShare is the share of a window's finished jobs that failed
+// from which droppedNote speaks up.
+const DroppedJobShare = 0.01
+
+// droppedNote is the verdict's word on failed jobs: a worker drops a job
+// whose calls fail, where real job systems retry it (Sidekiq up to 25
+// times), so the jobs would have come back and the queue would have held
+// more than this run shows. Empty when no window had DroppedJobShare of
+// its jobs fail.
+func droppedNote(a *Analysis) string {
+	if a.Plan == nil {
+		return ""
+	}
+	var notes []string
+	for _, q := range a.Plan.Services {
+		if q.Kind != "queue" {
+			continue
+		}
+		failed, worst := 0.0, 0.0
+		for _, w := range a.Windows {
+			sw := w.Services[q.Name]
+			if sw == nil || sw.Finished == nil || sw.JobErrorRate == nil {
+				continue
+			}
+			failed += *sw.Finished * *sw.JobErrorRate * WindowSeconds
+			worst = math.Max(worst, *sw.JobErrorRate)
+		}
+		if worst < DroppedJobShare || failed < 1 {
+			continue
+		}
+		notes = append(notes, fmt.Sprintf("%s jobs from %s failed (up to %s of a window's jobs) and were dropped", Count(failed), q.Name, Pct(worst)))
+	}
+	if len(notes) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" %s: Loadlore doesn't retry failed jobs yet, so real workers retrying them would have had a bigger backlog than this run shows.", strings.Join(notes, "; "))
+}
