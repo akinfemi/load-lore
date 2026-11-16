@@ -37,6 +37,7 @@ workload:
   entry: lb
   profile:
     - ramp: { from: 200, to: 4500, over: 4m }
+    - hold: { rps: 4500, for: 1m }  # the vote stays open at its peak
   mix: { read: 0.2, write: 0.8 }
   keys: { distribution: hotspot, share: 0.9, fraction: 0.1, count: 10 }
 

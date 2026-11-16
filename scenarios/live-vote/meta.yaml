@@ -11,15 +11,15 @@ host:
   cpus: 8
   memory: 8g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 1021
+  speed: 1031
 
 # Load generator VUs started before the load, at --scale 1, measured: the
 # larger of the peak rate x slo.p99_ms (4,500 x 0.5 s) and 1.5 x the most
-# VUs busy at once before a break in any of the check's runs (49).
+# VUs busy at once before a break in any of the check's runs (44).
 load:
   prealloc_vus: 2250
-  peak_vus: 49
-  from: live-vote-bigger-db-20261114-150548
+  peak_vus: 44
+  from: live-vote-bigger-db-20261116-094822
 
 # What `loadl scenario check` verifies, at --scale 1.
 check:
@@ -27,7 +27,7 @@ check:
     verdict: broke
     diagnoses: [hot-rows]
   solutions:
-    # helps: holds the whole ramp.
+    # helps: holds the whole ramp and the minute at its peak.
     redis-tally: {}
   variants:
     # The database's CPU went on the contention: twice of it still breaks
@@ -36,9 +36,14 @@ check:
 
 # What `loadl predict` asks before a run; each answer becomes an expect
 # line in design.yaml. A load guess scores right within 25%, too high or
-# too low both count as wrong. The load ramps from 200 to 4,500 rps.
+# too low both count as wrong. The load ramps from 200 to 4,500 rps over
+# 4 minutes, then holds 4,500 for a minute. The hold is there so a late
+# break counts: hot rows tip over at a load that moves from run to run
+# (2:50 to 3:50 into the ramp over three checks on the reference machine,
+# 3:10 to 3:50 for bigger-db), and a design that gave out in the ramp's
+# last window was only a stall, so the check came out inconclusive.
 predict:
-  - ask: At what offered load, in requests per second, will it break? The ramp goes from 200 to 4,500 rps. A rough guess is fine; answer never if you think it holds.
+  - ask: At what offered load, in requests per second, will it break? The load ramps from 200 to 4,500 rps, then holds there for a minute. A rough guess is fine; answer never if you think it holds.
     answer: rps
     expect: break_load_rps within 25% of {answer}
     never: break_load_rps none

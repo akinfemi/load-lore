@@ -1,33 +1,33 @@
 # live-vote-redis-tally: run report
 
-_run `live-vote-redis-tally-20261114-150111` · completed · 14 Nov 2026 15:01 UTC · scale 1 · seed 1_
+_run `live-vote-redis-tally-20261116-094220` · completed · 16 Nov 2026 09:43 UTC · scale 1 · seed 1_
 
 ## Verdict
 
-**Held.** Held the whole profile: up to 4,500 rps offered, 4,407 rps served at best, worst 10-second p99 5.2 ms, at most 0% errors.
+**Held.** Held the whole profile: up to 4,500 rps offered, 4,500 rps served at best, worst 10-second p99 2.4 ms, at most 0% errors.
 
 <sub>Sources: offered load: the load profile in plan.json (offered arrival rate); served: k6_http_reqs_total{expected_response="true"} (k6: successful responses); p99: k6_http_req_duration_seconds (k6 histogram, end to end); errors: k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6). Windows are 10 seconds; what counts as broken is under [Thresholds](#thresholds).</sub>
 
-## Diagram at 3:50
+## Diagram at 4:30
 
-Measured in the 10-second window from 3:50 to 4:00 (the busiest window: the most successful responses). Nodes are colored by their most saturated resource, CPU against its limit or a connection pool's connections in use: red at 90% or more, amber from 70%, green below.
+Measured in the 10-second window from 4:30 to 4:40 (the busiest window: the most successful responses). Nodes are colored by their most saturated resource, CPU against its limit or a connection pool's connections in use: red at 90% or more, amber from 70%, green below.
 
 ```mermaid
 flowchart LR
-    load(["load<br/>up to 4,500 rps<br/>offered 4,410 rps"])
-    lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m<br/>CPU 48%<br/>2/2 replicas up"}}
-    api["api ×2<br/>1 CPU · 512m<br/>CPU 89%<br/>in flight 4"]
-    db[("db<br/>postgres 17<br/>1 CPU · 1g<br/>CPU 6.1%<br/>conns 81/100")]
-    tally[("tally<br/>redis 8<br/>0.5 CPU · 256m<br/>CPU 15%")]
-    load -->|"20% read · 80% write<br/>4,407 rps · p99 2.7 ms"| lb
-    lb -->|"round-robin<br/>checks every 2s, out after 3<br/>4,362 rps · p99 1.5 ms"| api
-    api -->|"read on reads<br/>pool 40, min 40<br/>865 calls/s · p99 1.1 ms<br/>in use 1/80, 1 waiting"| db
-    api -->|"set on writes<br/>pool 40<br/>3,520 calls/s · p99 0.9 ms<br/>in use 2/80"| tally
+    load(["load<br/>up to 4,500 rps<br/>offered 4,500 rps"])
+    lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m<br/>CPU 44%<br/>2/2 replicas up"}}
+    api["api ×2<br/>1 CPU · 512m<br/>CPU 91%<br/>in flight 3"]
+    db[("db<br/>postgres 17<br/>1 CPU · 1g<br/>CPU 5.6%<br/>conns 81/100")]
+    tally[("tally<br/>redis 8<br/>0.5 CPU · 256m<br/>CPU 14%")]
+    load -->|"20% read · 80% write<br/>4,500 rps · p99 2.0 ms"| lb
+    lb -->|"round-robin<br/>checks every 2s, out after 3<br/>4,500 rps · p99 1.0 ms"| api
+    api -->|"read on reads<br/>pool 40, min 40<br/>901 calls/s · p99 0.8 ms<br/>in use 2/80"| db
+    api -->|"set on writes<br/>pool 40<br/>3,598 calls/s · p99 0.6 ms<br/>in use 3/80"| tally
     classDef ok fill:#d4edda,stroke:#28a745,color:#000
     classDef warm fill:#fff3cd,stroke:#d39e00,color:#000
     classDef hot fill:#f8d7da,stroke:#dc3545,color:#000
     class lb,db,tally ok
-    class api warm
+    class api hot
 ```
 
 <sub>Sources: offered from the load profile in plan.json (offered arrival rate); load edge from k6_http_reqs_total (k6: all responses) and k6_http_req_duration_seconds (k6 histogram, end to end); CPU from container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit; calls/s from loadlore_calls_total (the caller's outbound call attempts) and their p99 from loadlore_call_duration_seconds (the caller's histogram, pool wait included); pools from loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections and loadlore_pool_pending (callers waiting for a connection); lb traffic from haproxy_backend_http_requests_total (HAProxy), replicas up from haproxy_backend_active_servers (HAProxy), and the lb edge's p99 from loadlore_request_duration_seconds (the service's own histogram); conns from pg_stat_activity_count and pg_settings_max_connections (postgres_exporter); hit rate from redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter).</sub>
@@ -46,10 +46,10 @@ config:
 ---
 xychart-beta
     title "Throughput"
-    x-axis "seconds" 0 --> 230
+    x-axis "seconds" 0 --> 290
     y-axis "requests/s" 0 --> 5000
-    line [289.583, 468.75, 647.917, 827.083, 1006.25, 1185.417, 1364.583, 1543.75, 1722.917, 1902.083, 2081.25, 2260.417, 2439.583, 2618.75, 2797.917, 2977.083, 3156.25, 3335.417, 3514.583, 3693.75, 3872.917, 4052.083, 4231.25, 4410.417]
-    line [282.229, 464.928, 644.224, 823.662, 1002.397, 1181.704, 1361.004, 1540.194, 1719.317, 1898.34, 2077.716, 2256.754, 2435.958, 2615.093, 2794.518, 2973.335, 3152.371, 3331.984, 3510.612, 3690.409, 3869.304, 4048.466, 4227.299, 4407.07]
+    line [289.583, 468.75, 647.917, 827.083, 1006.25, 1185.417, 1364.583, 1543.75, 1722.917, 1902.083, 2081.25, 2260.417, 2439.583, 2618.75, 2797.917, 2977.083, 3156.25, 3335.417, 3514.583, 3693.75, 3872.917, 4052.083, 4231.25, 4410.417, 4500, 4500, 4500, 4500, 4500, 4500]
+    line [276.832, 462.743, 641.767, 821.026, 1000.186, 1179.276, 1358.479, 1537.791, 1716.753, 1896.177, 2074.966, 2254.299, 2433.559, 2612.642, 2791.857, 2971.049, 3150.121, 3364.019, 3510.503, 3689.321, 3868.776, 4047.453, 4225.668, 4407.825, 4500.004, 4499.998, 4499.818, 4500.405, 4499.687, 4499.901]
 ```
 
 <sub>Grey: offered load (the load profile in plan.json (offered arrival rate)). Blue: successful responses (k6_http_reqs_total{expected_response="true"} (k6: successful responses)).</sub>
@@ -64,11 +64,11 @@ config:
 ---
 xychart-beta
     title "Latency, end to end"
-    x-axis "seconds" 0 --> 230
-    y-axis "ms" 0 --> 6
-    line [0.961, 0.642, 0.594, 0.595, 0.596, 0.595, 0.583, 0.579, 0.576, 0.576, 0.575, 0.576, 0.576, 0.577, 0.579, 0.581, 0.582, 0.584, 0.593, 0.595, 0.601, 0.606, 0.625, 0.661]
-    line [1.639, 0.893, 0.696, 0.69, 0.699, 0.797, 0.688, 0.689, 0.695, 0.689, 0.688, 0.718, 0.726, 0.73, 0.743, 0.744, 0.751, 0.774, 0.809, 0.815, 0.871, 0.917, 1.234, 1.226]
-    line [2.44, 1.214, 1.081, 1.132, 1.142, 1.336, 1.048, 0.936, 1.041, 0.964, 1.052, 1.252, 0.991, 1.142, 1.052, 1.112, 1.14, 1.093, 1.183, 1.257, 1.415, 1.817, 5.175, 2.652]
+    x-axis "seconds" 0 --> 290
+    y-axis "ms" 0 --> 3
+    line [0.883, 0.647, 0.602, 0.6, 0.599, 0.597, 0.598, 0.589, 0.581, 0.579, 0.578, 0.576, 0.577, 0.578, 0.581, 0.584, 0.584, 0.588, 0.593, 0.598, 0.603, 0.602, 0.605, 0.616, 0.62, 0.623, 0.623, 0.622, 0.629, 0.631]
+    line [1.344, 0.884, 0.707, 0.711, 0.714, 0.721, 0.723, 0.707, 0.688, 0.702, 0.69, 0.721, 0.745, 0.715, 0.739, 0.795, 0.767, 0.796, 0.822, 0.847, 0.876, 0.874, 0.879, 0.981, 0.929, 0.993, 0.996, 0.966, 0.997, 1.007]
+    line [2.034, 1.247, 1.021, 1.202, 1.069, 1.13, 1.034, 1.024, 0.95, 1.057, 0.976, 1.164, 1.101, 1.054, 1.195, 1.359, 1.309, 1.298, 1.413, 1.339, 1.421, 1.58, 1.49, 1.981, 1.429, 1.959, 2.191, 1.952, 2.407, 2.039]
 ```
 
 <sub>Green: p50. Orange: p95. Red: p99 (k6_http_req_duration_seconds (k6 histogram, end to end)).</sub>
@@ -83,9 +83,9 @@ config:
 ---
 xychart-beta
     title "Errors"
-    x-axis "seconds" 0 --> 230
+    x-axis "seconds" 0 --> 290
     y-axis "% of requests" 0 --> 1
-    line [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    line [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 ```
 
 <sub>Failed requests as a share of all responses (k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6)), timeouts included.</sub>
@@ -100,19 +100,19 @@ config:
 ---
 xychart-beta
     title "CPU against each limit"
-    x-axis "seconds" 0 --> 230
+    x-axis "seconds" 0 --> 290
     y-axis "% of limit" 0 --> 100
-    line [10.294, 11.409, 14.317, 18.103, 22.07, 26.075, 29.253, 32.685, 36.404, 40.153, 43.934, 47.805, 51.438, 55.073, 58.797, 62.599, 66.254, 69.959, 73.491, 76.63, 80.005, 83.285, 87.455, 88.81]
-    line [3.679, 3.769, 2.929, 3.146, 3.023, 3.494, 3.32, 3.484, 3.509, 3.626, 3.549, 3.831, 3.92, 3.854, 4.097, 4.099, 4.292, 4.32, 4.564, 4.556, 4.929, 5.265, 5.616, 6.094]
-    line [14.383, 10.031, 9.145, 9.893, 10.245, 12.072, 13.099, 15.005, 19.386, 20.408, 20.793, 20.729, 23.217, 24.168, 24.559, 26.351, 27.455, 29.813, 34.661, 33.902, 36.667, 37.838, 43.689, 47.978]
-    line [5.968, 3.575, 3.288, 3.829, 4.057, 4.732, 4.953, 5.376, 6.045, 6.291, 6.578, 7.072, 7.38, 7.685, 7.969, 8.476, 8.934, 9.488, 9.745, 10.252, 10.878, 11.886, 13.415, 14.731]
+    line [8.301, 11.079, 14.213, 18.059, 21.883, 25.583, 28.967, 32.446, 36.155, 39.903, 43.601, 47.349, 51.148, 54.795, 58.589, 62.258, 66.033, 70.213, 72.998, 76.33, 79.701, 82.596, 85.754, 89.063, 91.015, 90.98, 91.08, 91.231, 91.567, 90.465]
+    line [6.244, 3.291, 3.002, 3.225, 3.113, 3.391, 3.477, 3.547, 3.642, 3.658, 3.753, 3.991, 3.836, 4.056, 4.112, 4.291, 4.242, 4.655, 4.656, 4.76, 5.058, 5.092, 5.134, 5.329, 5.48, 5.437, 5.635, 5.646, 5.682, 5.701]
+    line [10.533, 9.107, 8.954, 9.483, 10.197, 11.893, 13.734, 16.505, 22.074, 21.853, 23.125, 20.699, 21.942, 24.803, 25.161, 26.774, 27.761, 30.901, 31.257, 33.819, 36.142, 37.258, 39.336, 41.676, 44.85, 45.403, 43.399, 43.551, 45.101, 44.485]
+    line [4.968, 3.376, 3.337, 3.694, 4.056, 4.529, 4.993, 5.591, 5.972, 6.262, 6.62, 7.067, 7.431, 7.643, 8.153, 8.725, 9.028, 9.545, 9.77, 10.365, 10.872, 11.55, 12.059, 12.891, 13.444, 13.485, 13.573, 13.765, 14.061, 13.466]
 ```
 
 <sub>Blue: api. Orange: db. Green: lb. Purple: tally (container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window).</sub>
 
 ## Diagnosis
 
-No diagnosis rule fired. Rules checked: connection pool exhausted, queueing knee (rules version 9; thresholds below).
+No diagnosis rule fired. Rules checked: connection pool exhausted, queueing knee (rules version 12; thresholds below).
 
 ## Predictions
 
@@ -120,7 +120,7 @@ No diagnosis rule fired. Rules checked: connection pool exhausted, queueing knee
 
 | Prediction | Result | Worst value | Checked over | Notes |
 | --- | --- | --- | --- | --- |
-| `p99_ms < 100 until load_rps >= 1000` | **held** | 2.4 ms | 0:00 to 0:40, when load_rps >= 1,000 rps first held | source: k6_http_req_duration_seconds (k6 histogram, end to end) |
+| `p99_ms < 100 until load_rps >= 1000` | **held** | 2.0 ms | 0:00 to 0:40, when load_rps >= 1,000 rps first held | source: k6_http_req_duration_seconds (k6 histogram, end to end) |
 
 Loads and request rates depend on this machine: slower cores break the same design at a lower load, so a load guess can miss even when the reasoning behind it was right.
 
@@ -145,6 +145,7 @@ Loads and request rates depend on this machine: slower cores break the same desi
 | workload.timeout_ms | 10s | the default; k6 gives up on a request after this long and counts it as failed |
 | workload.slo.p99_ms | 500 ms | the default; a break on p99 alone needs p99 at or above this as well as 10x the low-load p99, so latency users would still accept isn't called a break |
 | resources.cpu_period_ms | 100 ms for api, db, lb, tally | Docker's default. A container that uses its CPU share early in a period stalls until the next one, which can show up in p99 when a service has a fraction of a CPU |
+| services.db.disk | the Docker host's | no disk block: a read that misses db's memory goes to the Docker host's disk, which on a laptop mostly answers from the host's own memory, fast and uncapped. Add disk: {} for a cloud volume's wait and IOPS cap |
 | services.lb timeouts | connect 5s, server 60s | HAProxy's own timeouts, with its defaults otherwise. A request already sent to a replica that dies waits for the server timeout (or the load generator's); health checks only stop new requests going there |
 | services.api.pools.db.min | 40 | set in the design: each replica opens 40 connections before the load starts and keeps them open |
 | services.api.pools.db.hold | call | the default, as pgxpool's: a request takes a connection for each call and hands it back straight away |
@@ -164,68 +165,76 @@ Loads and request rates depend on this machine: slower cores break the same desi
 - **Connection storm:** up to the break, a service's pools to a Postgres opening at least 50% of their combined size, and 10 or more connections, in one window, while p99 in that window or the next was at least 10x the low-load p99 and 10 ms above it. New connections are counted by loadlore_pool_connect_seconds (new connections the pools opened, and how long each took), or for runs from before it, from the rise in open connections.
 - **Retry storm:** for two windows in a row, a caller that retries sending 1.5x or more of its low-load calls per request to a target, with retries 20% or more of them, while the target failed 1.0% or more of its calls or its p99 was 3x its low-load value.
 - **Cold cache:** a cache's share of lookups that miss rising to 5x its level before or more, and to 5.0% of lookups at least, while its callers' reads of the database behind it reach 2x their rate before (counted as at least 1 a second, for a cache warm enough to send none).
-- **Working set doesn't fit:** for two windows in a row, a Postgres answering less than 90% of block reads from shared_buffers and reading 100 blocks a second or more from outside them, while p99 was 3x the low-load p99 or more.
+- **Working set doesn't fit:** for two windows in a row, a Postgres answering less than 90% of block reads from shared_buffers and reading 100 blocks a second or more from outside them, while p99 was 3x the low-load p99 or more. When Postgres times its reads (track_io_timing, on with a disk block), each block read must also take 3x its low-load time or more, and 1 ms more.
+- **Replication lag:** for two windows in a row, a read replica 1 s or more behind its primary, or 5.0% or more of the reads after a write it served missing the write.
+- **Autoscale lag:** the run broke while an autoscaled service's replicas were at 90% or more of their CPU limit: below its max, the autoscaler hadn't caught up; at its max (autoscale ceiling), it had nothing left to add.
 - **Hot rows:** for two windows in a row, 2 or more of a Postgres's backends waiting on locks on average, while a caller's writes to it took 3x their low-load time or more (and 2 ms more). Reads of the same rows may slow too, and the summary says when the database's CPU per request reached 3x its low-load value: the contention burning CPU. A queueing knee on that database's CPU at the same time then points at the rows. Windows with a disk_slow fault on the database don't count.
 
 ## Environment
 
-- loadl dev, profile 4m0s, scale 1, seed 1
+- loadl dev, profile 5m0s, scale 1, seed 1
 - Host: 8 CPUs, 9.7 GiB memory, Ubuntu 24.04.4 LTS (aarch64, kernel 6.8.0-117-generic), cgroup v2
 - Docker 29.5.2, Compose 5.1.1
-- Host speed index 987 (hash 966, memory 991, syscalls 1003): one CPU's work against the reference machine's 1000 (MacBook Air M4 (4 performance and 6 efficiency cores), Colima VM with 8 vCPUs). CPU limits are fractions of this host's cores, so a lower index means the design breaks at a lower load
-- Cool-down: none needed; the first benchmark (987) was within 5.0% of the run it's compared with (1021)
+- Host speed index 1001 (hash 1003, memory 983, syscalls 1017): one CPU's work against the reference machine's 1000 (MacBook Air M4 (4 performance and 6 efficiency cores), Colima VM with 8 vCPUs). CPU limits are fractions of this host's cores, so a lower index means the design breaks at a lower load
+- Cool-down: waited 33s for the host to cool, from speed index 949 to within 5.0% of the run it's compared with (1031)
 - Host CPU: Docker runs in a VM on this machine, so other programs' use of the CPU can't be seen
 - Data: a fresh copy of the cached seeded dataset
-- Load generator summary (k6): 563,967 requests, 0 dropped arrivals, 0% failed
+- Load generator summary (k6): 833,953 requests, 0 dropped arrivals, 0% failed
 
 <details><summary>Containers and images</summary>
 
 | Container | Image |
 | --- | --- |
-| loadlore-live-vote-redis-tally-20261114-150111-api-0-1 | loadlore/synthetic:dev |
-| loadlore-live-vote-redis-tally-20261114-150111-api-1-1 | loadlore/synthetic:dev |
-| loadlore-live-vote-redis-tally-20261114-150111-db-1 | postgres:17.11 |
-| loadlore-live-vote-redis-tally-20261114-150111-lb-1 | haproxy:3.2.26 |
-| loadlore-live-vote-redis-tally-20261114-150111-lore-cadvisor-1 | ghcr.io/google/cadvisor:v0.60.6 |
-| loadlore-live-vote-redis-tally-20261114-150111-lore-k6-1 | grafana/k6:2.3.0 |
-| loadlore-live-vote-redis-tally-20261114-150111-lore-pgexp-db-1 | quay.io/prometheuscommunity/postgres-exporter:v0.20.1 |
-| loadlore-live-vote-redis-tally-20261114-150111-lore-prometheus-1 | prom/prometheus:v3.16.0 |
-| loadlore-live-vote-redis-tally-20261114-150111-lore-redisexp-tally-1 | oliver006/redis_exporter:v1.97.0 |
-| loadlore-live-vote-redis-tally-20261114-150111-lore-toxiproxy-1 | ghcr.io/shopify/toxiproxy:2.13.0 |
-| loadlore-live-vote-redis-tally-20261114-150111-tally-1 | redis:8.2 |
+| loadlore-live-vote-redis-tally-20261116-094220-api-0-1 | loadlore/synthetic:dev |
+| loadlore-live-vote-redis-tally-20261116-094220-api-1-1 | loadlore/synthetic:dev |
+| loadlore-live-vote-redis-tally-20261116-094220-db-1 | postgres:17.11 |
+| loadlore-live-vote-redis-tally-20261116-094220-lb-1 | haproxy:3.2.26 |
+| loadlore-live-vote-redis-tally-20261116-094220-lore-cadvisor-1 | ghcr.io/google/cadvisor:v0.60.6 |
+| loadlore-live-vote-redis-tally-20261116-094220-lore-k6-1 | grafana/k6:2.3.0 |
+| loadlore-live-vote-redis-tally-20261116-094220-lore-pgexp-db-1 | quay.io/prometheuscommunity/postgres-exporter:v0.20.1 |
+| loadlore-live-vote-redis-tally-20261116-094220-lore-prometheus-1 | prom/prometheus:v3.16.0 |
+| loadlore-live-vote-redis-tally-20261116-094220-lore-redisexp-tally-1 | oliver006/redis_exporter:v1.97.0 |
+| loadlore-live-vote-redis-tally-20261116-094220-lore-toxiproxy-1 | ghcr.io/shopify/toxiproxy:2.13.0 |
+| loadlore-live-vote-redis-tally-20261116-094220-tally-1 | redis:8.2 |
 
 </details>
 
 ## Per-window data
 
-<details><summary>24 windows of 10 seconds</summary>
+<details><summary>30 windows of 10 seconds</summary>
 
 | t | offered | served | dropped | errors | p50 | p99 | api CPU | db CPU | db conns | lb CPU | lb up | tally CPU | tally hit rate | api→db pool | wait | api→tally pool | wait | k6 CPU | Toxiproxy CPU | k6 / Toxiproxy stalled |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0:00 | 290 | 282 | 0 | 0% | 1.0 ms | 2.4 ms | 10% | 3.7% | 81 | 14% | 2 | 6.0% | – | 0/80 | 0.0 ms | 0/80 | – | 9.0% | 17% | 0% / 0% |
-| 0:10 | 469 | 465 | 0 | 0% | 0.6 ms | 1.2 ms | 11% | 3.8% | 81 | 10% | 2 | 3.6% | – | 0/80 | 0.0 ms | 1/80 | – | 4.9% | 9.0% | 0% / 0% |
-| 0:20 | 648 | 644 | 0 | 0% | 0.6 ms | 1.1 ms | 14% | 2.9% | 81 | 9.1% | 2 | 3.3% | – | 0/80 | 0.0 ms | 1/80 | – | 5.7% | 9.7% | 0% / 0% |
-| 0:30 | 827 | 824 | 0 | 0% | 0.6 ms | 1.1 ms | 18% | 3.1% | 81 | 9.9% | 2 | 3.8% | – | 0/80 | 0.0 ms | 1/80 | – | 6.6% | 12% | 0% / 0% |
-| 0:40 | 1,006 | 1,002 | 0 | 0% | 0.6 ms | 1.1 ms | 22% | 3.0% | 81 | 10% | 2 | 4.1% | – | 0/80 | 0.0 ms | 1/80 | – | 7.2% | 13% | 0% / 0% |
-| 0:50 | 1,185 | 1,182 | 0 | 0% | 0.6 ms | 1.3 ms | 26% | 3.5% | 81 | 12% | 2 | 4.7% | – | 0/80 | 0.0 ms | 1/80 | – | 8.1% | 15% | 0% / 0% |
-| 1:00 | 1,365 | 1,361 | 0 | 0% | 0.6 ms | 1.0 ms | 29% | 3.3% | 81 | 13% | 2 | 5.0% | – | 1/80 | 0.0 ms | 1/80 | – | 8.7% | 18% | 0% / 0% |
-| 1:10 | 1,544 | 1,540 | 0 | 0% | 0.6 ms | 0.9 ms | 33% | 3.5% | 81 | 15% | 2 | 5.4% | – | 0/80 | 0.0 ms | 1/80 | – | 9.2% | 20% | 0% / 0% |
-| 1:20 | 1,723 | 1,719 | 0 | 0% | 0.6 ms | 1.0 ms | 36% | 3.5% | 81 | 19% | 2 | 6.0% | – | 1/80 | 0.0 ms | 1/80 | – | 10% | 23% | 0% / 0% |
-| 1:30 | 1,902 | 1,898 | 0 | 0% | 0.6 ms | 1.0 ms | 40% | 3.6% | 81 | 20% | 2 | 6.3% | – | 0/80 | 0.0 ms | 0/80 | – | 10% | 25% | 0% / 0% |
-| 1:40 | 2,081 | 2,078 | 0 | 0% | 0.6 ms | 1.1 ms | 44% | 3.5% | 81 | 21% | 2 | 6.6% | – | 1/80 | 0.0 ms | 2/80 | – | 10% | 26% | 0% / 0% |
-| 1:50 | 2,260 | 2,257 | 0 | 0% | 0.6 ms | 1.3 ms | 48% | 3.8% | 81 | 21% | 2 | 7.1% | – | 0/80 | 0.0 ms | 2/80 | – | 12% | 27% | 0% / 0% |
-| 2:00 | 2,440 | 2,436 | 0 | 0% | 0.6 ms | 1.0 ms | 51% | 3.9% | 81 | 23% | 2 | 7.4% | – | 1/80 | 0.0 ms | 1/80 | – | 12% | 29% | 0% / 0% |
-| 2:10 | 2,619 | 2,615 | 0 | 0% | 0.6 ms | 1.1 ms | 55% | 3.9% | 81 | 24% | 2 | 7.7% | – | 1/80 | 0.0 ms | 1/80 | – | 12% | 30% | 0% / 0% |
-| 2:20 | 2,798 | 2,795 | 0 | 0% | 0.6 ms | 1.1 ms | 59% | 4.1% | 81 | 25% | 2 | 8.0% | – | 0/80 | 0.0 ms | 1/80 | – | 13% | 32% | 0% / 0% |
-| 2:30 | 2,977 | 2,973 | 0 | 0% | 0.6 ms | 1.1 ms | 63% | 4.1% | 81 | 26% | 2 | 8.5% | – | 1/80 | 0.0 ms | 2/80 | – | 14% | 33% | 0% / 0% |
-| 2:40 | 3,156 | 3,152 | 0 | 0% | 0.6 ms | 1.1 ms | 66% | 4.3% | 81 | 27% | 2 | 8.9% | – | 1/80 | 0.0 ms | 3/80 | – | 15% | 35% | 0% / 0% |
-| 2:50 | 3,335 | 3,332 | 0 | 0% | 0.6 ms | 1.1 ms | 70% | 4.3% | 81 | 30% | 2 | 9.5% | – | 1/80 | 0.0 ms | 2/80 | – | 16% | 37% | 0% / 0% |
-| 3:00 | 3,515 | 3,511 | 0 | 0% | 0.6 ms | 1.2 ms | 73% | 4.6% | 81 | 35% | 2 | 9.7% | – | 1/80 | 0.0 ms | 2/80 | – | 16% | 38% | 0% / 0% |
-| 3:10 | 3,694 | 3,690 | 0 | 0% | 0.6 ms | 1.3 ms | 77% | 4.6% | 81 | 34% | 2 | 10% | – | 1/80 | 0.0 ms | 3/80 | – | 17% | 39% | 0% / 0% |
-| 3:20 | 3,873 | 3,869 | 0 | 0% | 0.6 ms | 1.4 ms | 80% | 4.9% | 81 | 37% | 2 | 11% | – | 1/80 | 0.0 ms | 2/80 | – | 18% | 41% | 0% / 0% |
-| 3:30 | 4,052 | 4,048 | 0 | 0% | 0.6 ms | 1.8 ms | 83% | 5.3% | 81 | 38% | 2 | 12% | – | 1/80 | 0.0 ms | 2/80 +1 | – | 20% | 43% | 0% / 0% |
-| 3:40 | 4,231 | 4,227 | 0 | 0% | 0.6 ms | 5.2 ms | 87% | 5.6% | 81 | 44% | 2 | 13% | – | 0/80 | 0.0 ms | 2/80 | – | 23% | 48% | 0% / 0% |
-| 3:50 | 4,410 | 4,407 | 0 | 0% | 0.7 ms | 2.7 ms | 89% | 6.1% | 81 | 48% | 2 | 15% | – | 1/80 +1 | 0.0 ms | 2/80 | – | 26% | 51% | 0% / 0% |
+| 0:00 | 290 | 277 | 0 | 0% | 0.9 ms | 2.0 ms | 8.3% | 6.2% | 81 | 11% | 2 | 5.0% | – | 0/80 | 0.0 ms | 1/80 | – | 8.4% | 13% | 0% / 0% |
+| 0:10 | 469 | 463 | 0 | 0% | 0.6 ms | 1.2 ms | 11% | 3.3% | 81 | 9.1% | 2 | 3.4% | – | 0/80 | 0.0 ms | 1/80 | – | 4.7% | 8.2% | 0% / 0% |
+| 0:20 | 648 | 642 | 0 | 0% | 0.6 ms | 1.0 ms | 14% | 3.0% | 81 | 9.0% | 2 | 3.3% | – | 1/80 | 0.0 ms | 1/80 | – | 5.6% | 9.6% | 0% / 0% |
+| 0:30 | 827 | 821 | 0 | 0% | 0.6 ms | 1.2 ms | 18% | 3.2% | 81 | 9.5% | 2 | 3.7% | – | 1/80 | 0.0 ms | 1/80 | – | 6.4% | 11% | 0% / 0% |
+| 0:40 | 1,006 | 1,000 | 0 | 0% | 0.6 ms | 1.1 ms | 22% | 3.1% | 81 | 10% | 2 | 4.1% | – | 1/80 | 0.0 ms | 1/80 | – | 6.9% | 13% | 0% / 0% |
+| 0:50 | 1,185 | 1,179 | 0 | 0% | 0.6 ms | 1.1 ms | 26% | 3.4% | 81 | 12% | 2 | 4.5% | – | 1/80 | 0.0 ms | 1/80 | – | 7.6% | 15% | 0% / 0% |
+| 1:00 | 1,365 | 1,358 | 0 | 0% | 0.6 ms | 1.0 ms | 29% | 3.5% | 81 | 14% | 2 | 5.0% | – | 1/80 | 0.0 ms | 1/80 | – | 8.5% | 17% | 0% / 0% |
+| 1:10 | 1,544 | 1,538 | 0 | 0% | 0.6 ms | 1.0 ms | 32% | 3.5% | 81 | 17% | 2 | 5.6% | – | 0/80 | 0.0 ms | 2/80 | – | 9.2% | 20% | 0% / 0% |
+| 1:20 | 1,723 | 1,717 | 0 | 0% | 0.6 ms | 0.9 ms | 36% | 3.6% | 81 | 22% | 2 | 6.0% | – | 0/80 | 0.0 ms | 1/80 | – | 9.9% | 23% | 0% / 0% |
+| 1:30 | 1,902 | 1,896 | 0 | 0% | 0.6 ms | 1.1 ms | 40% | 3.7% | 81 | 22% | 2 | 6.3% | – | 1/80 | 0.0 ms | 1/80 | – | 11% | 25% | 0% / 0% |
+| 1:40 | 2,081 | 2,075 | 0 | 0% | 0.6 ms | 1.0 ms | 44% | 3.8% | 81 | 23% | 2 | 6.6% | – | 0/80 | 0.0 ms | 1/80 | – | 10% | 26% | 0% / 0% |
+| 1:50 | 2,260 | 2,254 | 0 | 0% | 0.6 ms | 1.2 ms | 47% | 4.0% | 81 | 21% | 2 | 7.1% | – | 1/80 | 0.0 ms | 1/80 | – | 11% | 27% | 0% / 0% |
+| 2:00 | 2,440 | 2,434 | 0 | 0% | 0.6 ms | 1.1 ms | 51% | 3.8% | 81 | 22% | 2 | 7.4% | – | 1/80 | 0.0 ms | 1/80 | – | 12% | 28% | 0% / 0% |
+| 2:10 | 2,619 | 2,613 | 0 | 0% | 0.6 ms | 1.1 ms | 55% | 4.1% | 81 | 25% | 2 | 7.6% | – | 0/80 | 0.0 ms | 2/80 | – | 13% | 30% | 0% / 0% |
+| 2:20 | 2,798 | 2,792 | 0 | 0% | 0.6 ms | 1.2 ms | 59% | 4.1% | 81 | 25% | 2 | 8.2% | – | 0/80 | 0.0 ms | 1/80 | – | 13% | 31% | 0% / 0% |
+| 2:30 | 2,977 | 2,971 | 0 | 0% | 0.6 ms | 1.4 ms | 62% | 4.3% | 81 | 27% | 2 | 8.7% | – | 1/80 | 0.0 ms | 2/80 | – | 14% | 33% | 0% / 0% |
+| 2:40 | 3,156 | 3,150 | 0 | 0% | 0.6 ms | 1.3 ms | 66% | 4.2% | 81 | 28% | 2 | 9.0% | – | 1/80 | 0.0 ms | 2/80 | – | 15% | 35% | 0% / 0% |
+| 2:50 | 3,335 | 3,364 | 0 | 0% | 0.6 ms | 1.3 ms | 70% | 4.7% | 81 | 31% | 2 | 9.5% | – | 2/80 | 0.0 ms | 2/80 | – | 15% | 37% | 0% / 0% |
+| 3:00 | 3,515 | 3,511 | 0 | 0% | 0.6 ms | 1.4 ms | 73% | 4.7% | 81 | 31% | 2 | 9.8% | – | 1/80 | 0.0 ms | 2/80 | – | 16% | 37% | 0% / 0% |
+| 3:10 | 3,694 | 3,689 | 0 | 0% | 0.6 ms | 1.3 ms | 76% | 4.8% | 81 | 34% | 2 | 10% | – | 0/80 | 0.0 ms | 2/80 | – | 17% | 38% | 0% / 0% |
+| 3:20 | 3,873 | 3,869 | 0 | 0% | 0.6 ms | 1.4 ms | 80% | 5.1% | 81 | 36% | 2 | 11% | – | 1/80 | 0.0 ms | 2/80 | – | 18% | 41% | 0% / 0% |
+| 3:30 | 4,052 | 4,047 | 0 | 0% | 0.6 ms | 1.6 ms | 83% | 5.1% | 81 | 37% | 2 | 12% | – | 1/80 | 0.0 ms | 2/80 | – | 19% | 42% | 0% / 0% |
+| 3:40 | 4,231 | 4,226 | 0 | 0% | 0.6 ms | 1.5 ms | 86% | 5.1% | 81 | 39% | 2 | 12% | – | 1/80 | 0.0 ms | 3/80 | – | 20% | 44% | 0% / 0% |
+| 3:50 | 4,410 | 4,408 | 0 | 0% | 0.6 ms | 2.0 ms | 89% | 5.3% | 81 | 42% | 2 | 13% | – | 1/80 | 0.0 ms | 4/80 | – | 22% | 47% | 0% / 0% |
+| 4:00 | 4,500 | 4,500 | 0 | 0% | 0.6 ms | 1.4 ms | 91% | 5.5% | 81 | 45% | 2 | 13% | – | 1/80 | 0.0 ms | 2/80 | – | 23% | 49% | 0% / 0% |
+| 4:10 | 4,500 | 4,500 | 0 | 0% | 0.6 ms | 2.0 ms | 91% | 5.4% | 81 | 45% | 2 | 13% | – | 1/80 | 0.0 ms | 2/80 | – | 24% | 49% | 0% / 0% |
+| 4:20 | 4,500 | 4,500 | 0 | 0% | 0.6 ms | 2.2 ms | 91% | 5.6% | 81 | 43% | 2 | 14% | – | 2/80 | 0.0 ms | 2/80 | – | 24% | 49% | 0% / 0% |
+| 4:30 | 4,500 | 4,500 | 0 | 0% | 0.6 ms | 2.0 ms | 91% | 5.6% | 81 | 44% | 2 | 14% | – | 2/80 | 0.0 ms | 3/80 | – | 24% | 49% | 0% / 0% |
+| 4:40 | 4,500 | 4,500 | 0 | 0% | 0.6 ms | 2.4 ms | 92% | 5.7% | 81 | 45% | 2 | 14% | – | 1/80 | 0.0 ms | 3/80 | – | 24% | 50% | 0% / 0% |
+| 4:50 | 4,500 | 4,500 | 0 | 0% | 0.6 ms | 2.0 ms | 90% | 5.7% | 81 | 44% | 2 | 13% | – | 1/80 | 0.0 ms | 2/80 | – | 23% | 49% | 0% / 0% |
 
 Columns: offered is the load profile in plan.json (offered arrival rate); served is k6_http_reqs_total{expected_response="true"} (k6: successful responses); dropped is k6_dropped_iterations_total (k6: arrivals it couldn't start); errors are k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6); p50 and p99 are from k6_http_req_duration_seconds (k6 histogram, end to end); CPU is container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window; conns are pg_stat_activity_count and pg_settings_max_connections (postgres_exporter); hit rate is from redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter); up is haproxy_backend_active_servers (HAProxy); pools are loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections (peak in use/size, +peak waiting), wait is the mean from loadlore_pool_wait_seconds (time to get a connection); k6 and Toxiproxy CPU are against their budgets.
 
@@ -284,6 +293,7 @@ workload:
   entry: lb
   profile:
     - ramp: { from: 200, to: 4500, over: 4m }
+    - hold: { rps: 4500, for: 1m }  # the vote stays open at its peak
   mix: { read: 0.2, write: 0.8 }
   keys: { distribution: hotspot, share: 0.9, fraction: 0.1, count: 10 }
 

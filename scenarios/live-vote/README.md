@@ -17,7 +17,7 @@ flowchart LR
     api -->|"read on reads, write on writes<br/>pool 40, min 40"| db
 ```
 
-The vote opens and traffic climbs from 200 to 4,500 requests a second over four minutes, four in five of them votes. The producers want to know the app will take the peak.
+The vote opens and traffic climbs from 200 to 4,500 requests a second over four minutes, four in five of them votes, and stays at 4,500 for the vote's last minute. The producers want to know the app will take the peak.
 
 ## The question
 
@@ -38,7 +38,7 @@ loadl run scenarios/live-vote/design.yaml
 loadl report latest --print | less
 ```
 
-The run takes about 5 minutes. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 6.8 CPUs (7.8 for the bigger database). On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. Scale shrinks the request rate but not the time a row stays locked, so at small scales the votes may not collide enough to show the problem. The numbers here come from a MacBook Air M4 on mains power.
+The run takes about 6 minutes. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 6.8 CPUs (7.8 for the bigger database). On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. Scale shrinks the request rate but not the time a row stays locked, so at small scales the votes may not collide enough to show the problem. The numbers here come from a MacBook Air M4 on mains power.
 
 Stuck? `loadl hint live-vote` reveals one hint at a time.
 

@@ -14,7 +14,7 @@ The results screen still reads the tallies from Postgres. In a real system a sma
 
 ## Why it helps
 
-The tally was one row, and a row takes its updates one at a time: each one locks the row until its commit. At the break, about 2,400 votes a second queued for the favourite's row, and the contention burned the database's CPU, so twice the CPU barely moved the break (`variants/bigger-db`).
+The tally was one row, and a row takes its updates one at a time: each one locks the row until its commit. At the break in the reference check, at 4,410 requests a second offered, about 3,200 votes a second queued for the favourite's row, and the contention burned the database's CPU, so twice the CPU barely moved the break (`variants/bigger-db`).
 
 Redis runs commands one at a time too, but an increment holds nothing: no lock to wait for, no commit, no old version of the row left behind. It takes microseconds, so one key takes hundreds of thousands a second. Postgres is left with the reads, which don't take the row's lock.
 
@@ -28,4 +28,4 @@ Other ways out, which this version of Loadlore can't model because they change w
 
 ## The reference run
 
-`report.md` is the reference run on a MacBook Air M4 on mains power.
+`report.md` is the reference run on a MacBook Air M4 on mains power: it held through the ramp and the minute at 4,500 requests a second.
