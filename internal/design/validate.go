@@ -84,6 +84,7 @@ func (v *validator) validate() {
 	}
 	v.cycles()
 	v.queues()
+	v.warmPools()
 	if v.d.Workload != nil {
 		v.workload()
 	}
@@ -390,6 +391,59 @@ func (v *validator) pools(name, p string, s *Service) {
 		}
 		if !targets[t] {
 			v.warnf(pp, CodeUnusedPool, "%s has a pool for %s but never calls it", name, t)
+		}
+	}
+}
+
+// pgMaxConnections is Postgres's own default max_connections. The
+// containers connect as the superuser, so superuser_reserved_connections
+// doesn't hold any back; the exporter takes one.
+const (
+	pgMaxConnections = 100
+	pgOwnConnections = 1
+)
+
+// warmPools checks that the connections every warm pool opens before the
+// load fit in each Postgres: past max_connections the pools can't fill,
+// the callers never get ready, and the run can't start.
+func (v *validator) warmPools() {
+	for _, db := range v.d.ServiceNames() {
+		ts := v.d.Services[db]
+		if ts == nil || ts.Kind != "postgres" {
+			continue
+		}
+		limit := pgMaxConnections
+		if c, ok := ts.Config["max_connections"]; ok {
+			n, err := strconv.Atoi(c.String())
+			if err != nil {
+				continue
+			}
+			limit = n
+		}
+		total := 0
+		var parts []string
+		for _, name := range v.d.ServiceNames() {
+			s := v.d.Services[name]
+			if s == nil {
+				continue
+			}
+			pool, ok := s.Pools[db]
+			if !ok || pool.Min == nil || *pool.Min <= 0 {
+				continue
+			}
+			reps := 1
+			if s.Replicas != nil {
+				reps = *s.Replicas
+			}
+			total += reps * *pool.Min
+			if reps == 1 {
+				parts = append(parts, fmt.Sprintf("%s %d", name, *pool.Min))
+			} else {
+				parts = append(parts, fmt.Sprintf("%s %d x %d", name, reps, *pool.Min))
+			}
+		}
+		if total > limit-pgOwnConnections {
+			v.errorf(pathKey("services", db), CodeRange, "the warm pools open %d connections to %s before the load starts (%s), but its max_connections is %d and Loadlore's exporter needs %d: the pools can't fill and the run can't start. Lower a pool's min or raise max_connections", total, db, strings.Join(parts, ", "), limit, pgOwnConnections)
 		}
 	}
 }

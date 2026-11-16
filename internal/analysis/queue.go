@@ -3,6 +3,7 @@ package analysis
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/akinfemi/load-lore/internal/plan"
@@ -153,7 +154,16 @@ func lagDiagnosis(a *Analysis, q *plan.Service, workers []*plan.Service, runners
 		if sw.Finished != nil && sw.Published != nil {
 			peak = fmt.Sprintf(" Its workers finished at most about %s jobs a second, against %s published.", Rate(maxFinished(ws, q.Name)), Rate(maxPublished(ws, q.Name)))
 		}
+		hot := hotJobs(a, wk, worst, from)
+		if hot != nil {
+			d.Evidence = append(d.Evidence,
+				Evidence{Text: fmt.Sprintf("%s's writes to %s took %s at %s, against %s before the lag", wk.Name, hot.db, Ms(hot.write), Clock(w.Start), Ms(hot.base)), Source: SrcOpTime},
+				Evidence{Text: fmt.Sprintf("%s backends of %s waiting on locks at %s, on average", lockText(hot.locks), hot.db, Clock(w.Start)), Source: SrcLockWaits})
+		}
 		switch {
+		case hot != nil:
+			why = fmt.Sprintf(" %s's writes to %s took %s against %s before the lag, with %s backends of %s waiting on locks: its jobs update the same rows, and a row takes one write at a time, each keeping its lock until it commits. More job runners would only wait in line for the same rows.", wk.Name, hot.db, Ms(hot.write), Ms(hot.base), lockText(hot.locks), hot.db)
+			next = fmt.Sprintf("Don't add job runners or replicas to %s: the hot rows set its pace. Make the writes to them fewer or cheaper: apply many jobs in one write (a batch), or spread them over more rows.%s If that pace catches up after the peak, the queue is doing its job: check that the oldest job's wait is one your users accept.", wk.Name, peak)
 		case ww != nil && ww.CPU != nil && *ww.CPU >= WorkerCPUSaturated:
 			slower := ""
 			if ww.JobMeanMs != nil && base > 0 && *ww.JobMeanMs >= 1.5*base {
@@ -366,4 +376,52 @@ func droppedNote(a *Analysis) string {
 		return ""
 	}
 	return fmt.Sprintf(" %s: Loadlore doesn't retry failed jobs yet, so real workers retrying them would have had a bigger backlog than this run shows.", strings.Join(notes, "; "))
+}
+
+// hotWrites is a worker's writes to a Postgres slowed by row locks.
+type hotWrites struct {
+	db                 string
+	write, base, locks float64
+}
+
+// hotJobs finds a Postgres the worker's jobs write to whose writes, in
+// window i, took HotWriteFactor times their time before the lag (and
+// HotMinMs more) while HotLockWaitsMin connections waited on locks: the
+// jobs queue for the same rows. Nil if none.
+func hotJobs(a *Analysis, wk *plan.Service, i, from int) *hotWrites {
+	if len(wk.Synthetic) == 0 {
+		return nil
+	}
+	ws := a.Windows
+	dbs := make([]string, 0, len(wk.Synthetic[0].Targets))
+	for t := range wk.Synthetic[0].Targets {
+		if svc := a.Plan.Service(t); svc != nil && svc.Kind == "postgres" {
+			dbs = append(dbs, t)
+		}
+	}
+	sort.Strings(dbs)
+	for _, db := range dbs {
+		write := func(w *Window) (float64, bool) {
+			if e := edgeAt(w, wk.Name, db); e != nil {
+				v, ok := e.OpMeanMs["write"]
+				return v, ok
+			}
+			return 0, false
+		}
+		base := 0.0
+		for _, w := range ws[:from] {
+			if v, ok := write(w); ok && v > 0 && (base == 0 || v < base) {
+				base = v
+			}
+		}
+		wr, ok := write(ws[i])
+		sw := ws[i].Services[db]
+		if base == 0 || !ok || sw == nil || sw.LockWaits == nil {
+			continue
+		}
+		if *sw.LockWaits >= HotLockWaitsMin && wr >= HotWriteFactor*base && wr >= base+HotMinMs {
+			return &hotWrites{db: db, write: wr, base: base, locks: *sw.LockWaits}
+		}
+	}
+	return nil
 }

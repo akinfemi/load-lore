@@ -700,6 +700,17 @@ func TestHotRows(t *testing.T) {
 	if fired(analyze(t, dir)) {
 		t.Error("fired during a disk_slow fault on db")
 	}
+
+	// A slow disk from the start is in the low-load write times too, so a
+	// later slowdown with lock waits is still hot rows.
+	p.Faults[len(p.Faults)-1].At = 0
+	raw, _ = json.Marshal(&p)
+	if err := os.WriteFile(pf, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !fired(analyze(t, dir)) {
+		t.Error("quiet under a disk_slow fault there from the start")
+	}
 }
 
 func TestExpectRangesAndScaling(t *testing.T) {

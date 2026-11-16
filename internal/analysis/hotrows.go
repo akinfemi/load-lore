@@ -20,7 +20,8 @@ import (
 // throughput fell. So neither fast reads nor spare CPU is required, and
 // the evidence says which happened. Writes slowing fits a slow disk too,
 // whose longer commits hold locks longer, so the rule skips windows with a
-// disk_slow fault on the database.
+// disk_slow fault on the database, unless the fault was there through the
+// low-load windows as well: then their write times already include it.
 const (
 	HotWriteFactor  = 3.0
 	HotMinMs        = 2.0
@@ -75,12 +76,16 @@ func hotRowsEdge(a *Analysis, ws []*Window, svc, db string) *Diagnosis {
 	// The low-load times: windows past the warm-up offered at most
 	// BaselineShare of the peak.
 	var wsBase, rsBase, cpuBase []float64
+	slowBase := 0
 	for i, w := range ws {
 		if w.Start < ToolWarmupSeconds || w.Offered > BaselineShare*a.PeakOffered {
 			continue
 		}
 		if wr, rd := op(i, "write"), op(i, "read"); wr != nil && rd != nil {
 			wsBase, rsBase = append(wsBase, *wr), append(rsBase, *rd)
+			if diskFault(a, db, w.Start) {
+				slowBase++
+			}
 		}
 		if c := cpuPerRequest(w, db); c != nil {
 			cpuBase = append(cpuBase, *c)
@@ -98,10 +103,13 @@ func hotRowsEdge(a *Analysis, ws []*Window, svc, db string) *Diagnosis {
 		}
 		return nil
 	}
+	// A slow disk under every low-load window is part of the writes'
+	// baseline, so it can't be what slowed them later.
+	steadyDisk := slowBase == len(wsBase)
 	flags := make([]bool, len(ws))
 	for i, w := range ws {
 		wr, lw := op(i, "write"), locks(i)
-		if wr == nil || lw == nil || *lw < HotLockWaitsMin || diskFault(a, db, w.Start) {
+		if wr == nil || lw == nil || *lw < HotLockWaitsMin || (!steadyDisk && diskFault(a, db, w.Start)) {
 			continue
 		}
 		flags[i] = *wr >= HotWriteFactor*wb && *wr >= wb+HotMinMs

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/akinfemi/load-lore/internal/plan"
+	"github.com/akinfemi/load-lore/internal/synthetic"
 )
 
 // queueRun is twelve windows of a queue with a two-replica worker of five
@@ -124,5 +125,40 @@ func TestDroppedNote(t *testing.T) {
 	}
 	if n := droppedNote(a); n != "" {
 		t.Errorf("note under the bar: %q", n)
+	}
+}
+
+// Workers whose writes queue for the same rows: the advice is the rows,
+// not more runners.
+func TestConsumerLagHotRows(t *testing.T) {
+	a := queueRun(190, 98, 0.5)
+	a.Plan.Services = append(a.Plan.Services, &plan.Service{Name: "db", Kind: "postgres"})
+	a.Plan.Services[1].Synthetic = []*synthetic.Config{{Targets: map[string]synthetic.Target{"db": {}}}}
+	for i, w := range a.Windows {
+		wr, locks := 2.2, 0.0
+		if i >= 5 {
+			wr, locks = 15.8, 6.6
+		}
+		w.Edges = append(w.Edges, &EdgeWindow{From: "sender", To: "db", OpMeanMs: map[string]float64{"write": wr}})
+		w.Services["db"] = &ServiceWindow{LockWaits: &locks}
+	}
+	d := consumerLag(a)
+	if len(d) != 1 {
+		t.Fatalf("lag: %+v", d)
+	}
+	for _, want := range []string{"sender's writes to db took 16 ms against 2.2 ms before the lag, with 6.6 backends of db waiting on locks", "More job runners would only wait in line"} {
+		if !strings.Contains(d[0].Summary, want) {
+			t.Errorf("summary lacks %q: %s", want, d[0].Summary)
+		}
+	}
+	if !strings.Contains(d[0].Next, "Don't add job runners") || strings.Contains(d[0].Next, "consume.concurrency") {
+		t.Errorf("next: %s", d[0].Next)
+	}
+	// Writes as fast as before: the runner advice stands.
+	for _, w := range a.Windows {
+		w.Edges[len(w.Edges)-1].OpMeanMs["write"] = 2.2
+	}
+	if d := consumerLag(a); len(d) != 1 || !strings.Contains(d[0].Next, "consume.concurrency") {
+		t.Errorf("without hot rows: %+v", d)
 	}
 }

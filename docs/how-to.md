@@ -46,6 +46,7 @@ Scenarios are guided experiments: a starting design that breaks, a story, questi
 | [The live vote](../scenarios/live-vote/) | 2 | row locks, hot rows, lock contention that burns CPU |
 | [Featured on Hacker News](../scenarios/featured-on-hacker-news/) | 2 | autoscaling, scale-up lag, the metric it scales on, headroom |
 | [The backed-up queue](../scenarios/backed-up-queue/) | 3 | job queues and workers, consumer lag, Little's law for workers, what a buffer absorbs |
+| [The flash sale](../scenarios/flash-sale/) | 3 | hot rows under slow commits, taking writes off the request path with a queue, why fewer connections don't help |
 | [Statement day](../scenarios/statement-day/) | 2 | the buffer cache, working sets, a cloud disk's IOPS limit |
 | [The slow disk](../scenarios/slow-disk/) | 3 | fsync and commit latency, connection pools, group commit, `synchronous_commit` |
 | [Stale orders](../scenarios/stale-orders/) | 3 | read replicas, replication lag, read-your-writes |
@@ -233,8 +234,8 @@ The report is made from the run folder alone, so `loadl report <run>` can rewrit
   | Working set doesn't fit | Postgres read from outside its memory while latency climbed; with a disk block, its reads also slowed. |
   | Replication lag | A read replica fell a second or more behind its primary, or reads after a write from it missed the write. |
   | Autoscale lag | The run broke while an autoscaled service's replicas were saturated and the autoscaler was still adding them, or was already at its max. |
-  | Consumer lag | Jobs waited in a queue because its workers finished them more slowly than they arrived; a full queue, when it ran out of memory and refused new jobs. A run can hold while jobs back up: the requests that published them were answered fast. |
-  | Hot rows | Writes queued on row locks for the same few rows. Reads of those rows can slow too, and past a point the contention burns the database's CPU. |
+  | Consumer lag | Jobs waited in a queue because its workers finished them more slowly than they arrived; a full queue, when it ran out of memory and refused new jobs. A run can hold while jobs back up: the requests that published them were answered fast. It says whether the workers ran out of CPU, were waiting on their calls, or were queuing for the same hot rows, where more job runners don't help. |
+  | Hot rows | Writes queued on row locks for the same few rows. Reads of those rows can slow too, and past a point the contention burns the database's CPU. A slow disk under the whole run, which makes every commit hold its lock longer, still counts; one that starts mid-run doesn't, since it slows writes by itself. |
 
   Two diagnoses can both be true, one causing the other; the report says when it sees that.
 - **Why requests failed**, under the diagnosis: failed requests counted by cause (timeouts, refused connections, `max_connections`, an open circuit breaker…).
