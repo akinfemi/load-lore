@@ -40,7 +40,18 @@ type metrics struct {
 	coalesced    *prometheus.CounterVec // target
 	// readAfterWrite counts point reads of a key the request wrote.
 	readAfterWrite *prometheus.CounterVec // target, result
+	// Workers.
+	jobs          *prometheus.CounterVec   // queue, result
+	jobErrors     *prometheus.CounterVec   // queue, cause
+	jobReadErrors *prometheus.CounterVec   // queue, cause
+	jobWait       *prometheus.HistogramVec // queue
+	jobDuration   *prometheus.HistogramVec // queue
+	jobsRunning   prometheus.Gauge
 }
+
+// jobWaitBuckets reach further than latencyBuckets: a backed-up queue
+// holds jobs for minutes.
+var jobWaitBuckets = append(append([]float64{}, latencyBuckets...), 90, 120, 180, 300, 600, 1200, 1800)
 
 func newMetrics(cfg *Config, pools func() []poolSnapshot) *metrics {
 	reg := prometheus.NewRegistry()
@@ -88,6 +99,14 @@ func newMetrics(cfg *Config, pools func() []poolSnapshot) *metrics {
 	m.readAfterWrite = counter("read_after_write_total", "Point reads of a key the same request had written, by target and result: fresh (the read saw the write) or stale (it didn't, as when a replica hasn't replayed it yet).", "target", "result")
 	m.coalesced = counter("cache_coalesced_total", "Cache misses that waited for another request's on_miss calls for the same key instead of running their own (coalesce).", "target")
 
+	if cfg.Role == RoleWorker {
+		m.jobs = counter("jobs_total", "Jobs a worker finished, by queue and result: ok, or error when one of its calls failed (the job is dropped).", "queue", "result")
+		m.jobErrors = counter("job_errors_total", "Jobs that failed, by queue and the cause of the failed call.", "queue", "cause")
+		m.jobReadErrors = counter("job_read_errors_total", "Failed attempts to take a job from the queue, or to acknowledge one, by cause.", "queue", "cause")
+		m.jobWait = hist("job_wait_seconds", "Time from a job's publish to a worker taking it: its wait in the queue.", jobWaitBuckets, "queue")
+		m.jobDuration = hist("job_duration_seconds", "Time a worker spent running each job, its calls included.", latencyBuckets, "queue")
+		m.jobsRunning = gauge("jobs_running", "Jobs a worker replica is running now.")
+	}
 	f(&poolCollector{labels: labels, snapshots: pools})
 	return m
 }

@@ -20,20 +20,21 @@ type Design struct {
 type Service struct {
 	// Common.
 	Image     string     `yaml:"image,omitempty" json:"image,omitempty" jsonschema_description:"Container image for an application service: loadlore/synthetic or your own. Mutually exclusive with kind."`
-	Kind      string     `yaml:"kind,omitempty" json:"kind,omitempty" jsonschema:"enum=postgres,enum=postgres-replica,enum=redis,enum=pgbouncer,enum=lb" jsonschema_description:"Built-in component. Mutually exclusive with image."`
+	Kind      string     `yaml:"kind,omitempty" json:"kind,omitempty" jsonschema:"enum=postgres,enum=postgres-replica,enum=redis,enum=queue,enum=pgbouncer,enum=lb" jsonschema_description:"Built-in component. Mutually exclusive with image. queue is a job queue on Redis Streams: application services publish jobs to it, and workers consume them."`
 	Replicas  *int       `yaml:"replicas,omitempty" json:"replicas,omitempty" jsonschema:"minimum=1,default=1" jsonschema_description:"Number of replicas. A postgres-replica can run several, each streaming from its primary, and callers spread their reads across them. Other datastores, pgbouncer and lb run exactly one."`
 	Resources *Resources `yaml:"resources,omitempty" json:"resources,omitempty" jsonschema_description:"Default 1 CPU and 512m; lb defaults to 0.5 CPU and 256m."`
 
 	// Application services.
-	Role        string          `yaml:"role,omitempty" json:"role,omitempty" jsonschema:"enum=server,default=server" jsonschema_description:"server handles HTTP requests."`
+	Role        string          `yaml:"role,omitempty" json:"role,omitempty" jsonschema:"enum=server,enum=worker,default=server" jsonschema_description:"server handles HTTP requests. worker takes jobs from a queue (consume) and runs its behavior for each one."`
 	Behavior    *Behavior       `yaml:"behavior,omitempty" json:"behavior,omitempty" jsonschema_description:"What the synthetic service does per request. Only for loadlore/synthetic."`
 	Pools       map[string]Pool `yaml:"pools,omitempty" json:"pools,omitempty" jsonschema_description:"Connection pool per call target: a size (connections per replica, default 10), or {size, min}."`
 	Concurrency *Concurrency    `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	Consume     *Consume        `yaml:"consume,omitempty" json:"consume,omitempty" jsonschema_description:"role: worker only: the queue it takes jobs from, and how many jobs each replica runs at once."`
 	Autoscale   *Autoscale      `yaml:"autoscale,omitempty" json:"autoscale,omitempty" jsonschema_description:"Add and remove replicas during the run from a metric, as a Kubernetes HorizontalPodAutoscaler or a cloud autoscaling group does. replicas is how many it starts with. Needs an lb in front."`
 
 	// Datastores and infrastructure.
-	Version string                 `yaml:"version,omitempty" json:"version,omitempty" jsonschema_description:"Major version. postgres default \"17\"; redis default \"8\"."`
-	Config  map[string]ConfigValue `yaml:"config,omitempty" json:"config,omitempty" jsonschema_description:"Native config keys: postgresql.conf for postgres, redis.conf for redis, pgbouncer.ini for pgbouncer."`
+	Version string                 `yaml:"version,omitempty" json:"version,omitempty" jsonschema_description:"Major version. postgres default \"17\"; redis and queue default \"8\"."`
+	Config  map[string]ConfigValue `yaml:"config,omitempty" json:"config,omitempty" jsonschema_description:"Native config keys: postgresql.conf for postgres, redis.conf for redis and queue, pgbouncer.ini for pgbouncer."`
 	Primary string                 `yaml:"primary,omitempty" json:"primary,omitempty" jsonschema_description:"postgres-replica: the postgres service it streams from. The replica starts from a copy of the primary's data and serves reads only."`
 	Dataset *Dataset               `yaml:"dataset,omitempty" json:"dataset,omitempty" jsonschema_description:"Rows seeded before the run. postgres only."`
 	Disk    *Disk                  `yaml:"disk,omitempty" json:"disk,omitempty" jsonschema_description:"Model the data disk like a cloud volume: a wait per read and an IOPS cap. postgres only; without it the data sits on the Docker host's disk, which on a laptop is mostly served from memory."`
@@ -48,6 +49,12 @@ type Service struct {
 	// lb.
 	Algorithm   string       `yaml:"algorithm,omitempty" json:"algorithm,omitempty" jsonschema:"enum=round-robin,enum=least-conn,enum=random,default=round-robin" jsonschema_description:"How the lb picks a healthy replica for each request."`
 	HealthCheck *HealthCheck `yaml:"health_check,omitempty" json:"health_check,omitempty" jsonschema_description:"Active health checks the lb runs against each replica."`
+}
+
+// Consume is a worker's queue and how many jobs it runs at once.
+type Consume struct {
+	From        string `yaml:"from" json:"from" jsonschema:"required" jsonschema_description:"The kind: queue service it takes jobs from."`
+	Concurrency *int   `yaml:"concurrency,omitempty" json:"concurrency,omitempty" jsonschema:"minimum=1,default=5" jsonschema_description:"Jobs each replica runs at once, as Sidekiq's concurrency or a Celery worker's: 5 is Sidekiq's default."`
 }
 
 // Disk models a postgres's data disk like a network-attached cloud volume.
@@ -94,7 +101,7 @@ type Behavior struct {
 // Call is one outbound call made while handling a request.
 type Call struct {
 	Target string  `yaml:"target" json:"target" jsonschema:"required" jsonschema_description:"A service name."`
-	Op     string  `yaml:"op" json:"op" jsonschema:"required,enum=read,enum=write,enum=get,enum=set,enum=del,enum=http" jsonschema_description:"read/write for postgres and pgbouncer; get/set/del for redis; http for application services."`
+	Op     string  `yaml:"op" json:"op" jsonschema:"required,enum=read,enum=write,enum=get,enum=set,enum=del,enum=publish,enum=http" jsonschema_description:"read/write for postgres and pgbouncer; get/set/del for redis; publish for a queue (adds one job); http for application services."`
 	Count  *int    `yaml:"count,omitempty" json:"count,omitempty" jsonschema:"minimum=1,default=1" jsonschema_description:"Times per request."`
 	When   string  `yaml:"when,omitempty" json:"when,omitempty" jsonschema:"enum=always,enum=read,enum=write,default=always" jsonschema_description:"Run only for read or write requests from the workload mix."`
 	Mode   string  `yaml:"mode,omitempty" json:"mode,omitempty" jsonschema:"enum=sync,enum=async,default=sync" jsonschema_description:"sync waits for the result; async fires and continues."`

@@ -41,6 +41,10 @@ const (
 	DefaultCheckRise       = 2
 )
 
+// DefaultConsumeConcurrency is how many jobs a worker replica runs at once:
+// Sidekiq's default.
+const DefaultConsumeConcurrency = 5
+
 // DefaultConcurrencyMax is the default max for each concurrency model.
 var DefaultConcurrencyMax = map[string]int{"threads": 200, "event-loop": 0, "workers": 4}
 
@@ -104,7 +108,7 @@ func applyDefaults(d *Design) {
 			if s.Dataset != nil {
 				setDefault(&s.Dataset.RowBytes, DefaultRowBytes)
 			}
-		case s.Kind == "redis":
+		case s.Kind == "redis", s.Kind == "queue":
 			if s.Version == "" {
 				s.Version = DefaultRedisVersion
 			}
@@ -148,13 +152,17 @@ func defaultApp(s *Service, services map[string]*Service) {
 	if s.Role == "" {
 		s.Role = "server"
 	}
+	if c := s.Consume; c != nil {
+		setDefault(&c.Concurrency, DefaultConsumeConcurrency)
+	}
 	if s.Concurrency == nil {
 		s.Concurrency = &Concurrency{}
 	}
 	if s.Concurrency.Model == "" {
 		s.Concurrency.Model = "threads"
 	}
-	if max, ok := DefaultConcurrencyMax[s.Concurrency.Model]; ok {
+	// A worker runs consume.concurrency jobs at once instead.
+	if max, ok := DefaultConcurrencyMax[s.Concurrency.Model]; ok && s.Role != "worker" {
 		setDefault(&s.Concurrency.Max, max)
 	}
 	if a := s.Autoscale; a != nil {

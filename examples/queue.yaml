@@ -1,0 +1,45 @@
+version: 1
+name: queue
+
+# An api that saves each order and leaves the confirmation email to a
+# worker: it publishes one job per order to a queue, and two worker
+# replicas take the jobs and do the slow part.
+
+services:
+  api:
+    image: loadlore/synthetic
+    resources: { cpu: 1, memory: 256m }
+    behavior:
+      cpu_ms: 1
+      calls:
+        - { target: db, op: read, when: read }
+        - { target: db, op: write, when: write }
+        - { target: emails, op: publish, when: write }
+    pools: { db: 10, emails: 10 }
+
+  emails:
+    kind: queue
+    resources: { cpu: 0.5, memory: 256m }
+
+  sender:
+    image: loadlore/synthetic
+    role: worker
+    replicas: 2
+    resources: { cpu: 0.5, memory: 256m }
+    consume: { from: emails, concurrency: 5 }
+    behavior:
+      cpu_ms: 10
+      calls:
+        - { target: db, op: read }
+    pools: { db: 5 }
+
+  db:
+    kind: postgres
+    resources: { cpu: 1, memory: 1g }
+    dataset: { rows: 100000, row_bytes: 256 }
+
+workload:
+  entry: api
+  mix: { read: 0.5, write: 0.5 }
+  profile:
+    - ramp: { from: 50, to: 400, over: 2m }

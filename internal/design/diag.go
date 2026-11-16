@@ -38,6 +38,7 @@ const (
 	CodeExpectValue    = "expect-value"
 	CodeAssumptionPath = "assumption-path"
 	CodeUnusedPool     = "unused-pool"
+	CodeUnusedQueue    = "unused-queue"
 	CodeScale          = "scale"
 	CodeNoLB           = "no-lb"
 )

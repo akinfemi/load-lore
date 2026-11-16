@@ -40,7 +40,6 @@ var outcomeFields = map[string]string{
 
 // plannedFields are documented for a later phase but not accepted yet.
 var plannedFields = map[string]string{
-	"consume":    "worker services that consume from queues are planned for phase 2",
 	"cloud":      "cloud mode is planned for phase 2",
 	"partitions": "queues (kafka, rabbitmq) are planned for phase 2",
 	"retention":  "queues (kafka, rabbitmq) are planned for phase 2",
@@ -52,8 +51,6 @@ var plannedValues = map[string]map[string]string{
 		"kafka":    "queues (kafka, rabbitmq) are planned for phase 2",
 		"rabbitmq": "queues (kafka, rabbitmq) are planned for phase 2",
 	},
-	"role": {"worker": "worker services that consume from queues are planned for phase 2"},
-	"op":   {"publish": "publishing to queues is planned for phase 2"},
 }
 
 type nodePos struct{ key, val *yaml.Node }

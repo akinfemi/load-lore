@@ -105,6 +105,13 @@ func run() error {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	slog.Info("synthetic service listening", "service", cfg.Service, "replica", cfg.Replica, "addr", cfg.Listen)
+	// A worker also takes jobs from its queue; it still serves metrics and
+	// health checks over HTTP.
+	workerDone := make(chan error, 1)
+	if cfg.Role == synthetic.RoleWorker {
+		go func() { workerDone <- svc.RunWorker(ctx) }()
+		slog.Info("synthetic worker taking jobs", "queue", cfg.Consume.Target, "concurrency", cfg.Consume.Concurrency)
+	}
 
 	select {
 	case err := <-errc:
@@ -112,6 +119,17 @@ func run() error {
 			return err
 		}
 	case <-ctx.Done():
+	}
+	stop()
+	if cfg.Role == synthetic.RoleWorker {
+		// Jobs already taken run to the end.
+		select {
+		case err := <-workerDone:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("worker stopped", "error", err)
+			}
+		case <-time.After(10 * time.Second):
+		}
 	}
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

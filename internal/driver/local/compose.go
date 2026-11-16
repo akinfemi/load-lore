@@ -224,7 +224,7 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 				exp.DependsOn = map[string]composeDepend{name: {Condition: "service_healthy"}}
 				cf.Services["lore-pgexp-"+name] = exp
 			}
-		case "redis":
+		case "redis", "queue":
 			c := base(s.Image, s.Name, "datastore", -1, s.CPU, s.Memory)
 			setPeriod(c, s)
 			c.PullPolicy = "missing"
@@ -238,6 +238,11 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 
 			exp := base(ImageRedisExport, s.Name, "exporter", -1, p.Infra.ExporterCPU, p.Infra.ExporterMem)
 			exp.Environment = map[string]string{"REDIS_ADDR": fmt.Sprintf("redis://%s:%d", s.Name, plan.RedisPort)}
+			if s.Kind == "queue" {
+				// The stream's length and its consumer group: jobs waiting
+				// and running.
+				exp.Environment["REDIS_EXPORTER_CHECK_SINGLE_STREAMS"] = s.Name
+			}
 			exp.DependsOn = map[string]composeDepend{s.Name: {Condition: "service_healthy"}}
 			cf.Services["lore-redisexp-"+s.Name] = exp
 		}
@@ -519,7 +524,7 @@ func prometheusConfig(p *plan.Plan) string {
 				}
 				pg = append(pg, t)
 			}
-		case "redis":
+		case "redis", "queue":
 			rd = append(rd, s.Name)
 		case "pgbouncer":
 			pgb = append(pgb, s.Name)

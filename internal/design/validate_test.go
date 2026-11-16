@@ -113,6 +113,9 @@ func TestBaseIsValid(t *testing.T) {
 	}
 }
 
+// workerYAML takes jobs from q and writes each one to db.
+const workerYAML = "{image: loadlore/synthetic, role: worker, consume: {from: q}, behavior: {calls: [{target: db, op: write}]}}"
+
 func TestValidationDiagnostics(t *testing.T) {
 	tests := []struct {
 		name string
@@ -138,8 +141,24 @@ func TestValidationDiagnostics(t *testing.T) {
 		{"hit_rate is an outcome", map[string]string{"services.cache": "{kind: redis, hit_rate: 0.9}"}, []string{"error services.cache.hit_rate outcome-field"}},
 		{"max_rps is an outcome", map[string]string{"services.api.max_rps": "1000"}, []string{"error services.api.max_rps outcome-field"}},
 		{"kafka is planned", map[string]string{"services.q": "{kind: kafka}"}, []string{"error services.q.kind planned"}},
-		{"worker is planned", map[string]string{"services.api.role": "worker"}, []string{"error services.api.role planned"}},
-		{"publish is planned", map[string]string{"services.api.behavior.calls[1]": "{target: db, op: publish}"}, []string{"error services.api.behavior.calls[1].op planned"}},
+		{"kafka is planned", map[string]string{"services.q": "{kind: kafka}"}, []string{"error services.q.kind planned"}},
+
+		// Queues and workers.
+		{"queue and worker", map[string]string{"services.q": "{kind: queue}", "services.w": workerYAML, "services.api.behavior.calls[1]": "{target: q, op: publish}"}, nil},
+		{"worker without consume", map[string]string{"services.w": "{image: loadlore/synthetic, role: worker}"}, []string{"error services.w required"}},
+		{"consume on a server", map[string]string{"services.q": "{kind: queue}", "services.api.consume": "{from: q}"}, []string{"error services.api.consume not-applicable", "warning services.q unused-queue", "warning services.q unused-queue"}},
+		{"consume on a datastore", map[string]string{"services.c": "{kind: redis, consume: {from: c}}"}, []string{"error services.c.consume not-applicable"}},
+		{"consume from redis", map[string]string{"services.q": "{kind: redis}", "services.w": workerYAML}, []string{"error services.w.consume.from op-target"}},
+		{"consume from nowhere", map[string]string{"services.w": workerYAML}, []string{"error services.w.consume.from unknown-service"}},
+		{"publish to postgres", map[string]string{"services.api.behavior.calls[1]": "{target: db, op: publish}"}, []string{"error services.api.behavior.calls[1].op op-target"}},
+		{"get from a queue", map[string]string{"services.q": "{kind: queue}", "services.w": workerYAML, "services.api.behavior.calls[1]": "{target: q, op: get}"}, []string{"error services.api.behavior.calls[1].op op-target", "warning services.q unused-queue"}},
+		{"http to a worker", map[string]string{"services.q": "{kind: queue}", "services.w": workerYAML, "services.api.behavior.calls[1]": "{target: w, op: http}"}, []string{"error services.api.behavior.calls[1].target op-target", "warning services.q unused-queue"}},
+		{"nothing consumes", map[string]string{"services.q": "{kind: queue}", "services.api.behavior.calls[1]": "{target: q, op: publish}"}, []string{"warning services.q unused-queue"}},
+		{"worker as entry", map[string]string{"services.q": "{kind: queue}", "services.w": workerYAML, "services.api.behavior.calls[1]": "{target: q, op: publish}", "workload.entry": "w"}, []string{"error workload.entry op-target", "error workload.keys.count keyspace"}},
+		{"lb to a worker", map[string]string{"services.q": "{kind: queue}", "services.w": workerYAML, "services.api.behavior.calls[1]": "{target: q, op: publish}", "services.lb.target": "w"}, []string{"error services.lb.target op-target", "error workload.keys.count keyspace"}},
+		{"worker concurrency max", map[string]string{"services.q": "{kind: queue}", "services.w": "{image: loadlore/synthetic, role: worker, consume: {from: q}, concurrency: {max: 3}}", "services.api.behavior.calls[1]": "{target: q, op: publish}"}, []string{"error services.w.concurrency.max not-applicable"}},
+		{"worker concurrency zero", map[string]string{"services.q": "{kind: queue}", "services.w": "{image: loadlore/synthetic, role: worker, consume: {from: q, concurrency: 0}}", "services.api.behavior.calls[1]": "{target: q, op: publish}"}, []string{"error services.w.consume.concurrency range"}},
+		{"two queue replicas", map[string]string{"services.q": "{kind: queue, replicas: 2}", "services.w": workerYAML, "services.api.behavior.calls[1]": "{target: q, op: publish}"}, []string{"error services.q.replicas range"}},
 		{"cloud mode is planned", map[string]string{"modes": "{cloud: {provider: aws}}"}, []string{"error modes.cloud planned"}},
 
 		// Services.

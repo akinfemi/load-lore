@@ -25,6 +25,8 @@ const (
 	CauseTooManyConns  = "too_many_conns" // Postgres refused a new connection (max_connections)
 	CauseDBError       = "db_error"       // any other Postgres error
 	CauseCacheError    = "cache_error"    // any other Redis error
+	CauseQueueFull     = "queue_full"     // the queue is at maxmemory and refused the job
+	CauseQueueError    = "queue_error"    // any other error from the queue
 	CauseUpstreamError = "upstream_error" // an HTTP dependency answered with an error status
 	CauseCircuitOpen   = "circuit_open"   // the circuit breaker rejected the call
 	CauseBulkheadFull  = "bulkhead_full"  // the bulkhead rejected the call

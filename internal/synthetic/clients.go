@@ -44,6 +44,8 @@ func newClient(name string, t Target, timeout time.Duration, m *metrics) (client
 		return newPGClient(name, t, m)
 	case KindRedis:
 		return newRedisClient(name, t, timeout), nil
+	case KindQueue:
+		return newQueueClient(name, t, timeout), nil
 	case KindHTTP:
 		return newHTTPClient(name, t, m), nil
 	}

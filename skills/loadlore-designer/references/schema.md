@@ -37,7 +37,7 @@ See `synthetic-service.md` for how to choose values.
 ```yaml
 api:
   image: loadlore/synthetic        # or the user's own image (then no behavior)
-  role: server                  # the only role for now (default)
+  role: server                  # server (default) or worker
   replicas: 2
   resources: { cpu: 1, memory: 512m }
   behavior:
@@ -97,7 +97,7 @@ Call fields:
 | Field | Default | Values |
 | --- | --- | --- |
 | `target` | required | A service name |
-| `op` | required | `read`, `write` (postgres, pgbouncer) · `get`, `set`, `del` (redis) · `http` (application services and lb) |
+| `op` | required | `read`, `write` (postgres, pgbouncer) · `get`, `set`, `del` (redis) · `publish` (queue: adds one job) · `http` (application services and lb) |
 | `count` | `1` | Times per request |
 | `when` | `always` | `always`, `read`, `write` (from the workload mix) |
 | `mode` | `sync` | `sync` waits for the result; `async` fires and continues |
@@ -107,6 +107,38 @@ Call fields:
 | `ttl_s` | none | For `set` only |
 | `query` | `point` | `point` (one row by key), `range` (`rows` rows in key order from the key: `id >= key ORDER BY id LIMIT rows`), `batch` (the key and the `rows - 1` keys after it in one statement: `id = ANY(keys)`), `scan` (filter on `user_id`: a full table scan unless `user_id` is indexed); `read` only |
 | `rows` | `10` | Rows per `range` read, or keys per `batch` read |
+
+### Workers (`role: worker`)
+
+A worker takes jobs from a `kind: queue` service and runs its `behavior` once for each, instead of for each HTTP request:
+
+```yaml
+api:
+  image: loadlore/synthetic
+  behavior:
+    calls:
+      - { target: db, op: write, when: write }
+      - { target: emails, op: publish, when: write }   # one job per order
+emails:
+  kind: queue
+sender:
+  image: loadlore/synthetic
+  role: worker
+  replicas: 2
+  consume: { from: emails, concurrency: 5 }
+  behavior:
+    cpu_ms: 20
+    calls:
+      - { target: db, op: read }
+  pools: { db: 5 }
+```
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `consume.from` | required | The `kind: queue` service it takes jobs from |
+| `consume.concurrency` | `5` | Jobs each replica runs at once, as Sidekiq's concurrency or a Celery worker's. Sidekiq's default is 5. Printed as an assumption when not set |
+
+A job carries the request that published it: its type (read or write) and key, so a worker's calls with `when` and its key-based reads and writes act on the same rows the request would have. Each job also carries `workload.payload_kb` of payload, which is what fills the queue. A worker finishes a job, then acknowledges and deletes it. A job whose calls fail is counted as failed and dropped: per-call `resilience` (timeouts, retries) applies, but the job itself isn't retried. A worker serves no requests: it can't be the workload's `entry`, an lb's `target` or the target of an `http` call, and it can't autoscale yet. `concurrency.model` still applies (`event-loop` runs one job's CPU work at a time); `concurrency.max` doesn't, `consume.concurrency` sets it.
 
 Resilience fields apply to every outbound call of the service:
 
@@ -127,6 +159,7 @@ Resilience fields apply to every outbound call of the service:
 | `postgres` | `version` (default `"17"`), `config` (any postgresql.conf key; Postgres's own defaults apply, such as `max_connections` 100 and `shared_buffers` 128MB), `dataset`, `disk` | |
 | `postgres-replica` | `primary` (required, a postgres service), `resources`, `config` | A streaming read replica of `primary`: it starts from a copy of the primary's data and replays its WAL as it arrives, asynchronously, so a read can miss a write that just committed. It serves reads only: a call with `op: write` to it is an error. It runs the primary's `version` and has no `dataset` of its own. Loadlore sets `primary_conninfo` and keeps `hot_standby` on; the primary keeps `wal_keep_size` 1GB for its replicas unless its `config` sets it. `replicas: N` runs N replicas (`ro-0`, `ro-1`, …), each streaming from the primary with its own copy of the data, and a caller spreads its calls across them in turn, with a pool of the given size to each, as a client configured with every replica's host does: no health checks, so a dead replica keeps getting its share. Its metrics are the replicas' together; `replication_lag_ms` is the worst one's. A `pgbouncer` can't target a replica service with several replicas |
 | `redis` | `version` (default `"8"`), `config` (any redis.conf key) | Unless `config` sets them, `maxmemory` is 75% of the container's memory limit and `maxmemory-policy` is `allkeys-lru`, as managed Redis usually does. Both are printed as assumptions in every report, and `--scale` scales `maxmemory`. `maxmemory: 0` restores stock Redis, including being OOM-killed when the cache outgrows its container |
+| `queue` | `version` (default `"8"`), `config` (any redis.conf key) | A job queue on Redis Streams: callers add jobs with `op: publish`, and workers with `consume: { from: <it> }` take them in order, each job once, through one consumer group. Unless `config` sets them, `maxmemory` is 75% of the container's memory limit, as for `redis`, and `maxmemory-policy` is `noeviction`: a queue never drops jobs to make room, so once it is full, publishing fails with an error until workers make space. Jobs live in memory only, without persistence, so a restart loses them |
 | `pgbouncer` | `target` (required, a postgres service), `pool_mode` (`transaction`; also `session`, `statement`), `default_pool_size` (`20`), `config` (pgbouncer.ini keys) | PgBouncer 1.26. Clients beyond `default_pool_size` server connections wait in PgBouncer. `max_client_conn` defaults to PgBouncer's 100, and the plan notes when the callers' pools can open more. Loadlore sets the listen, auth and admin keys itself, and `pool_mode` and `default_pool_size` are fields, so `config` can't set those |
 | `lb` | `target` (required, an application service), `algorithm`, `health_check` | A load balancer (HAProxy) in front of the target's replicas. See below |
 
@@ -308,8 +341,7 @@ modes:
 
 Documented for later phases. `loadl validate` rejects these with a "planned" error, and the schema sync check skips this section.
 
-- **Workers** (phase 2): `role: worker` with `consume: { from: <queue>, concurrency: 8 }`, running `calls` once per message instead of per HTTP request.
-- **Queues** (phase 2): `kind: kafka` or `kind: rabbitmq` with `partitions` and `retention`, and the call op `publish`, e.g. `{ target: orders, op: publish, mode: async, when: write }`.
+- **Other queues** (phase 2): `kind: kafka` or `kind: rabbitmq` with `partitions` and `retention`. `kind: queue` (Redis Streams) is built.
 - **Cloud mode** (phase 2):
 
 ```yaml

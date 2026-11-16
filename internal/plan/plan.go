@@ -90,8 +90,12 @@ const (
 
 // Service is one design service, expanded to containers.
 type Service struct {
-	Name       string   `json:"name"`
-	Kind       string   `json:"kind"` // app, postgres, redis, pgbouncer, lb
+	Name string `json:"name"`
+	Kind string `json:"kind"` // app, postgres, redis, queue, pgbouncer, lb
+	// Role is an app service's: server, or worker for one that takes jobs
+	// from a queue (Consume) and serves no requests.
+	Role       string   `json:"role,omitempty"`
+	Consume    *Consume `json:"consume,omitempty"`
 	Image      string   `json:"image"`
 	Containers []string `json:"containers"` // one per replica: api-0, api-1; or db
 	// SlowDisk: a disk_slow fault targets this postgres, or it has a Disk,
@@ -127,6 +131,16 @@ type Service struct {
 	// of the primary's seeded data, and its Dataset is the primary's.
 	Primary string `json:"primary,omitempty"`
 }
+
+// Consume is a worker's queue and how many jobs each replica runs at once.
+type Consume struct {
+	Queue       string `json:"queue"`
+	Concurrency int    `json:"concurrency"`
+}
+
+// Every worker of a queue takes jobs from one consumer group, so each job
+// goes to one of them.
+const QueueGroup = "workers"
 
 // Autoscale is an application service's autoscaler, defaults filled in.
 type Autoscale struct {
@@ -430,7 +444,7 @@ func Build(d *design.Design, opt Options) (*Plan, error) {
 		p.Services = append(p.Services, s)
 		byName[name] = s
 	}
-	p.replicas(d, byName)
+	p.replicas(byName)
 
 	p.proxies(d, byName)
 	for _, name := range names {
@@ -512,8 +526,8 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 		s.Dataset = &spec
 		s.Disk = planDisk(ds.Disk, scale)
 		s.SlowDisk = s.Disk != nil
-	case ds.Kind == "redis":
-		s.Kind, s.Port, minMem = "redis", RedisPort, minMemoryRedis
+	case ds.Kind == "redis", ds.Kind == "queue":
+		s.Kind, s.Port, minMem = ds.Kind, RedisPort, minMemoryRedis
 		s.Version = ds.Version
 		s.Image = fmt.Sprintf(defaultRedisImg, ds.Version)
 		if ds.Version == "8" {
@@ -577,7 +591,7 @@ func (p *Plan) service(name string, ds *design.Service, scale float64) (*Service
 			s.Config["track_io_timing"] = "on"
 		}
 	}
-	if s.Kind == "redis" {
+	if s.Kind == "redis" || s.Kind == "queue" {
 		p.redisMemory(name, s)
 	}
 	return s, nil
@@ -650,6 +664,13 @@ func (p *Plan) redisMemory(name string, s *Service) {
 			Why: fmt.Sprintf("75%% of the container's %s memory limit, as managed Redis usually does; the rest is for fragmentation and client buffers. Set maxmemory: 0 for stock Redis (no cap)", sizeStr(s.Memory)),
 		})
 	}
+	if _, set := s.Config["maxmemory-policy"]; !set && s.Kind == "queue" {
+		s.Config["maxmemory-policy"] = "noeviction"
+		p.Assumptions = append(p.Assumptions, Assumption{
+			Field: "services." + name + ".config.maxmemory-policy", Value: "noeviction",
+			Why: "a queue keeps every job: once it is full, publishing fails with an error until workers make room, as Sidekiq and BullMQ ask of their Redis",
+		})
+	}
 	if _, set := s.Config["maxmemory-policy"]; !set {
 		s.Config["maxmemory-policy"] = "allkeys-lru"
 		p.Assumptions = append(p.Assumptions, Assumption{
@@ -688,7 +709,7 @@ func (p *Plan) proxies(d *design.Design, byName map[string]*Service) {
 		if ds.Behavior == nil {
 			continue
 		}
-		for _, target := range callTargets(ds.Behavior.Calls) {
+		for _, target := range serviceTargets(ds) {
 			t := byName[target]
 			for _, c := range t.Containers {
 				add(name, target, c, t.Port)
@@ -706,6 +727,19 @@ func (p *Plan) proxies(d *design.Design, byName map[string]*Service) {
 			break
 		}
 	}
+}
+
+// serviceTargets lists what an application service connects to: its calls'
+// targets, and the queue a worker consumes from.
+func serviceTargets(ds *design.Service) []string {
+	var out []string
+	if ds.Behavior != nil {
+		out = callTargets(ds.Behavior.Calls)
+	}
+	if c := ds.Consume; c != nil && !slices.Contains(out, c.From) {
+		out = append(out, c.From)
+	}
+	return out
 }
 
 func callTargets(calls []*design.Call) []string {
@@ -772,14 +806,22 @@ func (p *Plan) syntheticConfigs(d *design.Design, name string, s *Service, byNam
 	ds := d.Services[name]
 	b := ds.Behavior
 	targets := map[string]synthetic.Target{}
-	for _, target := range callTargets(b.Calls) {
+	for _, target := range serviceTargets(ds) {
 		t := byName[target]
 		var addrs []string
 		for _, x := range p.proxiesInto(name, target) {
 			addrs = append(addrs, x.Addr())
 		}
-		pool := ds.Pools[target]
-		st := synthetic.Target{Addrs: addrs, Pool: *pool.Size, PoolMin: *pool.Min}
+		pool, size, min := ds.Pools[target], 0, 0
+		if pool.Size != nil {
+			size, min = *pool.Size, *pool.Min
+		}
+		if c := ds.Consume; c != nil && c.From == target {
+			// Each job runner blocks on its own connection while it waits
+			// for a job, plus one for acknowledging.
+			size += *c.Concurrency + 1
+		}
+		st := synthetic.Target{Addrs: addrs, Pool: size, PoolMin: min}
 		if pool.Hold == synthetic.HoldRequest {
 			st.Hold = synthetic.HoldRequest
 		}
@@ -804,6 +846,11 @@ func (p *Plan) syntheticConfigs(d *design.Design, name string, s *Service, byNam
 		case "redis":
 			st.Kind = synthetic.KindRedis
 			st.RowBytes = rowBytesBehind(byName)
+		case "queue":
+			// A job carries the request's payload.
+			st.Kind = synthetic.KindQueue
+			st.Stream, st.Group = target, QueueGroup
+			st.RowBytes = int(*d.Workload.PayloadKB * 1024)
 		}
 		targets[target] = st
 	}
@@ -822,13 +869,28 @@ func (p *Plan) syntheticConfigs(d *design.Design, name string, s *Service, byNam
 		res.Bulkhead = &synthetic.Bulkhead{MaxConcurrent: x.MaxConcurrent}
 	}
 	calls := convertCalls(b.Calls)
-	for i := range s.Containers {
-		s.Synthetic = append(s.Synthetic, &synthetic.Config{
+	conc := synthetic.Concurrency{Model: ds.Concurrency.Model}
+	if ds.Concurrency.Max != nil {
+		conc.Max = *ds.Concurrency.Max
+	}
+	var consume *synthetic.Consume
+	if c := ds.Consume; c != nil && ds.Role == "worker" {
+		consume = &synthetic.Consume{Target: c.From, Concurrency: *c.Concurrency}
+		s.Role, s.Consume = "worker", &Consume{Queue: c.From, Concurrency: *c.Concurrency}
+	}
+	for i, container := range s.Containers {
+		cfg := &synthetic.Config{
 			Service: name, Replica: i, Listen: fmt.Sprintf(":%d", AppPort),
-			Concurrency: synthetic.Concurrency{Model: ds.Concurrency.Model, Max: *ds.Concurrency.Max},
+			Concurrency: conc,
 			CPUMs:       b.CPUMs, CPUJitter: *b.CPUJitter, AllocKB: b.AllocKB,
 			Calls: calls, Resilience: res, Targets: targets,
-		})
+		}
+		if consume != nil {
+			cc := *consume
+			cc.Consumer = container
+			cfg.Role, cfg.Consume = synthetic.RoleWorker, &cc
+		}
+		s.Synthetic = append(s.Synthetic, cfg)
 	}
 }
 
@@ -1108,6 +1170,13 @@ func (p *Plan) assume(d *design.Design) {
 		if s := d.Services[name]; s.Autoscale != nil {
 			p.assumeAutoscale(name, s)
 		}
+		if s := d.Services[name]; s.Role == "worker" && s.Consume != nil && s.Consume.Concurrency != nil {
+			why := fmt.Sprintf("set in the design: each replica runs up to %d jobs from %s at once", *s.Consume.Concurrency, s.Consume.From)
+			if *s.Consume.Concurrency == design.DefaultConsumeConcurrency {
+				why = fmt.Sprintf("Sidekiq's default: each replica runs up to %d jobs from %s at once, and the rest wait in the queue", *s.Consume.Concurrency, s.Consume.From)
+			}
+			p.Assumptions = append(p.Assumptions, Assumption{Field: "services." + name + ".consume.concurrency", Value: strconv.Itoa(*s.Consume.Concurrency), Why: why})
+		}
 		if s := d.Services[name]; s.Kind == "lb" {
 			p.Assumptions = append(p.Assumptions, Assumption{
 				Field: "services." + name + " timeouts", Value: "connect 5s, server 60s",
@@ -1376,7 +1445,7 @@ func (p *Plan) partition(pf *Fault, f *design.Fault, byName map[string]*Service)
 
 // replicas gives each read replica its primary's image and dataset, points
 // it at the primary, and has each primary with replicas keep WAL for them.
-func (p *Plan) replicas(d *design.Design, byName map[string]*Service) {
+func (p *Plan) replicas(byName map[string]*Service) {
 	for _, s := range p.Services {
 		pr := byName[s.Primary]
 		if s.Primary == "" || pr == nil {
@@ -1442,7 +1511,7 @@ func exporters(s *Service) int {
 	switch s.Kind {
 	case "postgres":
 		return len(s.Containers)
-	case "redis", "pgbouncer":
+	case "redis", "queue", "pgbouncer":
 		return 1
 	}
 	return 0

@@ -26,6 +26,10 @@ type Config struct {
 	Service string `json:"service"`
 	Replica int    `json:"replica"`
 	Listen  string `json:"listen,omitempty"` // default ":8080"
+	// Role is RoleServer (empty) or RoleWorker: a worker takes jobs from
+	// Consume's queue and runs the behavior for each.
+	Role    string   `json:"role,omitempty"`
+	Consume *Consume `json:"consume,omitempty"`
 
 	Concurrency Concurrency `json:"concurrency"`
 	CPUMs       float64     `json:"cpu_ms"`
@@ -38,6 +42,20 @@ type Config struct {
 	Targets map[string]Target `json:"targets"`
 }
 
+// Roles.
+const (
+	RoleServer = "server"
+	RoleWorker = "worker"
+)
+
+// Consume is a worker's queue: the target it takes jobs from, how many it
+// runs at once, and the name its job runners read as (numbered from it).
+type Consume struct {
+	Target      string `json:"target"`
+	Concurrency int    `json:"concurrency"`
+	Consumer    string `json:"consumer"`
+}
+
 // Concurrency models the service runtime.
 type Concurrency struct {
 	Model string `json:"model"` // threads | event-loop | workers
@@ -47,7 +65,7 @@ type Concurrency struct {
 // Call is one outbound call, as in the design file.
 type Call struct {
 	Target string `json:"target"`
-	Op     string `json:"op"` // read | write | get | set | del | http
+	Op     string `json:"op"` // read | write | get | set | del | publish | http
 	Count  int    `json:"count"`
 	When   string `json:"when"` // always | read | write
 	Mode   string `json:"mode"` // sync | async
@@ -94,6 +112,7 @@ type Bulkhead struct {
 const (
 	KindPostgres = "postgres"
 	KindRedis    = "redis"
+	KindQueue    = "queue"
 	KindHTTP     = "http"
 )
 
@@ -132,8 +151,12 @@ type Target struct {
 	// constant payload.
 	Data string `json:"data,omitempty"`
 
-	// Dataset shape, for payload sizes and user_id scans (postgres), and
-	// cache value sizes (redis).
+	// Queue: the stream jobs go to and the consumer group that takes them.
+	Stream string `json:"stream,omitempty"`
+	Group  string `json:"group,omitempty"`
+
+	// Dataset shape, for payload sizes and user_id scans (postgres), cache
+	// value sizes (redis) and job payload sizes (queue).
 	Rows     int64 `json:"rows,omitempty"`
 	RowBytes int   `json:"row_bytes,omitempty"`
 }
@@ -188,11 +211,11 @@ func (c *Config) Validate() error {
 	}
 	for name, t := range c.Targets {
 		switch {
-		case !slices.Contains([]string{KindPostgres, KindRedis, KindHTTP}, t.Kind):
+		case !slices.Contains([]string{KindPostgres, KindRedis, KindQueue, KindHTTP}, t.Kind):
 			bad("target %s: kind %q", name, t.Kind)
 		case len(t.Addrs) == 0:
 			bad("target %s: no addrs", name)
-		case t.Kind == KindRedis && len(t.Addrs) != 1:
+		case (t.Kind == KindRedis || t.Kind == KindQueue) && len(t.Addrs) != 1:
 			// Postgres targets may have several: one per read replica.
 			bad("target %s: a %s target has exactly one addr", name, t.Kind)
 		case t.Pool < 1:
@@ -207,6 +230,8 @@ func (c *Config) Validate() error {
 			bad("target %s: hold request is for postgres targets", name)
 		case t.Kind == KindPostgres && (t.Rows < 1 || t.RowBytes < 1):
 			bad("target %s: postgres needs rows and row_bytes", name)
+		case t.Kind == KindQueue && (t.Stream == "" || t.Group == ""):
+			bad("target %s: a queue needs stream and group", name)
 		}
 	}
 	var checkCalls func(path string, calls []Call)
@@ -221,6 +246,7 @@ func (c *Config) Validate() error {
 			want := map[string][]string{
 				KindPostgres: {"read", "write"},
 				KindRedis:    {"get", "set", "del"},
+				KindQueue:    {"publish"},
 				KindHTTP:     {"http"},
 			}[t.Kind]
 			if !slices.Contains(want, call.Op) {
@@ -248,6 +274,21 @@ func (c *Config) Validate() error {
 		}
 	}
 	checkCalls("calls", c.Calls)
+	switch {
+	case c.Role != "" && c.Role != RoleServer && c.Role != RoleWorker:
+		bad("role %q", c.Role)
+	case c.Role == RoleWorker && c.Consume == nil:
+		bad("a worker needs consume")
+	case c.Role != RoleWorker && c.Consume != nil:
+		bad("consume is for workers")
+	case c.Consume != nil:
+		if t, ok := c.Targets[c.Consume.Target]; !ok || t.Kind != KindQueue {
+			bad("consume target %q isn't a queue target", c.Consume.Target)
+		}
+		if c.Consume.Concurrency < 1 || c.Consume.Consumer == "" {
+			bad("consume %+v", *c.Consume)
+		}
+	}
 	if r := c.Resilience.Retries; r != nil {
 		if r.Max < 0 || !slices.Contains([]string{"none", "constant", "exponential"}, r.Backoff) || (r.Backoff != "none" && r.BaseMs < 1) {
 			bad("retries %+v", *r)

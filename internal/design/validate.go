@@ -83,6 +83,7 @@ func (v *validator) validate() {
 		v.service(name, v.d.Services[name])
 	}
 	v.cycles()
+	v.queues()
 	if v.d.Workload != nil {
 		v.workload()
 	}
@@ -105,7 +106,7 @@ func (v *validator) service(name string, s *Service) {
 		return // already reported; anything more would be noise
 	}
 	if s == nil {
-		v.errorf(p, CodeRequired, "service %q needs either image (an application service) or kind (postgres, redis, pgbouncer, lb)", name)
+		v.errorf(p, CodeRequired, "service %q needs either image (an application service) or kind (postgres, redis, queue, pgbouncer, lb)", name)
 		return
 	}
 	switch {
@@ -113,7 +114,7 @@ func (v *validator) service(name string, s *Service) {
 		v.errorf(pathKey(p, "kind"), CodeConflict, "set either image or kind, not both")
 		return
 	case s.Image == "" && s.Kind == "":
-		v.errorf(p, CodeRequired, "service %q needs either image (an application service) or kind (postgres, redis, pgbouncer, lb)", name)
+		v.errorf(p, CodeRequired, "service %q needs either image (an application service) or kind (postgres, redis, queue, pgbouncer, lb)", name)
 		return
 	}
 
@@ -143,6 +144,7 @@ func (v *validator) service(name string, s *Service) {
 		}
 		v.pools(name, p, s)
 		v.autoscale(name, p, s)
+		v.worker(p, s)
 		if c := s.Concurrency; c != nil && c.Model == "workers" && c.Max != nil && *c.Max < 1 {
 			v.errorf(pathKey(p, "concurrency.max"), CodeRange, "workers needs at least 1 worker")
 		}
@@ -155,6 +157,7 @@ func (v *validator) service(name string, s *Service) {
 	notFor("pools", s.Pools != nil, why)
 	notFor("concurrency", s.Concurrency != nil, why)
 	notFor("autoscale", s.Autoscale != nil, why)
+	notFor("consume", s.Consume != nil, "it is for application services with role: worker")
 	notFor("dataset", s.Dataset != nil && s.Kind == "postgres-replica", "a replica starts from a copy of its primary's data, so the dataset goes on the primary")
 	notFor("dataset", s.Dataset != nil && !s.IsPostgres(), "datasets are seeded into postgres")
 	notFor("primary", s.Primary != "" && s.Kind != "postgres-replica", "it is for postgres-replica")
@@ -200,6 +203,8 @@ func (v *validator) service(name string, s *Service) {
 		case v.broken(s.Target):
 		case t == nil || !t.IsApp():
 			v.errorf(pathKey(p, "target"), CodeOpTarget, "an lb's target must be an application service; %q is %s", s.Target, describeService(t))
+		case t.Role == "worker":
+			v.errorf(pathKey(p, "target"), CodeOpTarget, "%s is a worker and serves no requests; an lb's target must be a server", s.Target)
 		}
 	}
 	if s.Kind == "pgbouncer" {
@@ -261,6 +266,8 @@ func opsFor(t *Service) []string {
 		return []string{"read"}
 	case t.Kind == "redis":
 		return []string{"get", "set", "del"}
+	case t.Kind == "queue":
+		return []string{"publish"}
 	}
 	return nil
 }
@@ -292,7 +299,10 @@ func (v *validator) call(caller, p string, c *Call) {
 					v.errorf(pathKey(p, "op"), CodeOpTarget, "%s is %s; use op %s", c.Target, describeService(t), strings.Join(ops, ", "))
 				}
 			}
-			if t.IsApp() && t.Replicas != nil && *t.Replicas > 1 {
+			if t.IsApp() && t.Role == "worker" {
+				v.errorf(pathKey(p, "target"), CodeOpTarget, "%s is a worker: it takes jobs from its queue and serves no requests; publish a job to %s instead", c.Target, workerQueue(t))
+			}
+			if t.IsApp() && t.Replicas != nil && *t.Replicas > 1 && t.Role != "worker" {
 				v.warnf(pathKey(p, "target"), CodeNoLB, "%s", noLBMessage(caller, c.Target, *t.Replicas))
 			}
 		}
@@ -460,6 +470,8 @@ func (v *validator) workload() {
 			v.unknownService("workload.entry", w.Entry)
 		case s != nil && s.Kind != "" && s.Kind != "lb" && s.Image == "":
 			v.errorf("workload.entry", CodeOpTarget, "the entry must be an application service (image) or an lb; %s is %s", w.Entry, describeService(s))
+		case s != nil && s.IsApp() && s.Role == "worker":
+			v.errorf("workload.entry", CodeOpTarget, "%s is a worker and serves no requests; the entry must be a server or an lb", w.Entry)
 		case s != nil && s.IsApp() && s.Replicas != nil && *s.Replicas > 1:
 			v.warnf("workload.entry", CodeNoLB, "%s", noLBMessage("the load generator", w.Entry, *s.Replicas))
 		}
@@ -905,6 +917,13 @@ func (d *Design) EntryPath() EntryPathInfo {
 			case t.IsApp(), t.Kind == "lb":
 				visit(c.Target)
 				return
+			case t.Kind == "queue":
+				// A job carries the request's key to the workers.
+				for _, w := range d.ServiceNames() {
+					if ws := d.Services[w]; ws != nil && ws.Consume != nil && ws.Consume.From == c.Target {
+						visit(w)
+					}
+				}
 			case t.Kind == "pgbouncer":
 				if pg, ok := d.Services[t.Target]; ok && pg != nil && c.Op == "read" {
 					if db := d.datasetOf(t.Target); db != "" {
@@ -1115,6 +1134,81 @@ func (v *validator) autoscale(name, p string, s *Service) {
 		walkCalls(c.Behavior.Calls, func(call *Call) { direct = direct || call.Target == name })
 		if direct {
 			v.errorf(ap, CodeNotApplicable, "%s calls %s directly; call its lb instead, so new replicas get %s's calls too", caller, name, caller)
+		}
+	}
+}
+
+// worker checks a role: worker service and its consume block, and a
+// server that has one.
+func (v *validator) worker(p string, s *Service) {
+	cp := pathKey(p, "consume")
+	if s.Role != "worker" {
+		if s.Consume != nil {
+			v.errorf(cp, CodeNotApplicable, "consume only applies to role: worker; add role: worker to take jobs from %s", s.Consume.From)
+		}
+		return
+	}
+	switch {
+	case s.Consume == nil:
+		v.errorf(p, CodeRequired, "a worker needs consume: {from: <a kind: queue service>}, the queue it takes jobs from")
+		return
+	case s.Consume.From == "":
+		v.errorf(pathKey(cp, "from"), CodeRequired, "consume needs from: the kind: queue service it takes jobs from")
+	default:
+		switch q, ok := v.d.Services[s.Consume.From]; {
+		case !ok:
+			v.unknownService(pathKey(cp, "from"), s.Consume.From)
+		case v.broken(s.Consume.From):
+		case q == nil || q.Kind != "queue":
+			v.errorf(pathKey(cp, "from"), CodeOpTarget, "a worker consumes from a kind: queue service; %q is %s", s.Consume.From, describeService(q))
+		}
+	}
+	if c := s.Consume.Concurrency; c != nil && *c < 1 {
+		v.errorf(pathKey(cp, "concurrency"), CodeRange, "concurrency must be at least 1")
+	}
+	if s.Concurrency != nil && s.Concurrency.Max != nil {
+		v.errorf(pathKey(p, "concurrency.max"), CodeNotApplicable, "a worker runs consume.concurrency jobs at once; set that instead")
+	}
+	if s.Autoscale != nil {
+		v.errorf(pathKey(p, "autoscale"), CodeNotApplicable, "workers can't autoscale yet: autoscaling adds replicas behind an lb")
+	}
+	if !s.IsSynthetic() {
+		v.errorf(pathKey(p, "role"), CodeNotApplicable, "role: worker needs %s, which takes the jobs from the queue and runs behavior for each", SyntheticImage)
+	}
+}
+
+// workerQueue names the queue a worker consumes from, or "its queue".
+func workerQueue(s *Service) string {
+	if s.Consume != nil && s.Consume.From != "" {
+		return s.Consume.From
+	}
+	return "its queue"
+}
+
+// queues warns about a queue nothing publishes to or nothing consumes.
+func (v *validator) queues() {
+	for _, name := range v.d.ServiceNames() {
+		q := v.d.Services[name]
+		if q == nil || q.Kind != "queue" {
+			continue
+		}
+		published, consumed := false, false
+		for _, other := range v.d.ServiceNames() {
+			o := v.d.Services[other]
+			if o == nil {
+				continue
+			}
+			if o.Behavior != nil {
+				walkCalls(o.Behavior.Calls, func(c *Call) { published = published || c.Target == name && c.Op == "publish" })
+			}
+			consumed = consumed || o.Role == "worker" && o.Consume != nil && o.Consume.From == name
+		}
+		p := pathKey("services", name)
+		if !consumed {
+			v.warnf(p, CodeUnusedQueue, "nothing consumes jobs from %s: add a service with role: worker and consume: {from: %s}, or its jobs pile up until it is full", name, name)
+		}
+		if !published {
+			v.warnf(p, CodeUnusedQueue, "nothing publishes to %s: add a call with target: %s and op: publish", name, name)
 		}
 	}
 }

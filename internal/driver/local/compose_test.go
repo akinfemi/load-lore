@@ -342,3 +342,38 @@ func TestAutoscaleCompose(t *testing.T) {
 		t.Errorf("disabled servers wrong:\n%s", cfg)
 	}
 }
+
+// A queue is a Redis that keeps every job, with an exporter watching its
+// stream; workers are synthetic containers like any app service.
+func TestQueueCompose(t *testing.T) {
+	d, diags, err := design.LoadFile("../../../examples/queue.yaml")
+	if err != nil || diags.HasErrors() {
+		t.Fatal(err, diags)
+	}
+	p, err := plan.Build(d, plan.Options{RunID: "test-run", Seed: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildCompose(p, stackInput{Project: "loadlore-test-run", K6Script: []byte("// script\n"), DataVols: map[string]string{"db": "v1"}, Synthetic: "loadlore/synthetic:dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cf composeFile
+	if err := yaml.Unmarshal(got, &cf); err != nil {
+		t.Fatal(err)
+	}
+	q := cf.Services["emails"]
+	if q == nil || q.Image != "redis:8.2" || !slices.Contains(q.Command, "noeviction") || q.Healthcheck == nil {
+		t.Fatalf("queue service: %+v", q)
+	}
+	exp := cf.Services["lore-redisexp-emails"]
+	if exp == nil || exp.Environment["REDIS_EXPORTER_CHECK_SINGLE_STREAMS"] != "emails" {
+		t.Fatalf("queue exporter: %+v", exp)
+	}
+	if cf.Services["sender-0"] == nil || cf.Services["sender-1"] == nil {
+		t.Error("worker containers missing")
+	}
+	if !strings.Contains(prometheusConfig(p), "lore-redisexp-emails:9121") {
+		t.Error("the queue's exporter isn't scraped")
+	}
+}

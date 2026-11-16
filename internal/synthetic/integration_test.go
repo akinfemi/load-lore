@@ -394,3 +394,92 @@ func TestIntegrationHoldPerRequest(t *testing.T) {
 		t.Errorf("%d connections still in use", snap.inUse)
 	}
 }
+
+func queueTarget(addr string, pool int) Target {
+	return Target{Kind: KindQueue, Addrs: []string{addr}, Pool: pool, Stream: "jobs", Group: "workers", RowBytes: 100}
+}
+
+// An api publishes jobs; a worker with two job runners takes each one
+// once, reads its key from Postgres, and deletes it when done, so the
+// stream ends empty. Jobs published before the worker started are taken.
+func TestIntegrationQueue(t *testing.T) {
+	env := startPostgres(t)
+	addr := startRedis(t)
+	api := newService(t, &Config{
+		Service: "api", Resilience: Resilience{TimeoutMs: 5000},
+		Targets: map[string]Target{"jobs": queueTarget(addr, 2)},
+		Calls:   []Call{call("jobs", "publish", func(c *Call) { c.When = "write" })},
+	})
+	ctx := context.Background()
+	const n = 20
+	for i := range n {
+		if err := api.handle(ctx, request{typ: "write", key: int64(i + 1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := api.handle(ctx, request{typ: "read", key: 1}); err != nil { // publishes nothing
+		t.Fatal(err)
+	}
+	w := newService(t, &Config{
+		Service: "sender", Role: RoleWorker, Resilience: Resilience{TimeoutMs: 5000},
+		Consume: &Consume{Target: "jobs", Concurrency: 2, Consumer: "sender-0"},
+		Targets: map[string]Target{"jobs": queueTarget(addr, 3), "db": pgTarget(env, 2)},
+		Calls:   []Call{call("db", "read", func(c *Call) { c.When = "write" })},
+	})
+	wctx, stop := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- w.RunWorker(wctx) }()
+	deadline := time.Now().Add(15 * time.Second)
+	for metricValue(t, w, "loadlore_jobs_total", map[string]string{"queue": "jobs", "result": "ok"}) < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("worker finished %v of %d jobs", metricValue(t, w, "loadlore_jobs_total", nil), n)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	stop()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := metricValue(t, w, "loadlore_calls_total", map[string]string{"target": "db", "op": "read", "outcome": "ok"}); got != n {
+		t.Errorf("worker made %v db reads, want %d (one per write job)", got, n)
+	}
+	if got := metricValue(t, w, "loadlore_job_wait_seconds", map[string]string{"queue": "jobs"}); got != n {
+		t.Errorf("job waits observed: %v, want %d", got, n)
+	}
+	q := w.clients["jobs"].(*queueClient)
+	if l, err := q.rdb.XLen(ctx, "jobs").Result(); err != nil || l != 0 {
+		t.Errorf("stream length %d (%v), want 0", l, err)
+	}
+	if pending, err := q.rdb.XPending(ctx, "jobs", "workers").Result(); err != nil || pending.Count != 0 {
+		t.Errorf("pending %+v (%v), want none", pending, err)
+	}
+}
+
+// A full queue refuses jobs, and the publish fails with queue_full: the
+// request fails with it.
+func TestIntegrationQueueFull(t *testing.T) {
+	addr := startRedis(t)
+	api := newService(t, &Config{
+		Service: "api", Resilience: Resilience{TimeoutMs: 5000},
+		Targets: map[string]Target{"jobs": {Kind: KindQueue, Addrs: []string{addr}, Pool: 2, Stream: "jobs", Group: "workers", RowBytes: 64 << 10}},
+		Calls:   []Call{call("jobs", "publish")},
+	})
+	ctx := context.Background()
+	q := api.clients["jobs"].(*queueClient)
+	if err := q.rdb.ConfigSet(ctx, "maxmemory", "4mb").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.rdb.ConfigSet(ctx, "maxmemory-policy", "noeviction").Err(); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	for i := 0; i < 1000 && err == nil; i++ {
+		err = api.handle(ctx, request{typ: "write", key: 1})
+	}
+	if Cause(err) != CauseQueueFull {
+		t.Fatalf("after filling the queue: %v (cause %q), want %q", err, Cause(err), CauseQueueFull)
+	}
+	if got := metricValue(t, api, "loadlore_call_errors_total", map[string]string{"target": "jobs", "cause": CauseQueueFull}); got < 1 {
+		t.Errorf("queue_full call errors: %v", got)
+	}
+}

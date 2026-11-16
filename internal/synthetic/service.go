@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -29,6 +30,7 @@ type Service struct {
 	rnd       func() float64
 	async     sync.WaitGroup
 	flight    singleflight.Group // coalesced misses, by call and key
+	ready     atomic.Bool        // a worker: its consumer group exists
 }
 
 // New builds a service from its config. Connections are opened lazily, on
@@ -111,6 +113,10 @@ func (s *Service) Handler() http.Handler {
 }
 
 func (s *Service) serveReady(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Role == RoleWorker && !s.ready.Load() {
+		http.Error(w, "the worker hasn't joined its queue's consumer group yet", http.StatusServiceUnavailable)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	for _, name := range sortedNames(s.clients) {
@@ -166,7 +172,7 @@ func statusFor(cause string) int {
 	switch cause {
 	case CauseTimeout, CausePoolTimeout:
 		return http.StatusGatewayTimeout
-	case CauseCircuitOpen, CauseBulkheadFull:
+	case CauseCircuitOpen, CauseBulkheadFull, CauseQueueFull:
 		return http.StatusServiceUnavailable
 	case CauseCanceled:
 		return 499 // client closed the request

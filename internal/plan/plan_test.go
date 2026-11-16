@@ -634,3 +634,48 @@ func TestReplicaDisk(t *testing.T) {
 		t.Errorf("the primary got the replica's disk: %+v", db.Disk)
 	}
 }
+
+// A queue runs like a Redis that never evicts; a worker's job runners
+// each get a connection to it, and jobs carry the request's payload.
+func TestQueue(t *testing.T) {
+	d := loadFile(t, "../../examples/queue.yaml")
+	p, err := Build(d, Options{RunID: "r", Scale: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, w, api := p.Service("emails"), p.Service("sender"), p.Service("api")
+	if q.Kind != "queue" || q.Port != RedisPort || q.Image != pinnedRedis8 || q.Config["maxmemory-policy"] != "noeviction" || q.Config["maxmemory"] == "" {
+		t.Fatalf("queue %+v", q)
+	}
+	if a := findAssumption(p, "services.emails.config.maxmemory-policy"); a == nil || a.Value != "noeviction" {
+		t.Errorf("policy assumption %+v", a)
+	}
+	if w.Role != "worker" || w.Consume == nil || *w.Consume != (Consume{Queue: "emails", Concurrency: 5}) || len(w.Synthetic) != 2 {
+		t.Fatalf("worker %+v", w)
+	}
+	for i, cfg := range w.Synthetic {
+		if cfg.Role != "worker" || cfg.Consume == nil || cfg.Consume.Target != "emails" || cfg.Consume.Concurrency != 5 || cfg.Consume.Consumer != w.Containers[i] {
+			t.Errorf("worker config %d: role %q consume %+v", i, cfg.Role, cfg.Consume)
+		}
+		qt := cfg.Targets["emails"]
+		if qt.Kind != "queue" || qt.Pool != 6 || qt.Stream != "emails" || qt.Group != QueueGroup || qt.RowBytes != 1024 || len(qt.Addrs) != 1 {
+			t.Errorf("worker's queue target %+v", qt)
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Error(err)
+		}
+	}
+	if len(p.proxiesInto("sender", "emails")) != 1 {
+		t.Errorf("proxies from sender to emails: %v", p.proxiesInto("sender", "emails"))
+	}
+	at := api.Synthetic[0].Targets["emails"]
+	if at.Kind != "queue" || at.Pool != 10 || at.Stream != "emails" || api.Synthetic[0].Role != "" || api.Role != "" {
+		t.Errorf("api's queue target %+v, role %q", at, api.Synthetic[0].Role)
+	}
+	if a := findAssumption(p, "services.sender.consume.concurrency"); a == nil || a.Value != "5" || !strings.Contains(a.Why, "Sidekiq") {
+		t.Errorf("concurrency assumption %+v", a)
+	}
+	if exporters(q) != 1 {
+		t.Errorf("exporters for a queue: %d", exporters(q))
+	}
+}
