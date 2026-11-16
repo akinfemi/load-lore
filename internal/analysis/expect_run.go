@@ -39,7 +39,7 @@ func runMetric(a *Analysis, ws []*Window, name string) (rps, at float64, ok bool
 }
 
 // scoreRun scores a prediction of a whole-run metric: "within N% of X",
-// which a guess too high or too low breaks, or "none".
+// which a guess too high or too low breaks, "none" or "any".
 func scoreRun(a *Analysis, e *design.Expectation, ws []*Window) ExpectResult {
 	pr := e.Prediction
 	r := ExpectResult{Text: e.Text, Metric: pr.Subject.String(), Status: ExpectUnscored, Range: "the whole run"}
@@ -85,6 +85,18 @@ func scoreRun(a *Analysis, e *design.Expectation, ws []*Window) ExpectResult {
 			return r
 		default:
 			r.Status = ExpectHeld
+		}
+	case design.OpAny:
+		switch {
+		case happened:
+			r.Status = ExpectHeld
+			notes = append([]string{fmt.Sprintf("%s at %s rps offered, at %s", what, Rate(rps), Clock(at))}, notes...)
+		case !whole && a.StoppedEarly == nil:
+			r.Message = fmt.Sprintf("the load ended at %s, before the profile did, so it can't say %s", Clock(end), never)
+			return r
+		default:
+			r.Status = ExpectBroken
+			notes = append([]string{never}, notes...)
 		}
 	case design.OpWithin:
 		target, scaleNote := threshold(a, design.MetricRate, pr.Value)

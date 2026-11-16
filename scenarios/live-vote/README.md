@@ -23,13 +23,13 @@ The vote opens and traffic climbs from 200 to 4,500 requests a second over four 
 
 Before you run anything, write down your guesses. Don't work them out: a gut answer is fine, and where the run differs from it is what you'll learn from.
 
-1. At what load does it break, if it does?
-2. Which component gives out first, and how busy is the database's CPU when it does?
-3. If you gave the database twice the CPU, what would happen?
+1. Which component gives out first, and how busy is the database's CPU when it does?
+2. Would a database with twice the CPU take the vote without breaking? This is the guess the lesson turns on.
+3. At what load does it break, if it does? Only a rough guess.
 
-Loads depend on your machine: slower cores break the same design at a lower load, so a guess can miss even when the reasoning behind it is right. If it breaks, where it breaks also moves from run to run on the same machine, by up to a quarter of the load, so run it twice before reading much into one break point; the break guess scores right within 35% for that reason.
+Hot rows tip over unpredictably. When many writes queue for one row, the line can stay short for a while and then collapse within seconds, so where this design breaks moves from run to run on the same machine, by up to a quarter of the load, even when the machine's speed doesn't change. That's part of what's being taught: a hot row gives no warning before it goes. So the load guess scores loosely, right within 35%, and loads also depend on your machine: slower cores break the same design at a lower load. What doesn't move from run to run is what more CPU does, which is why question 2 is the one that counts.
 
-`loadl predict design.yaml` asks questions like these and writes your answers into the `expect` block at the bottom of `design.yaml`, or write them there yourself. The report scores each one against what the run measured. The line already there is an example; the grammar is in the [design file reference](../../skills/loadlore-designer/references/schema.md).
+`loadl predict design.yaml` asks these questions and writes your answers into the `expect` block at the bottom of `design.yaml`, or write them there yourself. Your answer to question 2 goes into `variants/bigger-db/design.yaml`, this design with twice the database's CPU and nothing else changed: run that design after this one, and its report scores the guess. The report scores each line against what the run measured. The line already there is an example; the grammar is in the [design file reference](../../skills/loadlore-designer/references/schema.md).
 
 ## Run it
 
@@ -52,4 +52,4 @@ loadl compare <first-run> latest -o compare.md
 
 Some directions: the database's resources, the pool sizes, and where and how a vote is counted. Before each run, work out how many votes a second land on the favourite's row.
 
-`solutions/` has one worked answer with its report, and `variants/bigger-db` is the fix that fits a different problem. They give the game away, so try your own first.
+`solutions/` has one worked answer with its report; it gives the game away, so try your own first. `variants/bigger-db/design.yaml` is the twice-the-CPU design that question 2 is about: run it to score your guess, but its README tells you what happens, so read that after.

@@ -390,6 +390,42 @@ func TestPredict(t *testing.T) {
 	}
 }
 
+// A question about another design writes its line there: the live vote's
+// twice-the-CPU guess goes into the bigger-db variant, whose run scores it.
+func TestPredictIntoAnotherDesign(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "live-vote")
+	if err := os.CopyFS(dir, os.DirFS("../../scenarios/live-vote")); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "design.yaml")
+	variant := filepath.Join(dir, "variants", "bigger-db", "design.yaml")
+	before, _ := os.ReadFile(variant)
+
+	if _, errOut, code := runCLI(t, "predict", path, "--json", "--answer", "1=db", "--answer", "2=near its limit", "--answer", "3=maybe", "--answer", "4=3000"); code == exitOK || !strings.Contains(errOut, "answer yes or no") {
+		t.Errorf("a bad yes/no: exit %d, %s", code, errOut)
+	}
+	if b, _ := os.ReadFile(variant); string(b) != string(before) {
+		t.Error("a bad answer changed the variant")
+	}
+
+	out, _, code := runCLI(t, "predict", path, "--json", "--answer", "1=db", "--answer", "2=near its limit", "--answer", "3=yes", "--answer", "4=3000")
+	var res predictResult
+	if code != exitOK || json.Unmarshal([]byte(out), &res) != nil {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if len(res.Lines) != 3 || len(res.Elsewhere) != 1 || !strings.HasSuffix(res.Elsewhere[0].Design, filepath.Join("variants", "bigger-db", "design.yaml")) {
+		t.Errorf("result %+v", res)
+	}
+	b, _ := os.ReadFile(path)
+	if want := "expect:\n  - note: \"db gives out first\"\n  - note: \"database CPU when it gives out: near its limit\"\n  - break_load_rps within 35% of 3000\n"; !strings.HasSuffix(string(b), want) {
+		t.Errorf("design ends\n%s", b[len(b)-200:])
+	}
+	b, _ = os.ReadFile(variant)
+	if want := "expect:\n  - break_load_rps none\n"; !strings.HasSuffix(string(b), want) {
+		t.Errorf("variant ends\n%s", b[len(b)-200:])
+	}
+}
+
 func TestStatus(t *testing.T) {
 	t.Chdir(t.TempDir())
 	dir := filepath.Join(rundir.Root, "demo-20261111-120000")

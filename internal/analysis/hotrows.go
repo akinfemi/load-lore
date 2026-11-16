@@ -147,7 +147,7 @@ func hotRowsEdge(a *Analysis, ws []*Window, svc, db string) *Diagnosis {
 		From:  ws[from].Start,
 		To:    ws[to].Start + WindowSeconds,
 		comp:  db,
-		Summary: fmt.Sprintf("From %s, %s's writes to %s took %s each, %.1fx their %s at low load, %s, and %s backends of %s waited on locks. Writes to the same popular rows wait for each other's row locks and go through one at a time.%s",
+		Summary: fmt.Sprintf("From %s, %s's writes to %s took %s each, %.1fx their %s at low load, %s, and %s backends of %s waited on locks. Writes to the same popular rows wait for each other's row locks and go through one at a time.%s Where hot rows tip over moves from run to run: the queue for a row can stay short and then collapse within seconds, so the same design can break at loads a quarter apart. Judge a fix by whether it takes the writes off the row, not by how much later it breaks.",
 			Clock(ws[from].Start), svc, db, Ms(wr), wr/wb, Ms(wb), reads, lockText(*locks(peak)), db, burned),
 	}
 	d.Evidence = append(d.Evidence,

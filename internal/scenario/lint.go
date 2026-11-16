@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -68,6 +69,12 @@ func (s *Scenario) Lint() []Problem {
 	for i, q := range m.Predict {
 		if p := q.Problem(); p != "" {
 			bad(MetaFile, "predict[%d]: %s", i, p)
+		} else if q.Design != "" {
+			if src, err := s.ReadFile(filepath.ToSlash(q.Design)); err != nil {
+				bad(MetaFile, "predict[%d]: design %s isn't in the scenario", i, q.Design)
+			} else if _, diags := design.Load(src); diags.HasErrors() {
+				bad(MetaFile, "predict[%d]: design %s doesn't validate", i, q.Design)
+			}
 		}
 	}
 	if len(m.Predict) == 0 {

@@ -760,8 +760,8 @@ func (v *validator) expect() {
 		_, runMetric := RunMetrics[pr.Subject.Metric]
 		runMetric = runMetric && pr.Subject.Service == ""
 		switch {
-		case runMetric && pr.Op != OpWithin && pr.Op != OpNone:
-			v.exprErr(p, pr.Subject.Offset, CodeExpectMetric, "%s is the whole run's: predict it as %s within 25%% of <rps>, or %s none", pr.Subject.Metric, pr.Subject.Metric, pr.Subject.Metric)
+		case runMetric && pr.Op != OpWithin && pr.Op != OpNone && pr.Op != OpAny:
+			v.exprErr(p, pr.Subject.Offset, CodeExpectMetric, "%s is the whole run's: predict it as %s within 25%% of <rps>, %s none or %s any", pr.Subject.Metric, pr.Subject.Metric, pr.Subject.Metric, pr.Subject.Metric)
 			continue
 		case runMetric:
 			if pr.Op == OpWithin {
@@ -773,7 +773,7 @@ func (v *validator) expect() {
 				}
 			}
 			continue
-		case pr.Op == OpWithin || pr.Op == OpNone:
+		case pr.Op == OpWithin || pr.Op == OpNone || pr.Op == OpAny:
 			v.exprErr(p, pr.Subject.Offset, CodeExpectMetric, "%q is for the whole run's metrics (%s), not %s", pr.Op, metricNames(RunMetrics), pr.Subject)
 			continue
 		}

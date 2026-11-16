@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,7 +29,15 @@ type predictResult struct {
 	Scenario  string            `json:"scenario"`
 	Design    string            `json:"design"`
 	Questions []predictQuestion `json:"questions"`
-	Lines     []string          `json:"lines,omitempty"` // written, once every question is answered
+	Lines     []string          `json:"lines,omitempty"` // written to Design, once every question is answered
+	// Elsewhere are lines written to other designs of the scenario, for
+	// questions about them: each design's own run scores them.
+	Elsewhere []predictFile `json:"elsewhere,omitempty"`
+}
+
+type predictFile struct {
+	Design string   `json:"design"`
+	Lines  []string `json:"lines"`
 }
 
 func newPredictCmd(g *globalOpts) *cobra.Command {
@@ -44,7 +53,10 @@ scores the lines after loadl run.
 In a terminal, it asks each question in turn. --answer N=value answers
 question N without asking, for scripts and AI agents; --json with no
 answers lists the questions. Loads are requests per second (1000, 1.5k)
-or never; a component is one of the design's services. The answers are
+or never; a component is one of the design's services; some questions
+take yes or no. A question about another of the scenario's designs, such
+as a variant with the change it asks about, writes its line into that
+design, whose run scores it. The answers are
 guesses, not calculations: the report compares them with the run.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -118,27 +130,76 @@ guesses, not calculations: the report compares them with the run.`,
 			if len(missing) > 0 {
 				return fmt.Errorf("questions %s have no answer: give --answer N=value for each (loadl predict %s --json lists them)", strings.Join(missing, ", "), path)
 			}
-			updated, err := predict.Rewrite(src, lines)
-			if err != nil {
-				return err
+			// Each line goes into the design its question is about: this
+			// one, or another of the scenario's. Every file is rewritten
+			// in memory first, so a bad one leaves them all as they were.
+			own, _ := filepath.Abs(path)
+			byFile := map[string][]string{own: nil}
+			order := []string{own}
+			for i, q := range res.Questions {
+				f := own
+				if q.Design != "" {
+					f = filepath.Join(sc.Path, filepath.FromSlash(q.Design))
+				}
+				if _, ok := byFile[f]; !ok {
+					order = append(order, f)
+				}
+				byFile[f] = append(byFile[f], lines[i])
 			}
-			if err := os.WriteFile(path, updated, 0o644); err != nil {
-				return err
+			updated := map[string][]byte{}
+			for _, f := range order {
+				fsrc := src
+				if f != own {
+					if fsrc, err = os.ReadFile(f); err != nil {
+						return err
+					}
+				}
+				if updated[f], err = predict.Rewrite(fsrc, byFile[f]); err != nil {
+					return fmt.Errorf("%s: %w", f, err)
+				}
 			}
-			res.Lines = lines
+			for _, f := range order {
+				if err := os.WriteFile(f, updated[f], 0o644); err != nil {
+					return err
+				}
+			}
+			res.Lines = byFile[own]
+			for _, f := range order[1:] {
+				res.Elsewhere = append(res.Elsewhere, predictFile{Design: relTo(f), Lines: byFile[f]})
+			}
 			if g.json {
 				return writeJSON(out, res)
 			}
-			fmt.Fprintf(out, "\nwrote %d predictions to %s:\n", len(lines), path)
-			for _, l := range lines {
+			fmt.Fprintf(out, "\nwrote %d predictions to %s:\n", len(res.Lines), path)
+			for _, l := range res.Lines {
 				fmt.Fprintf(out, "  - %s\n", l)
 			}
 			fmt.Fprintf(out, "the report scores them after loadl run %s\n", path)
+			for _, e := range res.Elsewhere {
+				fmt.Fprintf(out, "\nand %d to %s, the design that question is about:\n", len(e.Lines), e.Design)
+				for _, l := range e.Lines {
+					fmt.Fprintf(out, "  - %s\n", l)
+				}
+				fmt.Fprintf(out, "run it to score them: loadl run %s\n", e.Design)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringArrayVar(&answers, "answer", nil, "answer question N without asking, as N=value (repeatable)")
 	return cmd
+}
+
+// relTo is f as a path from the working directory, or f itself when that
+// doesn't work.
+func relTo(f string) string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return f
+	}
+	if r, err := filepath.Rel(wd, f); err == nil {
+		return r
+	}
+	return f
 }
 
 // guessIntro comes before the first question asked in a terminal. The
@@ -153,6 +214,8 @@ func ask(out io.Writer, in *bufio.Reader, q predictQuestion, services []string) 
 	fmt.Fprintf(out, "\n%d. %s\n", q.N, q.Ask)
 	if len(q.Choices) > 0 {
 		fmt.Fprintf(out, "   (%s)\n", strings.Join(q.Choices, ", "))
+	} else if q.Answer == scenario.AnswerYesNo {
+		fmt.Fprintln(out, "   (yes or no)")
 	}
 	for {
 		fmt.Fprint(out, "> ")

@@ -41,6 +41,14 @@ func Line(q scenario.Question, answer string, services []string) (string, error)
 			return "", fmt.Errorf("%q isn't one of the design's services: %s", answer, strings.Join(services, ", "))
 		}
 		v = services[i]
+	case scenario.AnswerYesNo:
+		switch strings.ToLower(strings.TrimSuffix(answer, ".")) {
+		case "yes", "y":
+			return q.Expect, nil
+		case "no", "n":
+			return q.No, nil
+		}
+		return "", fmt.Errorf("answer yes or no")
 	case scenario.AnswerText:
 		// Answers go inside a quoted note, so a double quote would end it.
 		v = strings.ReplaceAll(strings.Join(strings.Fields(answer), " "), `"`, "'")

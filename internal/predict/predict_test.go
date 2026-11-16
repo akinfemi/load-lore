@@ -13,6 +13,8 @@ var (
 		Expect: "p99_ms < 500 until load_rps >= {answer}", Never: "p99_ms < 500 throughout"}
 	first = scenario.Question{Ask: "Which component gives out first?", Answer: scenario.AnswerService,
 		Expect: `note: "{answer} gives out first"`}
+	cpu = scenario.Question{Ask: "Would twice the CPU fix it?", Answer: scenario.AnswerYesNo,
+		Expect: "break_load_rps none", No: "break_load_rps any", Design: "variants/bigger-db/design.yaml"}
 	open = scenario.Question{Ask: "What would bigger pools do?", Answer: scenario.AnswerText,
 		Expect: `note: "bigger pools: {answer}"`}
 )
@@ -33,6 +35,9 @@ func TestLine(t *testing.T) {
 		{load, "", "", "an answer is needed"},
 		{first, "DB", `note: "db gives out first"`, ""},
 		{first, "cache", "", "isn't one of the design's services: lb, api, db"},
+		{cpu, "Yes", "break_load_rps none", ""},
+		{cpu, "n", "break_load_rps any", ""},
+		{cpu, "maybe", "", "answer yes or no"},
 		{open, `they'd "hit"   max_connections`, `note: "bigger pools: they'd 'hit' max_connections"`, ""},
 	} {
 		got, err := Line(tc.q, tc.answer, services)

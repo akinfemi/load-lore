@@ -288,7 +288,7 @@ One prediction per line:
 
 End-to-end metrics: `p50_ms`, `p95_ms`, `p99_ms`, `error_rate`, `rps`, and `load_rps` (conditions only).
 
-Whole-run metrics, for "where will it break?" predictions: `break_load_rps`, the offered load where the verdict's break starts, and `errors_load_rps`, the offered load where 1% or more of requests first fail, two windows in a row. Predict them as `within <N>% of <value>`, which holds when the measured load is within N% of the guess either side, so a guess too high and one too low both break; or as `none`, which holds when it never happened. They take no qualifier. Prefer them to `until load_rps >= X` lines for a load guess: an `until` line only breaks when the guess is too high.
+Whole-run metrics, for "where will it break?" predictions: `break_load_rps`, the offered load where the verdict's break starts, and `errors_load_rps`, the offered load where 1% or more of requests first fail, two windows in a row. Predict them as `within <N>% of <value>`, which holds when the measured load is within N% of the guess either side, so a guess too high and one too low both break; as `none`, which holds when it never happened; or as `any`, which holds when it happened at any load. They take no qualifier. Prefer them to `until load_rps >= X` lines for a load guess: an `until` line only breaks when the guess is too high.
 
 Per-component metrics, written `<service>.<metric>`:
 
@@ -306,6 +306,7 @@ Values: latencies in milliseconds (`300`, `300ms` or `0.3s`); `error_rate`, `hit
 expect:
   - break_load_rps within 25% of 3000
   - errors_load_rps none
+  - break_load_rps any        # it breaks somewhere in the profile
   - p99_ms < 300 until load_rps >= 2000
   - cache.hit_rate > 80% after 1m
   - db.connections <= 96

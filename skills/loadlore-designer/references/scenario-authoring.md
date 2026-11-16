@@ -89,7 +89,7 @@ check:
 
 Arrivals are open, and each needs a free VU. VUs started mid-run take time to start and drop arrivals meanwhile, which in a stall lightens the load just when it matters, so `load` sizes them from measurement. Leave it out until the first check has run, then copy the numbers the check prints. Designs outside a scenario get the peak rate × `slo.p99_ms`.
 
-`predict` lists the README's questions for `loadl predict`. Each takes an answer of a kind, `rps` (an offered load, or `never`), `service` (one of the design's services) or `text`, and becomes the `expect` line in `expect`, with `{answer}` where the answer goes; an `rps` question also gives the `never` line. Write each `ask` so a beginner can answer it without arithmetic: an `rps` question says a rough guess is fine (`loadl predict` already says loads depend on the machine). A question the grammar can't score becomes a quoted `note`:
+`predict` lists the README's questions for `loadl predict`. Each takes an answer of a kind, `rps` (an offered load, or `never`), `service` (one of the design's services), `yesno` or `text`, and becomes the `expect` line in `expect`, with `{answer}` where the answer goes; an `rps` question also gives the `never` line, and a `yesno` one gives `expect` for yes and `no` for no. A question about another of the scenario's designs names it in `design`, a path inside the scenario's folder: its line goes into that design's `expect` block, and that design's run scores it. Write each `ask` so a beginner can answer it without arithmetic: an `rps` question says a rough guess is fine (`loadl predict` already says loads depend on the machine). A question the grammar can't score becomes a quoted `note`:
 
 ```yaml
 predict:
@@ -100,7 +100,14 @@ predict:
   - ask: Which component gives out first?
     answer: service
     expect: 'note: "{answer} gives out first"'
+  - ask: Would a database with twice the CPU hold? Your answer goes into variants/bigger-db/design.yaml, and its run scores it.
+    answer: yesno
+    design: variants/bigger-db/design.yaml
+    expect: break_load_rps none
+    no: break_load_rps any
 ```
+
+Score what stays put from run to run. Where a failure that tips over breaks moves by a quarter of the load or more (see "Leave room after the break" below), so a load guess there is a loose, secondary question; the stable result is relative (does a change fix it or not), and that's the question to score, with a variant as the design that makes the change. `scenarios/live-vote` does this.
 
 Size `host` from the plan: the design's limits plus Loadlore's containers (`loadl run` prints the budgets). Give every Postgres at least 0.4 CPU at `--scale 1`, the smallest measured to behave; `--static` warns below it, since a smaller one can stall under CPU throttling and teach something else. Breaking points move with core speed, so state the claims as relative results (broke or held, which rule fired, the gain from a fix), never as request rates. Rule ids are `pool-exhausted`, `queueing-knee`, `connection-storm`, `retry-storm`, `cold-cache`, `working-set`, `hot-rows`, `replication-lag` and `autoscale-lag` in this version. Break signals are `latency`, `errors` and `throughput`; a claim with `signals` needs `verdict: broke`.
 

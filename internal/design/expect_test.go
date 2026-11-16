@@ -112,6 +112,9 @@ func TestParseRunMetricForms(t *testing.T) {
 	if p, err := ParseExpect("errors_load_rps none"); err != nil || p.Op != OpNone {
 		t.Errorf("none: %+v, %v", p, err)
 	}
+	if p, err := ParseExpect("break_load_rps any"); err != nil || p.Op != OpAny {
+		t.Errorf("any: %+v, %v", p, err)
+	}
 	for line, want := range map[string]string{
 		"break_load_rps within 25% 1000":      `expected "of"`,
 		"break_load_rps within 25% of 1000 x": `unexpected "x"`,

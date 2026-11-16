@@ -91,18 +91,27 @@ type LoadMeta struct {
 type Question struct {
 	Ask string `yaml:"ask" json:"ask"`
 	// Answer is what kind of answer it takes: rps (an offered load, or
-	// "never"), service (one of the design's services) or text.
+	// "never"), service (one of the design's services), yesno or text.
 	Answer string `yaml:"answer" json:"answer"`
 	// Expect is the expect line the answer becomes, with {answer} where
 	// the answer goes; Never is the line for an rps answer of "never".
+	// For a yesno answer, Expect is the line for yes and No the line for
+	// no.
 	Expect string `yaml:"expect" json:"expect"`
 	Never  string `yaml:"never,omitempty" json:"never,omitempty"`
+	No     string `yaml:"no,omitempty" json:"no,omitempty"`
+	// Design is the design file the line goes into, relative to the
+	// scenario's folder, for a guess about another design, such as a
+	// variant that makes the change the question asks about: its run
+	// scores the guess. Empty for the design being predicted.
+	Design string `yaml:"design,omitempty" json:"design,omitempty"`
 }
 
 // Answer kinds.
 const (
 	AnswerRPS     = "rps"
 	AnswerService = "service"
+	AnswerYesNo   = "yesno"
 	AnswerText    = "text"
 )
 
@@ -377,12 +386,29 @@ func (q Question) Problem() string {
 	if strings.TrimSpace(q.Ask) == "" {
 		return "ask is required: the question, as the learner reads it"
 	}
+	if d := q.Design; d != "" && (filepath.IsAbs(d) || !fs.ValidPath(filepath.ToSlash(d)) || filepath.Ext(d) != ".yaml") {
+		return fmt.Sprintf("design %q must be a .yaml file inside the scenario's folder, such as variants/bigger-db/design.yaml", d)
+	}
+	if q.Answer == AnswerYesNo {
+		if q.Expect == "" || q.No == "" {
+			return "a yesno answer needs expect (the line for yes) and no (the line for no)"
+		}
+		for _, l := range []string{q.Expect, q.No} {
+			if strings.HasPrefix(l, "note:") {
+				return "a yesno answer is scored: its expect and no lines can't be notes"
+			}
+			if _, err := design.ParseExpect(l); err != nil {
+				return fmt.Sprintf("%q isn't a valid expect line: %v", l, err)
+			}
+		}
+		return ""
+	}
 	if !strings.Contains(q.Expect, "{answer}") {
 		return "expect must contain {answer}, where the answer goes"
 	}
 	sample := map[string]string{AnswerRPS: "1000", AnswerService: "svc", AnswerText: "an answer"}[q.Answer]
 	if sample == "" {
-		return fmt.Sprintf("answer must be rps, service or text, not %q", q.Answer)
+		return fmt.Sprintf("answer must be rps, service, yesno or text, not %q", q.Answer)
 	}
 	if q.Answer == AnswerRPS && q.Never == "" {
 		return "never is required for an rps answer: the line when the learner answers never"

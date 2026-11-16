@@ -35,30 +35,40 @@ check:
     bigger-db: { verdict: broke, diagnoses: [hot-rows] }
 
 # What `loadl predict` asks before a run; each answer becomes an expect
-# line in design.yaml. A load guess scores right within 35% here, not the
-# usual 25%, too high or too low both count as wrong: the breaks moved
-# between about 3,335 and 4,410 rps over the checks, and at 25% a guess
-# equal to one run's break (3,335) would score wrong against another's
-# (4,410, +32%). At 35%, every break seen scores right against every
-# other.
+# line. The scored question is the relative one: whether twice the
+# database's CPU holds the vote. Its answer goes into
+# variants/bigger-db/design.yaml, the design with that change, and that
+# run scores it. It's the stable result: bigger-db never held. It broke
+# 2:50 and 4:10 into the load (the starting design 2:50 to 3:50), and in
+# the two checks before the hold it collapsed in the ramp's last window.
+# The Redis tally always held.
+#
+# The load guess is a loose, secondary question. Where hot rows tip over
+# moves from run to run: the starting design broke at about 3,335, 3,873
+# and 4,410 rps over three checks on the reference machine, and that
+# isn't the host: the two furthest apart had host speed indexes of 1021
+# and 1031. So it scores right within 35%, not the usual 25%, too high or
+# too low both counting as wrong: at 25%, a guess equal to one run's break
+# (3,335) would score wrong against another's (4,410, +32%). At 35%,
+# every break seen scores right against every other.
 #
 # The load ramps from 200 to 4,500 rps over 4 minutes, then holds 4,500
-# for a minute. The hold is there so a late
-# break counts: hot rows tip over at a load that moves from run to run
-# (2:50 to 3:50 into the ramp over three checks on the reference machine,
-# 3:10 to 3:50 for bigger-db), and a design that gave out in the ramp's
-# last window was only a stall, so the check came out inconclusive.
+# for a minute, so a late break counts: a design that gave out in the
+# ramp's last window was only a stall, and the check came out
+# inconclusive.
 predict:
-  - ask: At what offered load, in requests per second, will it break? The load ramps from 200 to 4,500 rps, then holds there for a minute. A rough guess is fine; answer never if you think it holds.
-    answer: rps
-    expect: break_load_rps within 35% of {answer}
-    never: break_load_rps none
   - ask: Which component gives out first?
     answer: service
     expect: 'note: "{answer} gives out first"'
   - ask: How busy is the database's CPU when it does?
     answer: text
     expect: 'note: "database CPU when it gives out: {answer}"'
-  - ask: If you gave the database twice the CPU, what would happen?
-    answer: text
-    expect: 'note: "twice the CPU: {answer}"'
+  - ask: Would a database with twice the CPU take the vote without breaking? Answer yes or no. Your answer goes into variants/bigger-db/design.yaml, this design with twice the database's CPU, and its run scores it.
+    answer: yesno
+    design: variants/bigger-db/design.yaml
+    expect: break_load_rps none
+    no: break_load_rps any
+  - ask: At what offered load, in requests per second, will this design break? The load ramps from 200 to 4,500 rps, then holds there for a minute. A rough guess is fine, and it scores loosely, within 35%; answer never if you think it holds.
+    answer: rps
+    expect: break_load_rps within 35% of {answer}
+    never: break_load_rps none

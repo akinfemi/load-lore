@@ -63,6 +63,8 @@ const (
 	OpWithin CmpOp = "within"
 	// OpNone is "<metric> none": held when it never happened.
 	OpNone CmpOp = "none"
+	// OpAny is "<metric> any": held when it happened, at any load.
+	OpAny CmpOp = "any"
 )
 
 // Holds reports whether "actual op threshold" is true.
@@ -137,11 +139,11 @@ func ParseExpect(line string) (*Prediction, error) {
 	if pred.Subject, err = p.metric("a metric such as p99_ms or db.connections"); err != nil {
 		return nil, err
 	}
-	// <metric> within <N>% of <value>, or <metric> none.
+	// <metric> within <N>% of <value>, <metric> none or <metric> any.
 	switch t := p.toks[p.pos]; {
-	case t.kind == tokWord && t.text == "none":
+	case t.kind == tokWord && (t.text == "none" || t.text == "any"):
 		p.next()
-		pred.Op = OpNone
+		pred.Op = CmpOp(t.text)
 		return pred, p.end()
 	case t.kind == tokWord && t.text == "within":
 		p.next()

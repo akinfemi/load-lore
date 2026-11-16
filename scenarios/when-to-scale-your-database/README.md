@@ -56,7 +56,7 @@ loadl compare <first-run> latest -o compare.md
 
 Some directions: the database's resources, the work each request asks of it, the pool sizes, or keeping requests away from the database. They don't all help, and finding out which ones don't is part of the lesson.
 
-Scaling the database out isn't one of the options yet: this version of Loadlore doesn't model read replicas or sharding, so a design with one Postgres stays one Postgres.
+Scaling the database out is an option too: a design can add a read replica (a `postgres-replica` service with `primary: db`) and send the api's reads to it, and [Stale orders](../stale-orders/) covers what they cost. Sharding isn't modelled yet.
 
 You may also see a connection storm early in the ramp. [The connection pool trap](../connection-pool-trap/) covers it.
 

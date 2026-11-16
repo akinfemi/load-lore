@@ -357,7 +357,7 @@ func TestRunMetricPredictions(t *testing.T) {
 	w.Failed = func(t float64) float64 { return 0.2 * boolF(t > 70) } // breaks in the window from 1:10, at 750 rps
 	w.Expect = []string{
 		"break_load_rps within 25% of 700", "break_load_rps within 25% of 400", "break_load_rps within 25% of 1200",
-		"break_load_rps none", "errors_load_rps within 10% of 750",
+		"break_load_rps none", "errors_load_rps within 10% of 750", "break_load_rps any",
 	}
 	a := analyze(t, analysistest.WriteRun(t, w, 1))
 	want := []struct {
@@ -369,6 +369,7 @@ func TestRunMetricPredictions(t *testing.T) {
 		{ExpectBroken, "too high: it broke at 750 rps, 38% below the guess of 1,200"},
 		{ExpectBroken, "it broke at 750 rps offered, at 1:10"},
 		{ExpectHeld, "requests started failing at 750 rps"},
+		{ExpectHeld, "it broke at 750 rps offered, at 1:10"},
 	}
 	for i, e := range a.Expect {
 		if e.Status != want[i].status || !strings.HasPrefix(e.Message, want[i].msg) {
@@ -377,18 +378,18 @@ func TestRunMetricPredictions(t *testing.T) {
 	}
 
 	h := analysistest.Healthy()
-	h.Expect = []string{"break_load_rps none", "break_load_rps within 25% of 500", "errors_load_rps none"}
+	h.Expect = []string{"break_load_rps none", "break_load_rps within 25% of 500", "errors_load_rps none", "break_load_rps any"}
 	a = analyze(t, analysistest.WriteRun(t, h, 1))
-	if e := a.Expect; e[0].Status != ExpectHeld || e[1].Status != ExpectBroken || !strings.Contains(e[1].Message, "too low: it never broke up to 950 rps") || e[2].Status != ExpectHeld {
+	if e := a.Expect; e[0].Status != ExpectHeld || e[1].Status != ExpectBroken || !strings.Contains(e[1].Message, "too low: it never broke up to 950 rps") || e[2].Status != ExpectHeld || e[3].Status != ExpectBroken || e[3].Message != "it never broke" {
 		t.Errorf("a run that held: %+v", e)
 	}
 
 	// Interrupted at 0:30: it can't say it never broke.
 	h.EndEarly = 70 * time.Second
 	h.RunJSON = map[string]any{"status": "interrupted", "error": "interrupted"}
-	h.Expect = []string{"break_load_rps none", "break_load_rps within 25% of 800"}
+	h.Expect = []string{"break_load_rps none", "break_load_rps within 25% of 800", "break_load_rps any"}
 	a = analyze(t, analysistest.WriteRun(t, h, 1))
-	if e := a.Expect; e[0].Status != ExpectUnscored || e[1].Status != ExpectUnscored {
+	if e := a.Expect; e[0].Status != ExpectUnscored || e[1].Status != ExpectUnscored || e[2].Status != ExpectUnscored {
 		t.Errorf("an interrupted run: %+v", e)
 	}
 }
