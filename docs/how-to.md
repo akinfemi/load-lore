@@ -236,6 +236,7 @@ The report is made from the run folder alone, so `loadl report <run>` can rewrit
   | Autoscale lag | The run broke while an autoscaled service's replicas were saturated and the autoscaler was still adding them, or was already at its max. |
   | Consumer lag | Jobs waited in a queue because its workers finished them more slowly than they arrived; a full queue, when it ran out of memory and refused new jobs. A run can hold while jobs back up: the requests that published them were answered fast. It says whether the workers ran out of CPU, were waiting on their calls, or were queuing for the same hot rows, where more job runners don't help. |
   | Hot rows | Writes queued on row locks for the same few rows. Reads of those rows can slow too, and past a point the contention burns the database's CPU. A slow disk under the whole run, which makes every commit hold its lock longer, still counts; one that starts mid-run doesn't, since it slows writes by itself. |
+  | Hot shard | One shard took far more than its share of a caller's calls by key and was busy while another shard idled: the popular keys live on it, and more shards leave them there. |
 
   Two diagnoses can both be true, one causing the other; the report says when it sees that.
 - **Why requests failed**, under the diagnosis: failed requests counted by cause (timeouts, refused connections, `max_connections`, an open circuit breaker…).

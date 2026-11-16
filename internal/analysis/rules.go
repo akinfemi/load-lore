@@ -35,7 +35,7 @@ type Evidence struct {
 
 // RuleIDs are the diagnosis rules this version runs, by the id a
 // Diagnosis carries in Rule.
-var RuleIDs = []string{"pool-exhausted", "queueing-knee", "connection-storm", "retry-storm", "cold-cache", "working-set", "hot-rows", "replication-lag", "autoscale-lag", "consumer-lag"}
+var RuleIDs = []string{"pool-exhausted", "queueing-knee", "connection-storm", "retry-storm", "cold-cache", "working-set", "hot-rows", "replication-lag", "autoscale-lag", "consumer-lag", "hot-shard"}
 
 // Rule thresholds. Rules are deterministic and versioned with the code.
 const (
@@ -64,7 +64,7 @@ const (
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
-const RuleVersion = "14"
+const RuleVersion = "15"
 
 func diagnose(a *Analysis) []*Diagnosis {
 	out := []*Diagnosis{}
@@ -74,6 +74,7 @@ func diagnose(a *Analysis) []*Diagnosis {
 	out = append(out, coldCache(a)...)
 	out = append(out, workingSet(a)...)
 	out = append(out, hotRows(a)...)
+	out = append(out, hotShard(a)...)
 	out = append(out, replicationLag(a)...)
 	out = append(out, autoscaleLag(a)...)
 	out = append(out, consumerLag(a)...)
@@ -95,6 +96,14 @@ func diagnose(a *Analysis) []*Diagnosis {
 		for _, h := range out {
 			if h.Rule == "hot-rows" && h.comp == d.comp && h.From < d.To && d.From < h.To {
 				d.Next = fmt.Sprintf("%s's CPU went on contention for a few hot rows (see hot rows), not on more work, so more CPU moves the break less than it would for real work: spread the writes over more rows first.", d.comp)
+				break
+			}
+		}
+		// A knee on a hot shard: the popular keys live there, so more CPU
+		// everywhere, or more shards, leaves them where they are.
+		for _, h := range out {
+			if h.Rule == "hot-shard" && h.comp == d.comp && h.From < d.To && d.From < h.To {
+				d.Next = fmt.Sprintf("%s is a hot shard (see hot shard): its load comes from a few popular keys, so more shards or more CPU on every shard move the break little. Take the load off those keys first.", d.comp)
 				break
 			}
 		}

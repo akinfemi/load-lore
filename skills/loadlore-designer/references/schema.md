@@ -96,7 +96,9 @@ Call fields:
 
 | Field | Default | Values |
 | --- | --- | --- |
-| `target` | required | A service name |
+| `target` | required, or `shards` | A service name |
+| `shards` | none | Instead of `target`, for data split across postgres services: the shards, two or more, in order. See [Sharding](#sharding) |
+| `shard_by` | `key` | With `shards`: `key` sends each call to the one shard that holds its key; `all` sends it to every shard at once and waits for the slowest (a fan-out read; `read` only) |
 | `op` | required | `read`, `write` (postgres, pgbouncer) · `get`, `set`, `del` (redis) · `publish` (queue: adds one job) · `http` (application services and lb) |
 | `count` | `1` | Times per request |
 | `when` | `always` | `always`, `read`, `write` (from the workload mix) |
@@ -107,6 +109,24 @@ Call fields:
 | `ttl_s` | none | For `set` only |
 | `query` | `point` | `point` (one row by key), `range` (`rows` rows in key order from the key: `id >= key ORDER BY id LIMIT rows`), `batch` (the key and the `rows - 1` keys after it in one statement: `id = ANY(keys)`), `scan` (filter on `user_id`: a full table scan unless `user_id` is indexed); `read` only |
 | `rows` | `10` | Rows per `range` read, or keys per `batch` read |
+
+### Sharding
+
+A call to data split across several postgres services names them as `shards` instead of a `target`:
+
+```yaml
+api:
+  behavior:
+    calls:
+      - { shards: [db0, db1, db2, db3], op: read, when: read }    # one shard: the key's
+      - { shards: [db0, db1, db2, db3], op: write, when: write }
+      - { shards: [db0, db1, db2, db3], shard_by: all, op: read, query: range, rows: 10 }   # every shard
+  pools: { db0: 20, db1: 20, db2: 20, db3: 20 }   # a pool per shard, per replica
+```
+
+A key goes to shard `(key - 1) mod N` of the N shards, as that shard's own row `(key - 1) div N + 1`: hash sharding on a numeric key, where consecutive keys land on different shards. So a shard seeded with `rows` rows holds its `rows` keys, and the keyspace (`workload.keys.count`, by default) is N × `rows`. Give each shard the same dataset. A hot key stays on one shard however many there are: a `hotspot` or `zipf` key distribution sends its popular keys' traffic to whichever shards hold them.
+
+`shard_by: all` is a fan-out read: one call to every shard at once, done when the slowest answers, failed if any fails, as a query that can't be routed by key (a search, a listing across all users) is. It costs every shard a query, so it grows with the shard count. Each shard has its own pool, and the report shows each shard as its own component.
 
 ### Workers (`role: worker`)
 

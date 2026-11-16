@@ -752,8 +752,10 @@ func callTargets(calls []*design.Call) []string {
 	var walk func([]*design.Call)
 	walk = func(cs []*design.Call) {
 		for _, c := range cs {
-			if !slices.Contains(out, c.Target) {
-				out = append(out, c.Target)
+			for _, t := range c.Targets() {
+				if !slices.Contains(out, t) {
+					out = append(out, t)
+				}
 			}
 			walk(c.OnMiss)
 		}
@@ -917,7 +919,7 @@ func rowBytesBehind(byName map[string]*Service) int {
 func convertCalls(calls []*design.Call) []synthetic.Call {
 	out := make([]synthetic.Call, 0, len(calls))
 	for _, c := range calls {
-		sc := synthetic.Call{Target: c.Target, Op: c.Op, Count: *c.Count, When: c.When, Mode: c.Mode, Query: c.Query, OnMiss: convertCalls(c.OnMiss), Coalesce: c.Coalesce}
+		sc := synthetic.Call{Target: c.Target, Shards: c.Shards, ShardBy: c.ShardBy, Op: c.Op, Count: *c.Count, When: c.When, Mode: c.Mode, Query: c.Query, OnMiss: convertCalls(c.OnMiss), Coalesce: c.Coalesce}
 		if c.AfterMs != nil {
 			sc.AfterMs = *c.AfterMs
 		}
@@ -1127,6 +1129,14 @@ func (p *Plan) proxiedOps(d *design.Design, rate float64) float64 {
 						share = 1 - readShare
 					}
 					n := r * share * float64(*c.Count)
+					if len(c.Shards) > 0 {
+						// A fan-out is one call to each shard.
+						if c.ShardBy == "all" {
+							n *= float64(len(c.Shards))
+						}
+						ops += n
+						continue
+					}
 					ops += n
 					switch t := d.Services[c.Target]; {
 					case t.IsApp() || t.Kind == "lb":

@@ -103,7 +103,11 @@ type Behavior struct {
 
 // Call is one outbound call made while handling a request.
 type Call struct {
-	Target string  `yaml:"target" json:"target" jsonschema:"required" jsonschema_description:"A service name."`
+	Target string `yaml:"target,omitempty" json:"target,omitempty" jsonschema_description:"A service name. A call to sharded data names shards instead."`
+	// Shards are the postgres services a sharded call goes to, by key
+	// (ShardBy key: one shard per call) or to every one (ShardBy all).
+	Shards  []string `yaml:"shards,omitempty" json:"shards,omitempty" jsonschema:"minItems=2" jsonschema_description:"Instead of target, for data split across postgres services by key: the shards, in order. With shard_by key a call goes to the shard its key hashes to (key modulo the shard count), and that shard's row key/count; with shard_by all it goes to every shard at once and waits for all of them (a fan-out read)."`
+	ShardBy string   `yaml:"shard_by,omitempty" json:"shard_by,omitempty" jsonschema:"enum=key,enum=all,default=key" jsonschema_description:"With shards: key sends each call to the one shard that holds its key; all sends it to every shard at once (reads only), done when the slowest answers."`
 	Op     string  `yaml:"op" json:"op" jsonschema:"required,enum=read,enum=write,enum=get,enum=set,enum=del,enum=publish,enum=http" jsonschema_description:"read/write for postgres and pgbouncer; get/set/del for redis; publish for a queue (adds one job); http for application services."`
 	Count  *int    `yaml:"count,omitempty" json:"count,omitempty" jsonschema:"minimum=1,default=1" jsonschema_description:"Times per request."`
 	When   string  `yaml:"when,omitempty" json:"when,omitempty" jsonschema:"enum=always,enum=read,enum=write,default=always" jsonschema_description:"Run only for read or write requests from the workload mix."`

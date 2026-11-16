@@ -64,7 +64,14 @@ type Concurrency struct {
 
 // Call is one outbound call, as in the design file.
 type Call struct {
-	Target string `json:"target"`
+	Target string `json:"target,omitempty"`
+	// Shards, instead of Target: postgres targets holding the data split
+	// by key. ShardBy "key" sends a call to the shard of its key, (key-1)
+	// modulo the shard count, as that shard's key (key-1)/count+1, so a
+	// shard seeded with rows/count rows holds exactly its keys; "all"
+	// sends it to every shard at once and waits for all of them.
+	Shards  []string `json:"shards,omitempty"`
+	ShardBy string   `json:"shard_by,omitempty"`
 	Op     string `json:"op"` // read | write | get | set | del | publish | http
 	Count  int    `json:"count"`
 	When   string `json:"when"` // always | read | write
@@ -238,9 +245,21 @@ func (c *Config) Validate() error {
 	checkCalls = func(path string, calls []Call) {
 		for i, call := range calls {
 			p := fmt.Sprintf("%s[%d]", path, i)
-			t, ok := c.Targets[call.Target]
+			name := call.Target
+			if len(call.Shards) > 0 {
+				if call.Target != "" || len(call.Shards) < 2 || (call.ShardBy != "key" && call.ShardBy != "all") || (call.ShardBy == "all" && call.Op != "read") {
+					bad("%s: shards %v with target %q, shard_by %q, op %q", p, call.Shards, call.Target, call.ShardBy, call.Op)
+				}
+				for _, sh := range call.Shards {
+					if t, ok := c.Targets[sh]; !ok || t.Kind != KindPostgres {
+						bad("%s: shard %q isn't a postgres target", p, sh)
+					}
+				}
+				name = call.Shards[0]
+			}
+			t, ok := c.Targets[name]
 			if !ok {
-				bad("%s: no target %q", p, call.Target)
+				bad("%s: no target %q", p, name)
 				continue
 			}
 			want := map[string][]string{

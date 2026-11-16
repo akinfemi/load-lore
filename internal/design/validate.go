@@ -287,6 +287,14 @@ func (v *validator) calls(caller, path string, calls []*Call) {
 }
 
 func (v *validator) call(caller, p string, c *Call) {
+	if c.ShardBy != "" && len(c.Shards) == 0 {
+		v.errorf(pathKey(p, "shard_by"), CodeNotApplicable, "shard_by only applies with shards")
+	}
+	if len(c.Shards) > 0 {
+		v.shards(caller, p, c)
+	} else if c.Target == "" && c.Op != "" {
+		v.errorf(pathKey(p, "target"), CodeRequired, "missing required field \"target\": the service this call goes to (or shards, for data split across postgres services)")
+	}
 	if c.Target != "" {
 		t, ok := v.d.Services[c.Target]
 		switch {
@@ -367,7 +375,11 @@ func (v *validator) resilience(p string, r *Resilience) {
 func (v *validator) pools(name, p string, s *Service) {
 	targets := map[string]bool{}
 	if s.Behavior != nil {
-		walkCalls(s.Behavior.Calls, func(c *Call) { targets[c.Target] = true })
+		walkCalls(s.Behavior.Calls, func(c *Call) {
+			for _, t := range c.Targets() {
+				targets[t] = true
+			}
+		})
 	}
 	for _, t := range sortedKeys(s.Pools) {
 		pp := pathKey(pathKey(p, "pools"), t)
@@ -587,10 +599,13 @@ func (v *validator) keyspace(k *Keys) {
 	if !path.Keyed {
 		return
 	}
+	// A shard holds keys/shards of the keys, so its keyspace is its rows
+	// times the shard count.
 	rows := map[int64][]string{}
 	for _, name := range path.Read {
 		if ds := v.d.Services[name].Dataset; ds != nil {
-			rows[ds.Rows] = append(rows[ds.Rows], name)
+			r := ds.Rows * int64(max(1, path.Shards[name]))
+			rows[r] = append(rows[r], name)
 		}
 	}
 	var noData []string
@@ -929,7 +944,7 @@ func (d *Design) isCalled(name string) bool {
 			continue
 		}
 		found := false
-		walkCalls(s.Behavior.Calls, func(c *Call) { found = found || c.Target == name })
+		walkCalls(s.Behavior.Calls, func(c *Call) { found = found || c.CallsTo(name) })
 		if found {
 			return true
 		}
@@ -941,6 +956,9 @@ func (d *Design) isCalled(name string) bool {
 type EntryPathInfo struct {
 	Read  []string // postgres services read on the entry path, sorted
 	Keyed bool     // whether any call on the path uses a key
+	// Shards is, for a postgres read as one of a sharded call's shards,
+	// how many shards share the keys: each holds keys/shards of them.
+	Shards map[string]int
 }
 
 // EntryPath follows calls from the workload entry through http calls, load
@@ -965,6 +983,23 @@ func (d *Design) EntryPath() EntryPathInfo {
 		}
 		seen[name] = true
 		walkCalls(s.Behavior.Calls, func(c *Call) {
+			if len(c.Shards) > 0 {
+				for _, sh := range c.Shards {
+					if t, ok := d.Services[sh]; ok && t != nil && t.IsPostgres() && c.Op == "read" {
+						if db := d.datasetOf(sh); db != "" {
+							read[db] = true
+							if info.Shards == nil {
+								info.Shards = map[string]int{}
+							}
+							info.Shards[db] = len(c.Shards)
+						}
+					}
+				}
+				if c.Query != "scan" {
+					info.Keyed = true
+				}
+				return
+			}
 			t, ok := d.Services[c.Target]
 			if !ok || t == nil {
 				return
@@ -1187,7 +1222,7 @@ func (v *validator) autoscale(name, p string, s *Service) {
 			continue
 		}
 		direct := false
-		walkCalls(c.Behavior.Calls, func(call *Call) { direct = direct || call.Target == name })
+		walkCalls(c.Behavior.Calls, func(call *Call) { direct = direct || call.CallsTo(name) })
 		if direct {
 			v.errorf(ap, CodeNotApplicable, "%s calls %s directly; call its lb instead, so new replicas get %s's calls too", caller, name, caller)
 		}
@@ -1287,5 +1322,38 @@ func (v *validator) diskProfile(p string, dk *Disk) {
 		v.errorf(pathKey(p, "iops"), CodeRequired, "an %s volume is bought by its provisioned IOPS: set iops, %d to %d", pr.Name, pr.MinIOPS, pr.MaxIOPS)
 	case pr.Modeled() && dk.IOPS != nil && (*dk.IOPS < pr.MinIOPS || *dk.IOPS > pr.MaxIOPS):
 		v.errorf(pathKey(p, "iops"), CodeRange, "a %s volume takes %d to %d IOPS, not %d", pr.Name, pr.MinIOPS, pr.MaxIOPS, *dk.IOPS)
+	}
+}
+
+// shards checks a sharded call: its shards are distinct postgres primaries,
+// it has no target of its own, and only reads fan out to all of them.
+func (v *validator) shards(caller, p string, c *Call) {
+	if c.Target != "" {
+		v.errorf(pathKey(p, "target"), CodeConflict, "a call has target or shards, not both: shards already name where it goes")
+	}
+	if len(c.Shards) < 2 && !v.failed[pathKey(p, "shards")] {
+		v.errorf(pathKey(p, "shards"), CodeRange, "shards needs at least two postgres services; for one, use target")
+	}
+	seen := map[string]bool{}
+	for i, name := range c.Shards {
+		sp := pathIndex(pathKey(p, "shards"), i)
+		t, ok := v.d.Services[name]
+		switch {
+		case seen[name]:
+			v.errorf(sp, CodeConflict, "%s is listed twice: each shard holds its own part of the keys", name)
+		case name == caller:
+			v.errorf(sp, CodeCycle, "a service can't call itself")
+		case !ok:
+			v.unknownService(sp, name)
+		case t != nil && t.Kind != "postgres":
+			v.errorf(sp, CodeOpTarget, "%s is %s; shards are postgres services, each holding its part of the data", name, describeService(t))
+		}
+		seen[name] = true
+	}
+	if c.Op != "" && c.Op != "read" && c.Op != "write" && !v.failed[pathKey(p, "op")] {
+		v.errorf(pathKey(p, "op"), CodeOpTarget, "a sharded call is a read or a write, not %s", c.Op)
+	}
+	if c.ShardBy == "all" && c.Op == "write" {
+		v.errorf(pathKey(p, "shard_by"), CodeConflict, "shard_by all fans a read out to every shard; a write goes to the shard that holds its key (shard_by key)")
 	}
 }

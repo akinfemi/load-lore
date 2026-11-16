@@ -2,6 +2,7 @@ package design
 
 import (
 	"math"
+	"slices"
 	"strings"
 )
 
@@ -212,17 +213,23 @@ func defaultApp(s *Service, services map[string]*Service) {
 		if c.Query == "range" || c.Query == "batch" {
 			setDefault(&c.Rows, DefaultRangeRows)
 		}
-		if _, known := services[c.Target]; known {
+		if len(c.Shards) > 0 && c.ShardBy == "" {
+			c.ShardBy = "key"
+		}
+		for _, t := range c.Targets() {
+			if _, known := services[t]; !known {
+				continue
+			}
 			if s.Pools == nil {
 				s.Pools = map[string]Pool{}
 			}
-			pool := s.Pools[c.Target]
+			pool := s.Pools[t]
 			setDefault(&pool.Size, DefaultPool)
 			setDefault(&pool.Min, 0)
 			if pool.Hold == "" {
 				pool.Hold = DefaultPoolHold
 			}
-			s.Pools[c.Target] = pool
+			s.Pools[t] = pool
 		}
 	})
 }
@@ -260,6 +267,20 @@ func defaultWorkload(w *Workload) {
 }
 
 // walkCalls visits every call, including on_miss calls, depth first.
+// Targets are the services a call goes to: its target, or its shards.
+func (c *Call) Targets() []string {
+	if len(c.Shards) > 0 {
+		return c.Shards
+	}
+	if c.Target == "" {
+		return nil
+	}
+	return []string{c.Target}
+}
+
+// CallsTo reports whether c goes to name, as its target or a shard.
+func (c *Call) CallsTo(name string) bool { return slices.Contains(c.Targets(), name) }
+
 func walkCalls(calls []*Call, fn func(*Call)) {
 	for _, c := range calls {
 		if c == nil {

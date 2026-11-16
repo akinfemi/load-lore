@@ -605,3 +605,55 @@ func grepLines(body, prefix string) string {
 	}
 	return strings.Join(out, "\n")
 }
+
+// A sharded call goes to the shard of its key, (key-1) mod shards, as
+// that shard's own row (key-1)/shards+1; a fan-out goes to every shard and
+// fails when any of them does.
+func TestShardedCalls(t *testing.T) {
+	cfg := baseConfig()
+	for _, n := range []string{"db0", "db1", "db2"} {
+		cfg.Targets[n] = cfg.Targets["db"]
+	}
+	shards := []string{"db0", "db1", "db2"}
+	cfg.Calls = []Call{
+		call("", "write", func(c *Call) { c.Shards, c.ShardBy = shards, "key" }),
+		call("", "read", func(c *Call) { c.Shards, c.ShardBy, c.When = shards, "all", "read" }),
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	s, f := newTestService(t, cfg)
+	for _, k := range []int64{1, 2, 3, 4, 8} {
+		if err := s.handle(context.Background(), request{typ: "write", key: k}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, want := range map[string]string{
+		"db0": "write:write:1,write:write:2", // keys 1 and 4
+		"db1": "write:write:1,write:write:3", // keys 2 and 8
+		"db2": "write:write:1",               // key 3
+	} {
+		if got := strings.Join(f[name].calls(), ","); got != want {
+			t.Errorf("%s: %s, want %s", name, got, want)
+		}
+	}
+
+	if err := s.handle(context.Background(), request{typ: "read", key: 5}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range shards {
+		if got := f[name].calls(); len(got) == 0 || got[len(got)-1] != "read:read:2" {
+			t.Errorf("fan-out on %s: %v", name, got)
+		}
+	}
+	f["db1"].fn = func(context.Context, *Call, request) (bool, error) { return false, errors.New("down") }
+	if err := s.handle(context.Background(), request{typ: "read", key: 5}); err == nil {
+		t.Error("a fan-out with a failed shard succeeded")
+	}
+
+	bad := baseConfig()
+	bad.Calls = []Call{call("", "write", func(c *Call) { c.Shards, c.ShardBy = []string{"db", "cache"}, "all" })}
+	if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "shard") {
+		t.Errorf("bad shards: %v", err)
+	}
+}

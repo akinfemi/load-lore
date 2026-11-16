@@ -74,6 +74,9 @@ func Annotated(d *design.Design, an *Annotations) *mermaid.Flowchart {
 		case s.Behavior != nil:
 			for _, e := range callEdges(s) {
 				lines := []string{strings.Join(e.ops, ", ")}
+				if e.shard != "" {
+					lines = append(lines, e.shard)
+				}
 				if pool, ok := s.Pools[e.target]; ok && pool.Size != nil {
 					l := fmt.Sprintf("pool %d", *pool.Size)
 					if pool.Min != nil && *pool.Min > 0 {
@@ -221,6 +224,7 @@ type callEdge struct {
 	target string
 	async  bool
 	ops    []string
+	shard  string // "shard 1 of 4" for a call to sharded data
 }
 
 // callEdges groups a service's calls, including on_miss calls, into one edge
@@ -232,12 +236,17 @@ func callEdges(s *design.Service) []callEdge {
 	var edges []callEdge
 	add := func(c *design.Call, onMiss bool) {
 		async := c.Mode == "async"
-		i := slices.IndexFunc(edges, func(e callEdge) bool { return e.target == c.Target && e.async == async })
-		if i < 0 {
-			edges = append(edges, callEdge{target: c.Target, async: async})
-			i = len(edges) - 1
+		for _, t := range c.Targets() {
+			i := slices.IndexFunc(edges, func(e callEdge) bool { return e.target == t && e.async == async })
+			if i < 0 {
+				edges = append(edges, callEdge{target: t, async: async})
+				i = len(edges) - 1
+			}
+			edges[i].ops = append(edges[i].ops, opLabel(c, onMiss))
+			if n := len(c.Shards); n > 0 {
+				edges[i].shard = fmt.Sprintf("shard %d of %d", slices.Index(c.Shards, t)+1, n)
+			}
 		}
-		edges[i].ops = append(edges[i].ops, opLabel(c, onMiss))
 	}
 	var walk func(calls []*design.Call, onMiss bool)
 	walk = func(calls []*design.Call, onMiss bool) {
@@ -291,6 +300,9 @@ func opLabel(c *design.Call, onMiss bool) string {
 	}
 	if onMiss {
 		l += " on miss"
+	}
+	if len(c.Shards) > 0 && c.ShardBy == "all" {
+		l += " to every shard"
 	}
 	return l
 }

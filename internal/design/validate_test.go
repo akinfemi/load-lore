@@ -271,6 +271,16 @@ func TestValidationDiagnostics(t *testing.T) {
 		{"hold not for http", map[string]string{"services.web": "{image: loadlore/synthetic, behavior: {calls: [{target: api, op: http}]}, pools: {api: {hold: request}}}"}, []string{"error services.web.pools.api.hold not-applicable", "warning services.web.behavior.calls[0].target no-lb"}},
 		{"hold bad value", map[string]string{"services.api.pools": "{db: {hold: forever}}"}, []string{"error services.api.pools.db.hold invalid-value"}},
 		{"pool unknown field", map[string]string{"services.api.pools": "{db: {size: 4, warm: true}}"}, []string{"error services.api.pools.db.warm unknown-field"}},
+		// Sharding.
+		{"shards by key", map[string]string{"services.db2": "{kind: postgres, dataset: {rows: 1000}}", "services.api.behavior.calls[0]": "{shards: [db, db2], op: read}", "services.api.behavior.calls[1]": "{shards: [db, db2], shard_by: all, op: read, query: range}", "workload.keys": "{count: 2000}"}, nil},
+		{"shards double the keyspace", map[string]string{"services.db2": "{kind: postgres, dataset: {rows: 1000}}", "services.api.behavior.calls[0]": "{shards: [db, db2], op: read}", "workload.keys": "{count: 2001}"}, []string{"error workload.keys.count keyspace"}},
+		{"shards and target", map[string]string{"services.db2": "{kind: postgres, dataset: {rows: 1000}}", "services.api.behavior.calls[0]": "{target: db, shards: [db, db2], op: read}"}, []string{"error services.api.behavior.calls[0].target conflict"}},
+		{"one shard", map[string]string{"services.api.behavior.calls[0]": "{shards: [db], op: read}"}, []string{"error services.api.behavior.calls[0].shards range"}},
+		{"shard twice", map[string]string{"services.api.behavior.calls[0]": "{shards: [db, db], op: read}"}, []string{"error services.api.behavior.calls[0].shards[1] conflict"}},
+		{"shard not postgres", map[string]string{"services.cache": "{kind: redis}", "services.api.behavior.calls[0]": "{shards: [db, cache], op: read}"}, []string{"error services.api.behavior.calls[0].shards[1] op-target"}},
+		{"fan-out write", map[string]string{"services.db2": "{kind: postgres, dataset: {rows: 1000}}", "services.api.behavior.calls[0]": "{shards: [db, db2], shard_by: all, op: write}", "workload.keys": "{count: 2000}"}, []string{"error services.api.behavior.calls[0].shard_by conflict"}},
+		{"shard_by without shards", map[string]string{"services.api.behavior.calls[0]": "{target: db, shard_by: key, op: read}"}, []string{"error services.api.behavior.calls[0].shard_by not-applicable"}},
+		{"call without target", map[string]string{"services.api.behavior.calls[0]": "{op: read}"}, []string{"error services.api.behavior.calls[0].target required"}},
 
 		// Workload.
 		{"unknown entry", map[string]string{"workload.entry": "apo"}, []string{"error workload.entry unknown-service"}},

@@ -267,7 +267,11 @@ func (s *Service) runCalls(ctx context.Context, calls []Call, req request) error
 }
 
 // call runs one call with retries, then its on_miss calls on a cache miss.
+// A sharded call goes to the shard of its key, or to every shard.
 func (s *Service) call(ctx context.Context, c *Call, req request) error {
+	if len(c.Shards) > 0 {
+		return s.sharded(ctx, c, req)
+	}
 	maxAttempts := 1
 	r := s.cfg.Resilience.Retries
 	if r != nil {
@@ -292,6 +296,37 @@ func (s *Service) call(ctx context.Context, c *Call, req request) error {
 			return err
 		}
 	}
+}
+
+// sharded runs a sharded call as a call to one shard, the one holding
+// the request's key, or as a call to every shard at once that fails if any
+// of them does. Each shard sees the key as its own row number, so a shard
+// seeded with rows/shards rows holds exactly its keys.
+func (s *Service) sharded(ctx context.Context, c *Call, req request) error {
+	n := int64(len(c.Shards))
+	k := max(req.key, 1) - 1
+	local := req
+	local.key = k/n + 1
+	one := func(i int) error {
+		sc := *c
+		sc.Target, sc.Shards, sc.ShardBy = c.Shards[i], nil, ""
+		return s.call(ctx, &sc, local)
+	}
+	if c.ShardBy != "all" {
+		return one(int(k % n))
+	}
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range c.Shards {
+		wg.Go(func() { errs[i] = one(i) })
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // coalesced runs a get's on_miss calls once for all the requests that
