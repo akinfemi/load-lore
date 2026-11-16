@@ -528,7 +528,7 @@ func TestDisk(t *testing.T) {
 	if db := p.Service("db"); db.Disk != nil {
 		t.Errorf("no disk block: disk %+v", db.Disk)
 	}
-	if a := findAssumption(p, "services.db.disk"); a == nil || a.Value != "the Docker host's" {
+	if a := findAssumption(p, "services.db.disk"); a == nil || a.Value != "laptop: the Docker host's" {
 		t.Errorf("no disk block: assumption %+v", a)
 	}
 	read := 4
@@ -545,8 +545,55 @@ func TestDisk(t *testing.T) {
 		t.Errorf("track_io_timing %q with a disk block", db.Config["track_io_timing"])
 	}
 	a := findAssumption(p, "services.db.disk")
-	if a == nil || a.Value != "4 ms per read, 1500 IOPS" || !strings.Contains(a.Why, "default") || !strings.Contains(a.Why, "the wait not") {
+	if a == nil || a.Value != "no profile: 4 ms per read, 1500 IOPS" || !strings.Contains(a.Why, "default") || !strings.Contains(a.Why, "the wait not") {
 		t.Errorf("disk assumption %+v", a)
+	}
+}
+
+// A disk profile takes its waits, IOPS and throughput from its published
+// numbers, scales the caps (not the waits), and the assumption names the
+// profile and its source; laptop leaves the data on the host's disk.
+func TestDiskProfiles(t *testing.T) {
+	d := loadFile(t, "../../examples/smoke.yaml")
+	prof := func(name string, iops *int) {
+		d.Services["db"].Disk = &design.Disk{Profile: &name, IOPS: iops}
+	}
+	prof("gp3", nil)
+	p, err := Build(d, Options{RunID: "r", Scale: 0.5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := p.Service("db")
+	if db.Disk == nil || *db.Disk != (Disk{Profile: "gp3", ReadMs: 1, WriteMs: 1, IOPS: 1500, MiBps: 62.5}) || !db.SlowDisk || db.Config["track_io_timing"] != "on" {
+		t.Fatalf("gp3 at 0.5: disk %+v, slow disk %v", db.Disk, db.SlowDisk)
+	}
+	a := findAssumption(p, "services.db.disk")
+	if a == nil || a.Value != "gp3: 1 ms per read, 1 ms per write, 1500 IOPS, 62.5 MiB/s" ||
+		!strings.Contains(a.Why, "Source: AWS, Amazon EBS General Purpose SSD volumes: https://docs.aws.amazon.com/") || !strings.Contains(a.Why, "the waits not") {
+		t.Errorf("gp3 assumption %+v", a)
+	}
+
+	iops := 20000
+	prof("io2", &iops)
+	if p, err = Build(d, Options{RunID: "r", Scale: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if db := p.Service("db"); db.Disk == nil || *db.Disk != (Disk{Profile: "io2", IOPS: 20000, MiBps: 4000}) {
+		t.Errorf("io2: disk %+v", db.Disk)
+	}
+	if a := findAssumption(p, "services.db.disk"); a == nil || !strings.Contains(a.Why, "provisioned in the design: 20000") {
+		t.Errorf("io2 assumption %+v", a)
+	}
+
+	prof("laptop", nil)
+	if p, err = Build(d, Options{RunID: "r", Scale: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if db := p.Service("db"); db.Disk != nil { // smoke's disk_slow fault still makes it a slow disk
+		t.Errorf("laptop: disk %+v", db.Disk)
+	}
+	if a := findAssumption(p, "services.db.disk"); a == nil || a.Value != "laptop" || !strings.Contains(a.Why, "Source: none") {
+		t.Errorf("laptop assumption %+v", a)
 	}
 }
 

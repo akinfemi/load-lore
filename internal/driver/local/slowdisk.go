@@ -87,22 +87,28 @@ func (d *Driver) dropPageCache(ctx context.Context) error {
 	return err
 }
 
-// slowDisk sets the write and flush delay of a service's dm-delay device,
-// keeping its disk block's read delay.
+// slowDisk sets the write and flush delay of a service's dm-delay device
+// to its disk's own write wait plus ms, keeping its read wait: a disk_slow
+// fault adds ms, and clearing it (ms 0) leaves the disk's own.
 func (d *Driver) slowDisk(ctx context.Context, svc string, ms int) error {
-	name := d.slowDiskName(svc)
-	read := 0
+	read, write := 0, 0
 	if s := d.plan.Service(svc); s != nil && s.Disk != nil {
-		read = s.Disk.ReadMs
+		read, write = s.Disk.ReadMs, s.Disk.WriteMs
 	}
+	return d.diskDelay(ctx, d.slowDiskName(svc), read, write+ms)
+}
+
+// diskDelay reloads dm-delay device name's table with these read and
+// write (and flush) waits, keeping the device and size.
+func (d *Driver) diskDelay(ctx context.Context, name string, read, write int) error {
 	// The table reads "0 <sectors> delay <dev> 0 <read ms> <dev> 0 <write
-	// ms> <dev> 0 <flush ms>"; keep the device and size.
+	// ms> <dev> 0 <flush ms>".
 	script := fmt.Sprintf(`set -e
 %s
 set -- $(dmsetup table %s)
 dmsetup suspend %s
 dmsetup reload %s --table "0 $2 delay $4 0 %d $4 0 %d $4 0 %d"
-dmsetup resume %s`, slowDiskTools, name, name, name, read, ms, ms, name)
+dmsetup resume %s`, slowDiskTools, name, name, name, read, write, write, name)
 	_, err := d.docker(ctx, "run", "--rm", "--privileged", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID, ImageAlpine, "sh", "-c", script)
 	return err
 }

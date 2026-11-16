@@ -166,7 +166,9 @@ func (v *validator) service(name string, s *Service) {
 		v.replica(name, p, s)
 	}
 	notFor("disk", s.Disk != nil && !s.IsPostgres(), "it is for postgres")
-	if dk := s.Disk; dk != nil && s.IsPostgres() {
+	if dk := s.Disk; dk != nil && s.IsPostgres() && dk.Profile != nil {
+		v.diskProfile(pathKey(p, "disk"), dk)
+	} else if dk != nil && s.IsPostgres() {
 		if dk.ReadMs != nil && (*dk.ReadMs < 0 || *dk.ReadMs > 100) {
 			v.errorf(pathKey(p, "disk.read_ms"), CodeRange, "read_ms must be 0 to 100 whole milliseconds, not %d", *dk.ReadMs)
 		}
@@ -1264,5 +1266,26 @@ func (v *validator) queues() {
 		if !published {
 			v.warnf(p, CodeUnusedQueue, "nothing publishes to %s: add a call with target: %s and op: publish", name, name)
 		}
+	}
+}
+
+// diskProfile checks a disk block that names a profile: the profile sets
+// the waits, and IOPS may only be provisioned within its published range.
+func (v *validator) diskProfile(p string, dk *Disk) {
+	pr, ok := DiskProfiles[*dk.Profile]
+	if !ok {
+		v.errorf(pathKey(p, "profile"), CodeInvalidValue, "profile must be one of %s, not %q", strings.Join(DiskProfileNames(), ", "), *dk.Profile)
+		return
+	}
+	if dk.ReadMs != nil {
+		v.errorf(pathKey(p, "read_ms"), CodeConflict, "the %s profile sets the disk's waits from its published specs; drop read_ms", pr.Name)
+	}
+	switch {
+	case !pr.Modeled() && dk.IOPS != nil:
+		v.errorf(pathKey(p, "iops"), CodeConflict, "the %s profile is the Docker host's own disk, with no IOPS cap; drop iops", pr.Name)
+	case pr.Modeled() && dk.IOPS == nil && pr.IOPS == 0:
+		v.errorf(pathKey(p, "iops"), CodeRequired, "an %s volume is bought by its provisioned IOPS: set iops, %d to %d", pr.Name, pr.MinIOPS, pr.MaxIOPS)
+	case pr.Modeled() && dk.IOPS != nil && (*dk.IOPS < pr.MinIOPS || *dk.IOPS > pr.MaxIOPS):
+		v.errorf(pathKey(p, "iops"), CodeRange, "a %s volume takes %d to %d IOPS, not %d", pr.Name, pr.MinIOPS, pr.MaxIOPS, *dk.IOPS)
 	}
 }

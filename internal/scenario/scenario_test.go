@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,6 +88,7 @@ services:
   db:
     kind: postgres
     dataset: { rows: 1000 }
+    disk: { profile: gp3 }
 workload:
   entry: api
   profile: [ { hold: { rps: 10, for: 30s } } ]
@@ -160,6 +162,46 @@ func TestLint(t *testing.T) {
 
 	if _, err := Open(writeScenario(t, map[string]string{"meta.yaml": "title: x\nsurprise: 1\n"})); err == nil || !strings.Contains(err.Error(), "surprise") {
 		t.Errorf("unknown meta field: %v", err)
+	}
+}
+
+// A scenario's Postgres services name a disk profile, and a disk_slow for
+// the whole run is refused, unless meta.yaml marks the scenario legacy.
+func TestLintDiskProfiles(t *testing.T) {
+	files := demoFiles()
+	raw := strings.Replace(demoDesign, "    disk: { profile: gp3 }\n", "    disk: { iops: 5000 }\n", 1)
+	files["design.yaml"] = raw
+	d, _ := design.Load([]byte(raw))
+	files["README.md"] = "# Demo\n\n```mermaid\n" + flowchart(d) + "```\n"
+	files["solutions/bigger/design.yaml"] = strings.Replace(demoDesign, "name: demo", "name: demo-bigger", 1) +
+		"scenario:\n  - { at: 0s, inject: disk_slow, target: db, add_ms: 1 }\n"
+	s, err := Open(writeScenario(t, files))
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := fmt.Sprint(s.Lint())
+	for _, want := range []string{
+		"design.yaml: error: services.db: name a disk profile",
+		"solutions/bigger/design.yaml: error: scenario[0]: a disk_slow for the whole run is the disk itself",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in\n%s", want, all)
+		}
+	}
+
+	files["meta.yaml"] += "disk: legacy\n"
+	if s, err = Open(writeScenario(t, files)); err != nil {
+		t.Fatal(err)
+	}
+	if ps := s.Lint(); HasErrors(ps) {
+		t.Errorf("legacy: %v", ps)
+	}
+	files["meta.yaml"] = strings.Replace(files["meta.yaml"], "disk: legacy", "disk: old", 1)
+	if s, err = Open(writeScenario(t, files)); err != nil {
+		t.Fatal(err)
+	}
+	if all := fmt.Sprint(s.Lint()); !strings.Contains(all, `disk must be legacy or left out, not "old"`) {
+		t.Errorf("bad disk value: %s", all)
 	}
 }
 

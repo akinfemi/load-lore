@@ -80,6 +80,9 @@ func (s *Scenario) Lint() []Problem {
 	if len(m.Predict) == 0 {
 		warn(MetaFile, "predict lists no questions, so loadl predict has nothing to ask; add the README's questions with the expect line each answer becomes")
 	}
+	if m.Disk != "" && m.Disk != DiskLegacy {
+		bad(MetaFile, "disk must be %s or left out, not %q", DiskLegacy, m.Disk)
+	}
 	if v := m.Check.Problem.Verdict; v != "broke" && v != "held" {
 		bad(MetaFile, "check.problem.verdict must be broke or held, not %q", v)
 	}
@@ -206,7 +209,32 @@ func (s *Scenario) lintDesign(file, name, why string, ps *[]Problem) *design.Des
 	for _, m := range postgresFloor(d) {
 		*ps = append(*ps, Problem{File: file, Message: m, Warning: true})
 	}
+	if s.Meta.Disk != DiskLegacy {
+		for _, m := range diskProfiles(d) {
+			*ps = append(*ps, Problem{File: file, Message: m})
+		}
+	}
 	return d
+}
+
+// diskProfiles says what keeps a scenario design off the named disk
+// profiles: a Postgres without one, or a disk_slow fault for the whole run,
+// which is a disk, not a fault. Picked per scenario, raw waits and caps
+// drift into tuning inputs until the result appears.
+func diskProfiles(d *design.Design) []string {
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(d.Services)) {
+		svc := d.Services[name]
+		if svc.IsPostgres() && (svc.Disk == nil || svc.Disk.Profile == nil) {
+			out = append(out, fmt.Sprintf("services.%s: name a disk profile, as disk: { profile: gp3 } (the default for scenarios), so every scenario stands on the same published disks rather than on waits and caps picked for it", name))
+		}
+	}
+	for i, f := range d.Scenario {
+		if f.Inject == "disk_slow" && f.At == 0 && f.For == nil {
+			out = append(out, fmt.Sprintf("scenario[%d]: a disk_slow for the whole run is the disk itself, not a fault: pick a disk profile instead", i))
+		}
+	}
+	return out
 }
 
 // MinPostgresCPU is the smallest CPU limit a Postgres has been measured to

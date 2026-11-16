@@ -13,6 +13,11 @@ host:
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
   speed: 1000
 
+# Measured before disk profiles: its designs keep their disks until its
+# next re-measure, so its reference results don't change. Then each
+# Postgres names a profile (disk: { profile: gp3 }) and this line goes.
+disk: legacy
+
 # Load generator VUs started before the load, at --scale 1: the peak rate x
 # slo.p99_ms (300 x 0.5 s), well above 1.5 x the most busy at once before a
 # break in the check's runs (13).

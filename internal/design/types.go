@@ -57,15 +57,18 @@ type Consume struct {
 	Concurrency *int   `yaml:"concurrency,omitempty" json:"concurrency,omitempty" jsonschema:"minimum=1,default=5" jsonschema_description:"Jobs each replica runs at once, as Sidekiq's concurrency or a Celery worker's: 5 is Sidekiq's default."`
 }
 
-// Disk models a postgres's data disk like a network-attached cloud volume.
-// Every read that misses memory waits ReadMs, and reads and writes are each
-// capped at IOPS a second, so reads queue at the cap the way they do on a
-// real volume. Without it, the data sits on the Docker host's disk; on a
-// laptop, a read that misses the container's memory comes back from the
-// host's own, in about a tenth of a millisecond and with no cap.
+// Disk models a postgres's data disk. Profile names a disk from
+// DiskProfiles (laptop, gp3, io2), whose waits, IOPS and throughput come
+// from published specs; IOPS may be provisioned within the profile's
+// range. Without a profile, the older raw form: every read that misses
+// memory waits ReadMs, and reads and writes are each capped at IOPS a
+// second. Without a disk block, the data sits on the Docker host's disk;
+// on a laptop, a read that misses the container's memory comes back from
+// the host's own, in about a tenth of a millisecond and with no cap.
 type Disk struct {
-	ReadMs *int `yaml:"read_ms,omitempty" json:"read_ms,omitempty" jsonschema:"minimum=0,maximum=100,default=1" jsonschema_description:"Milliseconds every read from the disk waits, in whole milliseconds. A gp3 volume takes about 1."`
-	IOPS   *int `yaml:"iops,omitempty" json:"iops,omitempty" jsonschema:"minimum=100,default=3000" jsonschema_description:"Reads a second the disk serves, and writes a second, each; gp3's baseline is 3000. Scaled with --scale."`
+	Profile *string `yaml:"profile,omitempty" json:"profile,omitempty" jsonschema:"enum=laptop,enum=gp3,enum=io2" jsonschema_description:"A named disk with numbers from published specs: laptop (the Docker host's own), gp3 (1 ms per read and write, 3,000 IOPS and 125 MiB/s baseline) or io2 (provisioned IOPS, no added wait). Every report prints the profile and its source."`
+	ReadMs  *int    `yaml:"read_ms,omitempty" json:"read_ms,omitempty" jsonschema:"minimum=0,maximum=100,default=1" jsonschema_description:"Without a profile only: milliseconds every read from the disk waits, in whole milliseconds."`
+	IOPS    *int    `yaml:"iops,omitempty" json:"iops,omitempty" jsonschema:"minimum=100" jsonschema_description:"Reads a second the disk serves, and writes a second, each. With gp3, provisioned IOPS from 3000 (the default) to 80000; with io2, required, 100 to 256000; not with laptop. Without a profile, at least 100, default 3000. Scaled with --scale."`
 }
 
 // HealthCheck is an lb's active check of each replica: an HTTP GET every

@@ -192,18 +192,25 @@ dataset: { rows: 5000000, row_bytes: 512, indexes: [id, user_id] }
 
 `rows` is required; `row_bytes` defaults to `512`; `indexes` lists extra indexed columns (`id` is always indexed).
 
-`disk` (postgres only) makes the data disk behave like a network-attached cloud volume. Without it, the data sits on the Docker host's disk, and on a laptop a read that misses Postgres's memory comes back from the host's own memory in about a tenth of a millisecond, with no limit on how many. So a working set bigger than the database's memory only hurts with a `disk` block. `disk: {}` takes the defaults:
+`disk` (postgres and postgres-replica) picks the data disk from a named profile, so every design stands on the same published disks instead of waits and caps tuned until a result shows. Without it, the data sits on the Docker host's disk (the `laptop` profile): on a laptop a read that misses Postgres's memory comes back from the host's own memory in about a tenth of a millisecond, with no limit on how many, and a commit's fsync returns in a fraction of a millisecond. So a working set bigger than the database's memory, or a row that takes one commit at a time, shows its cost only on a cloud profile.
 
 ```yaml
-disk: { read_ms: 1, iops: 3000 }
+disk: { profile: gp3 }               # a gp3 volume at its baseline
+disk: { profile: gp3, iops: 10000 }  # with provisioned IOPS
+disk: { profile: io2, iops: 20000 }
 ```
 
-| Field | Default | Meaning |
-|---|---|---|
-| `read_ms` | `1` | Milliseconds every read from the disk waits, whole milliseconds, 0 to 100. A gp3 volume takes about 1. |
-| `iops` | `3000` | Reads a second the disk serves, and writes a second, each; at least 100. gp3's baseline is 3000. Scaled with `--scale`. |
+| Profile | Waits added | IOPS | Throughput | Source |
+|---|---|---|---|---|
+| `laptop` | none | no cap | no cap | the Docker host's own disk |
+| `gp3` | 1 ms per read, and per write and fsync | `3000` (the baseline), or provisioned from 3000 to 80000 | 125 MiB/s (the baseline) | [AWS: General Purpose SSD volumes](https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html): 3,000 IOPS and 125 MiB/s included, up to 80,000 IOPS, "single-digit millisecond latency" |
+| `io2` | none | required: provisioned, 100 to 256000 | 0.256 MiB/s per IOPS, up to 4,000 | [AWS: Provisioned IOPS SSD volumes](https://docs.aws.amazon.com/ebs/latest/userguide/provisioned-iops.html): io2 Block Express, average latency under 500 microseconds |
 
-Reads that miss shared_buffers and the database container's own page cache wait `read_ms`, and queue once they reach `iops`. Loadlore empties the Docker host's page cache after copying the dataset in, so the container's memory limit holds, and turns on `track_io_timing` (unless `config` sets it) so the report can tell reads that waited for the disk from ones memory answered. A `disk_slow` fault on the same database adds its write delay on top.
+How the numbers are read from the sources: AWS gives gp3's latency as a range, single-digit milliseconds, and Loadlore takes its low end, 1 ms, so the profile flatters the disk rather than handicapping it. The waits are whole milliseconds (the kernel's dm-delay step), so io2's sub-millisecond latency adds nothing and the Docker host's own disk sets it. IOPS and throughput are capped separately for reads and for writes, so a mixed load can reach up to twice them, and both are scaled with `--scale`; the waits aren't. gp3's provisioned throughput isn't modelled. Every report lists the profile, its numbers and its source under assumptions.
+
+Reads that miss shared_buffers and the database container's own page cache wait the profile's read wait and queue at its IOPS; every write and fsync waits its write wait, from the moment the dataset is copied in. Loadlore empties the Docker host's page cache after copying the dataset in, so the container's memory limit holds, and turns on `track_io_timing` (unless `config` sets it) so the report can tell reads that waited for the disk from ones memory answered. A `disk_slow` fault on the same database adds its write delay on top of the profile's.
+
+The older form without a profile, `disk: {}` or `disk: { read_ms: 1, iops: 3000 }`, still works: reads wait `read_ms` (default 1, 0 to 100) and reads and writes are each capped at `iops` (default 3000, at least 100), with no write wait. Scenarios don't use it except where `meta.yaml` marks them as moving to a profile at their next re-measure.
 
 There is deliberately no field for hit rate, capacity or failure point. Those emerge from the run, and `loadl validate` rejects such fields with an explanation.
 

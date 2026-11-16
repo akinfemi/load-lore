@@ -75,11 +75,16 @@ type Assumption struct {
 }
 
 // Disk is a postgres's data disk modelled like a cloud volume: every read
-// that reaches it waits ReadMs, and reads and writes are each capped at
-// IOPS a second (scaled with --scale).
+// that reaches it waits ReadMs, every write and fsync WriteMs, and reads
+// and writes are each capped at IOPS a second and MiBps of throughput
+// (both scaled with --scale). Profile is the design's disk profile, or ""
+// for the raw form.
 type Disk struct {
-	ReadMs int `json:"read_ms"`
-	IOPS   int `json:"iops"`
+	Profile string  `json:"profile,omitempty"`
+	ReadMs  int     `json:"read_ms"`
+	WriteMs int     `json:"write_ms,omitempty"`
+	IOPS    int     `json:"iops"`
+	MiBps   float64 `json:"mib_per_s,omitempty"`
 }
 
 // Default disk: about a gp3 volume's read latency and baseline IOPS.
@@ -1236,10 +1241,25 @@ func (p *Plan) assumeDisk(name string, ds *design.Service) {
 	if s == nil {
 		return
 	}
-	a := Assumption{Field: "services." + name + ".disk", Value: "the Docker host's",
-		Why: "no disk block: a read that misses " + name + "'s memory goes to the Docker host's disk, which on a laptop mostly answers from the host's own memory, fast and uncapped. Add disk: {} for a cloud volume's wait and IOPS cap"}
+	a := Assumption{Field: "services." + name + ".disk", Value: "laptop: the Docker host's",
+		Why: "no disk block: a read that misses " + name + "'s memory goes to the Docker host's disk, which on a laptop mostly answers from the host's own memory, fast and uncapped, and a commit's fsync returns in a fraction of a millisecond. Add disk: { profile: gp3 } for a cloud volume's waits and caps"}
+	if ds.Disk != nil && ds.Disk.Profile != nil {
+		pr := design.DiskProfiles[*ds.Disk.Profile]
+		a.Value, a.Why = pr.Name, pr.Basis+". Source: "+pr.Source
+		if dk := s.Disk; dk != nil {
+			a.Value = fmt.Sprintf("%s: %d ms per read, %d ms per write, %d IOPS, %s MiB/s", pr.Name, dk.ReadMs, dk.WriteMs, dk.IOPS, strconv.FormatFloat(math.Round(dk.MiBps*10)/10, 'f', -1, 64))
+			if ds.Disk.IOPS != nil {
+				a.Why += fmt.Sprintf(". IOPS provisioned in the design: %d", *ds.Disk.IOPS)
+			}
+			if p.Scale != 1 {
+				a.Why += "; IOPS and throughput scaled with --scale, the waits not"
+			}
+		}
+		p.Assumptions = append(p.Assumptions, a)
+		return
+	}
 	if s.Disk != nil {
-		a.Value = fmt.Sprintf("%d ms per read, %d IOPS", s.Disk.ReadMs, s.Disk.IOPS)
+		a.Value = fmt.Sprintf("no profile: %d ms per read, %d IOPS", s.Disk.ReadMs, s.Disk.IOPS)
 		a.Why = "set in the design: every read that misses " + name + "'s memory waits this long, and reads and writes are each capped at this rate, as on a cloud volume"
 		if ds.Disk.ReadMs == nil || ds.Disk.IOPS == nil {
 			a.Why += fmt.Sprintf(" (unset values default to about a gp3 volume's: %d ms, %d IOPS)", DefaultDiskReadMs, DefaultDiskIOPS)
@@ -1522,6 +1542,21 @@ func exporters(s *Service) int {
 func planDisk(dk *design.Disk, scale float64) *Disk {
 	if dk == nil {
 		return nil
+	}
+	if dk.Profile != nil {
+		pr := design.DiskProfiles[*dk.Profile]
+		if !pr.Modeled() {
+			return nil // the Docker host's own disk
+		}
+		disk := Disk{Profile: pr.Name, ReadMs: pr.ReadMs, WriteMs: pr.WriteMs, IOPS: pr.IOPS}
+		if dk.IOPS != nil {
+			disk.IOPS = *dk.IOPS
+		}
+		if pr.MiBps != nil {
+			disk.MiBps = pr.MiBps(disk.IOPS) * scale
+		}
+		disk.IOPS = max(1, int(math.Round(float64(disk.IOPS)*scale)))
+		return &disk
 	}
 	disk := Disk{ReadMs: DefaultDiskReadMs, IOPS: DefaultDiskIOPS}
 	if dk.ReadMs != nil {

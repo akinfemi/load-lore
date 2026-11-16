@@ -77,6 +77,8 @@ type composeService struct {
 type composeBlkio struct {
 	DeviceReadIOPS  []composeDeviceRate `yaml:"device_read_iops,omitempty"`
 	DeviceWriteIOPS []composeDeviceRate `yaml:"device_write_iops,omitempty"`
+	DeviceReadBps   []composeDeviceRate `yaml:"device_read_bps,omitempty"`
+	DeviceWriteBps  []composeDeviceRate `yaml:"device_write_bps,omitempty"`
 }
 
 type composeDeviceRate struct {
@@ -202,6 +204,10 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 				if dev := in.DiskDevs[name]; s.Disk != nil && dev != "" {
 					rate := []composeDeviceRate{{Path: dev, Rate: s.Disk.IOPS}}
 					c.BlkioConfig = &composeBlkio{DeviceReadIOPS: rate, DeviceWriteIOPS: rate}
+					if s.Disk.MiBps > 0 {
+						bps := []composeDeviceRate{{Path: dev, Rate: int(s.Disk.MiBps * (1 << 20))}}
+						c.BlkioConfig.DeviceReadBps, c.BlkioConfig.DeviceWriteBps = bps, bps
+					}
 				}
 				c.Healthcheck = &composeHealth{Test: []string{"CMD-SHELL", fmt.Sprintf("pg_isready -U %s -d %s -h 127.0.0.1", plan.DBUser, plan.DBName)}, Interval: "1s", Timeout: "3s", Retries: 180}
 				c.StopGracePeriod = "10s"

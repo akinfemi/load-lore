@@ -725,13 +725,21 @@ func DownAll(ctx context.Context, withCaches bool) (removed Counts, err error) {
 	if err != nil {
 		return removed, err
 	}
-	// dm-delay devices of slow-disk runs hold loop devices and their image
-	// files; they go before the volumes those live in.
-	slowErr := (&Driver{host: host}).removeSlowDisks(ctx, true)
 	f := client.Filters{}.Add("label", LabelOwner+"=1")
+	// dm-delay devices of slow-disk runs hold loop devices and their image
+	// files; they go once no container has them mounted (a kept stack's
+	// database still does: removing the device first fails as busy), and
+	// before the volumes those files live in.
+	var errs []error
 	if cs, err := api.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f}); err == nil {
 		removed.Containers = len(cs.Items)
+		for _, c := range cs.Items {
+			_, err := api.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+			errs = append(errs, ignoreNotFound(err))
+		}
 	}
+	errs = append(errs, (&Driver{host: host}).removeSlowDisks(ctx, true))
+	slowErr := errors.Join(errs...)
 	if vs, err := api.VolumeList(ctx, client.VolumeListOptions{Filters: f}); err == nil {
 		for _, v := range vs.Items {
 			if _, isCache := v.Labels[LabelCache]; !isCache || withCaches {

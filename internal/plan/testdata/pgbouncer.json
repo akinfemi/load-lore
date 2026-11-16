@@ -393,8 +393,8 @@
     },
     {
       "field": "services.db.disk",
-      "value": "the Docker host's",
-      "why": "no disk block: a read that misses db's memory goes to the Docker host's disk, which on a laptop mostly answers from the host's own memory, fast and uncapped. Add disk: {} for a cloud volume's wait and IOPS cap"
+      "value": "laptop: the Docker host's",
+      "why": "no disk block: a read that misses db's memory goes to the Docker host's disk, which on a laptop mostly answers from the host's own memory, fast and uncapped, and a commit's fsync returns in a fraction of a millisecond. Add disk: { profile: gp3 } for a cloud volume's waits and caps"
     },
     {
       "field": "services.lb timeouts",

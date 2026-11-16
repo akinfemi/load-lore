@@ -73,7 +73,16 @@ type Meta struct {
 	// Load sizes the load generator for the scenario's designs, from
 	// measurement.
 	Load *LoadMeta `yaml:"load,omitempty" json:"load,omitempty"`
+	// Disk is "legacy" for a scenario measured before disk profiles: its
+	// designs keep their disks, raw or none, until its next re-measure, so
+	// its reference results don't change. Empty for every other scenario,
+	// whose Postgres services must each name a disk profile.
+	Disk string `yaml:"disk,omitempty" json:"disk,omitempty"`
 }
+
+// DiskLegacy is Meta.Disk for a scenario that hasn't moved to disk
+// profiles yet.
+const DiskLegacy = "legacy"
 
 // LoadMeta is the load generator sizing measured for a scenario. Arrivals
 // are open, and each needs a free VU: VUs started mid-run take time to

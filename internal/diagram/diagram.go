@@ -138,8 +138,20 @@ func addNode(f *mermaid.Flowchart, name string, s *design.Service, extra []strin
 	}
 }
 
-// diskLabel is a postgres disk block's read wait and IOPS, defaults filled.
+// diskLabel is a postgres disk block's profile and IOPS, or its read wait
+// and IOPS without a profile, defaults filled.
 func diskLabel(dk *design.Disk) string {
+	if dk.Profile != nil {
+		pr := design.DiskProfiles[*dk.Profile]
+		if !pr.Modeled() {
+			return "disk " + pr.Name
+		}
+		iops := pr.IOPS
+		if dk.IOPS != nil {
+			iops = *dk.IOPS
+		}
+		return fmt.Sprintf("disk %s · %s IOPS", pr.Name, strings.TrimSuffix(rps(float64(iops)), " rps"))
+	}
 	read, iops := plan.DefaultDiskReadMs, plan.DefaultDiskIOPS
 	if dk.ReadMs != nil {
 		read = *dk.ReadMs
