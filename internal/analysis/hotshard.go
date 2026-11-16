@@ -9,8 +9,8 @@ import (
 )
 
 // Hot shard: a caller sends calls to shards by key, and one shard takes
-// HotShardShareFactor times its even share of the caller's calls to them
-// or more while it is busy (CPU at HotShardCPU or more, or its calls
+// HotShardShareFactor times the calls of the next busiest shard or more
+// while it is busy (CPU at HotShardCPU or more, or its calls
 // TargetSlowFactor times their low-load time and TargetSlowMinMs more),
 // and another shard's CPU stays under HotShardIdleCPU, for two windows in
 // a row. The keys are spread by hash, but the traffic isn't: the popular
@@ -88,7 +88,7 @@ func hotShardGroup(a *Analysis, svc string, shards []string) *Diagnosis {
 	picks := make([]*pick, len(ws))
 	flags := make([]bool, len(ws))
 	for i, w := range ws {
-		total, best := 0.0, -1.0
+		total, best, second := 0.0, -1.0, 0.0
 		var p pick
 		for _, sh := range shards {
 			e := edgeAt(w, svc, sh)
@@ -97,7 +97,9 @@ func hotShardGroup(a *Analysis, svc string, shards []string) *Diagnosis {
 			}
 			total += *e.RPS
 			if *e.RPS > best {
-				best, p.hot = *e.RPS, sh
+				second, best, p.hot = max(best, 0), *e.RPS, sh
+			} else if *e.RPS > second {
+				second = *e.RPS
 			}
 		}
 		if total <= 0 || p.hot == "" {
@@ -119,7 +121,9 @@ func hotShardGroup(a *Analysis, svc string, shards []string) *Diagnosis {
 			}
 		}
 		picks[i] = &p
-		flags[i] = busy && p.share >= HotShardShareFactor/n && p.idle != "" && p.idleCPU < HotShardIdleCPU
+		// Compared with the next busiest shard, not with an even share: with
+		// two shards an even share's 1.5x would need 75% of the calls.
+		flags[i] = busy && best >= HotShardShareFactor*second && p.idle != "" && p.idleCPU < HotShardIdleCPU
 	}
 	from, to, ok := sustained(flags)
 	if !ok {

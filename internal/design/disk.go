@@ -52,7 +52,7 @@ var DiskProfiles = map[string]DiskProfile{
 		MiBps:  func(int) float64 { return 125 },
 		Source: "AWS, Amazon EBS General Purpose SSD volumes: https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html",
 		Basis: "a gp3 volume at its baseline: 3,000 IOPS and 125 MiB/s, included in its price, and up to 80,000 IOPS provisioned. " +
-			"AWS states single-digit millisecond latency; Loadlore adds 1 ms to every read, write and fsync, the low end, so the disk is flattered rather than handicapped. " +
+			"AWS publishes no exact latency, only single-digit milliseconds, so the 1 ms Loadlore adds to every read, write and fsync is its own estimate: the low end of that range, so the disk is flattered rather than handicapped. " +
 			"Reads and writes are capped separately, so a mixed load can reach up to twice the IOPS. Provisioned throughput isn't modelled",
 	},
 	DiskIO2: {
