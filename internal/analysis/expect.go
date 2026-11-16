@@ -104,6 +104,18 @@ func metricFor(a *Analysis, m design.MetricRef) (metricFn, bool) {
 		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.HitRate }), design.MetricRatio, SrcHitRate}, true
 	case "stale_read_rate":
 		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.StaleReadRate }), design.MetricRatio, SrcStaleReads}, true
+	case "depth":
+		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.Depth }), design.MetricCount, SrcQueueDepth}, true
+	case "oldest_job_ms":
+		return metricFn{svc(func(s *ServiceWindow) *float64 {
+			if s.OldestJobS == nil {
+				return nil
+			}
+			v := *s.OldestJobS * 1000
+			return &v
+		}), design.MetricLatency, SrcOldestJob}, true
+	case "job_wait_p99_ms":
+		return metricFn{svc(func(s *ServiceWindow) *float64 { return s.JobWaitP99 }), design.MetricLatency, SrcJobWait}, true
 	case "replication_lag_ms":
 		return metricFn{svc(func(s *ServiceWindow) *float64 {
 			if s.ReplicationLagS == nil {

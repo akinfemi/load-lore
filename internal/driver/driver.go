@@ -144,6 +144,8 @@ type Sample struct {
 	HitRate        map[string]float64 `json:"hit_rate,omitempty"` // Redis, by service
 	// ReplicationLagS is each Postgres read replica's lag, in seconds.
 	ReplicationLagS map[string]float64 `json:"replication_lag_s,omitempty"`
+	// QueueJobs is each queue's unfinished jobs, waiting or running.
+	QueueJobs map[string]float64 `json:"queue_jobs,omitempty"`
 }
 
 // PoolSample is one caller's pool to one target, summed over replicas.

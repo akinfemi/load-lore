@@ -591,6 +591,7 @@ func (d *Driver) sampleMore(ctx context.Context, s *driver.Sample) {
 	s.MaxConnections = vec(`max by (service) (pg_settings_max_connections)`, "service")
 	s.HitRate = vec(`sum by (service) (rate(redis_keyspace_hits_total[10s])) / (sum by (service) (rate(redis_keyspace_hits_total[10s])) + sum by (service) (rate(redis_keyspace_misses_total[10s])) > 0)`, "service")
 	s.ReplicationLagS = vec(`max by (service) (pg_replication_lag_seconds) and on (service) (pg_replication_is_replica == 1)`, "service")
+	s.QueueJobs = vec(`max by (service) (redis_stream_length)`, "service")
 }
 
 // --- Collect ---

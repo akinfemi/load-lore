@@ -232,6 +232,7 @@ The report is made from the run folder alone, so `loadl report <run>` can rewrit
   | Working set doesn't fit | Postgres read from outside its memory while latency climbed; with a disk block, its reads also slowed. |
   | Replication lag | A read replica fell a second or more behind its primary, or reads after a write from it missed the write. |
   | Autoscale lag | The run broke while an autoscaled service's replicas were saturated and the autoscaler was still adding them, or was already at its max. |
+  | Consumer lag | Jobs waited in a queue because its workers finished them more slowly than they arrived; a full queue, when it ran out of memory and refused new jobs. A run can hold while jobs back up: the requests that published them were answered fast. |
   | Hot rows | Writes queued on row locks for the same few rows. Reads of those rows can slow too, and past a point the contention burns the database's CPU. |
 
   Two diagnoses can both be true, one causing the other; the report says when it sees that.

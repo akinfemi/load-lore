@@ -67,6 +67,10 @@ func Annotated(d *design.Design, an *Annotations) *mermaid.Flowchart {
 			if _, ok := d.Services[s.Primary]; ok {
 				edge(s.Primary, name, mermaid.Dotted, "streams WAL")
 			}
+		case s.Kind == "queue":
+			for _, w := range consumersOf(d, name) {
+				edge(name, w, mermaid.Solid, consumeLabel(d.Services[w].Consume))
+			}
 		case s.Behavior != nil:
 			for _, e := range callEdges(s) {
 				lines := []string{strings.Join(e.ops, ", ")}
@@ -111,6 +115,9 @@ func addNode(f *mermaid.Flowchart, name string, s *design.Service, extra []strin
 		if !s.IsSynthetic() {
 			lines = append(lines, s.Image)
 		}
+		if s.Role == "worker" {
+			lines = append(lines, "worker")
+		}
 		lines = append(lines, res)
 		if a := s.Autoscale; a != nil && a.Min != nil && a.Max != nil {
 			lines = append(lines, autoscaleLabel(a))
@@ -120,6 +127,8 @@ func addNode(f *mermaid.Flowchart, name string, s *design.Service, extra []strin
 		f.Node(mermaid.ID(name), mermaid.Rounded, append([]string{title, "pgbouncer · " + s.PoolMode, res}, extra...)...)
 	case s.Kind == "lb":
 		f.Node(mermaid.ID(name), mermaid.Hexagon, append([]string{title, "load balancer", res}, extra...)...)
+	case s.Kind == "queue":
+		f.Node(mermaid.ID(name), mermaid.Cylinder, append([]string{title, "queue · Redis Streams", res}, extra...)...)
 	default:
 		lines := []string{title, strings.TrimSpace(s.Kind + " " + s.Version), res}
 		if dk := s.Disk; dk != nil {
@@ -162,6 +171,9 @@ func nodeOrder(d *design.Design) []string {
 		if s.Kind == "pgbouncer" || s.Kind == "lb" {
 			queue = append(queue, s.Target)
 		}
+		if s.Kind == "queue" {
+			queue = append(queue, consumersOf(d, name)...)
+		}
 		for _, e := range callEdges(s) {
 			queue = append(queue, e.target)
 		}
@@ -172,6 +184,25 @@ func nodeOrder(d *design.Design) []string {
 		}
 	}
 	return order
+}
+
+// consumersOf lists the workers that take jobs from queue, by name.
+func consumersOf(d *design.Design, queue string) []string {
+	var out []string
+	for _, name := range d.ServiceNames() {
+		if s := d.Services[name]; s != nil && s.Consume != nil && s.Consume.From == queue {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// consumeLabel is how a worker takes jobs: consume, 5 at a time.
+func consumeLabel(c *design.Consume) string {
+	if c.Concurrency == nil {
+		return "consume"
+	}
+	return fmt.Sprintf("consume, %d at a time", *c.Concurrency)
 }
 
 type callEdge struct {

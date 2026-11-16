@@ -210,6 +210,9 @@ func nodeMetrics(svc *plan.Service, parent string, s *driver.Sample) (string, fl
 	if l, has := s.ReplicationLagS[svc.Name]; has {
 		parts = append(parts, "lag "+analysis.Ms(l*1000))
 	}
+	if j, has := s.QueueJobs[svc.Name]; has {
+		parts = append(parts, analysis.Count(j)+" jobs")
+	}
 	if pool, has := s.Pools[parent+">"+svc.Name]; has && pool.Max > 0 {
 		t := fmt.Sprintf("%s's pool %s/%s", parent, analysis.Count(pool.InUse), analysis.Count(pool.Max))
 		if pool.Pending > 0 {
@@ -384,6 +387,9 @@ func components(b *strings.Builder, p *plan.Plan, s *driver.Sample) {
 		}
 		if l, has := s.ReplicationLagS[svc.Name]; has {
 			parts = append(parts, "lag "+analysis.Ms(l*1000))
+		}
+		if j, has := s.QueueJobs[svc.Name]; has {
+			parts = append(parts, analysis.Count(j)+" jobs queued")
 		}
 		var keys []string
 		for k := range s.Pools {

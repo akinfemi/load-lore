@@ -297,6 +297,7 @@ Per-component metrics, written `<service>.<metric>`:
 | postgres | `connections`, `cpu`, `memory` |
 | postgres-replica | `connections`, `cpu`, `memory`, `replication_lag_ms`: how far behind its primary it is: the WAL it hadn't replayed, in milliseconds of the primary's writing; `stale_read_rate`: of the point reads of a key the same request had just written to the primary, the share that didn't see the write |
 | redis | `hit_rate`, `memory`, `cpu` |
+| queue | `depth`: jobs published and not yet finished, waiting or running; `oldest_job_ms`: how long the oldest of them had waited; `job_wait_p99_ms`: the p99 wait, publish to start, of the jobs workers took; `memory`, `cpu` |
 | application services | `cpu`, `memory`, `p99_ms`, `error_rate`, `inflight` |
 
 Values: latencies in milliseconds (`300`, `300ms` or `0.3s`); `error_rate`, `hit_rate`, `cpu` and `memory` as a percentage (`5%`) or fraction (`0.05`), where `cpu` and `memory` are utilization of the container's limit; rates and counts as plain numbers.

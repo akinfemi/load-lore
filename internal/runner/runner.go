@@ -531,6 +531,13 @@ func progressLines(ctx context.Context, t0 time.Time, drv driver.Driver, out io.
 			}
 			parts = append(parts, "cpu "+strings.Join(cpus, " "))
 		}
+		if len(s.QueueJobs) > 0 {
+			var queues []string
+			for _, q := range sortedKeys(s.QueueJobs) {
+				queues = append(queues, fmt.Sprintf("%s %.0f", q, s.QueueJobs[q]))
+			}
+			parts = append(parts, "jobs queued "+strings.Join(queues, " "))
+		}
 		fmt.Fprintf(out, "[%s] %s\n", clock(elapsed), strings.Join(parts, " · "))
 		st.update(func(x *Status) { x.ElapsedS, x.Sample = elapsed.Seconds(), s })
 		_ = dir.AppendJSON(rundir.ProgressFile, ProgressLine{ElapsedS: elapsed.Seconds(), Sample: s})

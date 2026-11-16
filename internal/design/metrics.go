@@ -48,7 +48,11 @@ var ComponentMetrics = map[string]map[string]MetricKind{
 	"postgres":         {"connections": MetricCount, "cpu": MetricRatio, "memory": MetricRatio},
 	"postgres-replica": {"connections": MetricCount, "cpu": MetricRatio, "memory": MetricRatio, "replication_lag_ms": MetricLatency, "stale_read_rate": MetricRatio},
 	"redis":            {"hit_rate": MetricRatio, "memory": MetricRatio, "cpu": MetricRatio},
-	"service":          {"cpu": MetricRatio, "memory": MetricRatio, "p99_ms": MetricLatency, "error_rate": MetricRatio, "inflight": MetricCount},
+	// queue: depth is the jobs not yet finished, oldest_job_ms how long
+	// the oldest had waited, job_wait_p99_ms the p99 wait of the jobs
+	// workers took, publish to start.
+	"queue":   {"depth": MetricCount, "oldest_job_ms": MetricLatency, "job_wait_p99_ms": MetricLatency, "memory": MetricRatio, "cpu": MetricRatio},
+	"service": {"cpu": MetricRatio, "memory": MetricRatio, "p99_ms": MetricLatency, "error_rate": MetricRatio, "inflight": MetricCount},
 }
 
 // metricClass is the ComponentMetrics key for a service.

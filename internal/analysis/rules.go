@@ -35,7 +35,7 @@ type Evidence struct {
 
 // RuleIDs are the diagnosis rules this version runs, by the id a
 // Diagnosis carries in Rule.
-var RuleIDs = []string{"pool-exhausted", "queueing-knee", "connection-storm", "retry-storm", "cold-cache", "working-set", "hot-rows", "replication-lag", "autoscale-lag"}
+var RuleIDs = []string{"pool-exhausted", "queueing-knee", "connection-storm", "retry-storm", "cold-cache", "working-set", "hot-rows", "replication-lag", "autoscale-lag", "consumer-lag"}
 
 // Rule thresholds. Rules are deterministic and versioned with the code.
 const (
@@ -64,7 +64,7 @@ const (
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
-const RuleVersion = "12"
+const RuleVersion = "13"
 
 func diagnose(a *Analysis) []*Diagnosis {
 	out := []*Diagnosis{}
@@ -76,6 +76,7 @@ func diagnose(a *Analysis) []*Diagnosis {
 	out = append(out, hotRows(a)...)
 	out = append(out, replicationLag(a)...)
 	out = append(out, autoscaleLag(a)...)
+	out = append(out, consumerLag(a)...)
 	// A knee named after a pool whose target kept up is pool-exhausted's
 	// case; when that rule fired for the pool, the knee would only repeat it.
 	storms := retryStorm(a)

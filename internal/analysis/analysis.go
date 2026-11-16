@@ -22,6 +22,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/hoststat"
 	"github.com/akinfemi/load-lore/internal/plan"
 	"github.com/akinfemi/load-lore/internal/rundir"
+	"github.com/akinfemi/load-lore/internal/synthetic"
 )
 
 // WindowSeconds is the length of the windows percentiles and rates are
@@ -176,6 +177,32 @@ type ServiceWindow struct {
 	// Redis.
 	HitRate   *float64 `json:"hit_rate,omitempty"`
 	Evictions *float64 `json:"evictions,omitempty"`
+
+	// Queues. Depth is the jobs not done yet, waiting or running, at most
+	// over the window and at its end; OldestJobS how long the oldest of
+	// them had been there, at most. Published and Finished are jobs a
+	// second added to the queue and finished by its workers; JobErrorRate
+	// is the share of finished jobs that failed, and JobWaitP99 the p99 of
+	// the jobs workers took, from publish to start. QueueUsed is the
+	// queue's memory against its maxmemory; PublishErrors failed publishes
+	// a second, QueueFull the ones refused because it was full.
+	Depth         *float64 `json:"queue_depth,omitempty"`
+	DepthEnd      *float64 `json:"queue_depth_end,omitempty"`
+	OldestJobS    *float64 `json:"oldest_job_s,omitempty"`
+	Published     *float64 `json:"published,omitempty"`
+	Finished      *float64 `json:"finished,omitempty"`
+	JobErrorRate  *float64 `json:"job_error_rate,omitempty"`
+	JobWaitP99    *float64 `json:"job_wait_p99_ms,omitempty"`
+	QueueUsed     *float64 `json:"queue_used,omitempty"`
+	PublishErrors *float64 `json:"publish_errors,omitempty"`
+	QueueFull     *float64 `json:"queue_full,omitempty"`
+
+	// Workers: jobs a second finished, the mean time one took, and the jobs
+	// running at once (peak and mean, summed over replicas).
+	Jobs        *float64 `json:"jobs,omitempty"`
+	JobMeanMs   *float64 `json:"job_mean_ms,omitempty"`
+	Running     *float64 `json:"jobs_running,omitempty"`
+	RunningMean *float64 `json:"jobs_running_mean,omitempty"`
 
 	// lb: replicas in rotation (the minimum seen in the window).
 	Healthy *float64 `json:"healthy_replicas,omitempty"`
@@ -369,7 +396,7 @@ func Analyze(dir string) (*Analysis, error) {
 		a.PeakVUsAll = maxPtr(a.PeakVUsAll, w.VUs)
 	}
 	a.Diagnoses = diagnose(a)
-	a.Verdict.Summary += staleNote(a)
+	a.Verdict.Summary += staleNote(a) + queueNote(a)
 	a.Expect = scoreAll(a, a.Windows)
 	a.Windows = all
 	return a, nil
@@ -646,7 +673,7 @@ func (b *builder) offered(start float64) float64 {
 
 func roleOf(kind string) string {
 	switch kind {
-	case "postgres", "redis":
+	case "postgres", "redis", "queue":
 		return "datastore"
 	}
 	return kind // app, lb, pgbouncer
@@ -722,6 +749,10 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 	svc := eq("service", s.Name)
 	switch s.Kind {
 	case "app":
+		if s.Role == "worker" {
+			b.worker(sw, s, wa, wb)
+			break
+		}
 		if total, ok := st.increase("loadlore_requests_total", svc, wa, wb); ok {
 			bad, _ := st.increase("loadlore_requests_total", and(svc, not("code", "200")), wa, wb)
 			sw.RPS = num(total/(wb-wa), true)
@@ -808,6 +839,8 @@ func (b *builder) service(s *plan.Service, wa, wb float64) *ServiceWindow {
 		if ev, ok := st.increase("redis_evicted_keys_total", svc, wa, wb); ok {
 			sw.Evictions = num(ev, true)
 		}
+	case "queue":
+		b.queue(sw, s, wa, wb)
 	case "lb":
 		be := and(svc, eq("proxy", "replicas"))
 		if total, ok := st.increase("haproxy_backend_http_requests_total", be, wa, wb); ok {
@@ -857,9 +890,14 @@ func (b *builder) appEdges(w *Window, s *plan.Service, wa, wb float64) {
 				e.OpMeanMs[op] = sums[op] / c * 1000
 			}
 		}
-		w.Edges = append(w.Edges, e)
-
-		if tgt.Pool <= 0 || !st.has("loadlore_pool_max_connections") {
+		// A worker's job runners hold their connections to its queue while
+		// they wait for jobs: neither an edge of calls nor a pool that fills
+		// up. Its publishes to the same queue, if any, are still an edge.
+		consumes := s.Consume != nil && s.Consume.Queue == t
+		if !consumes || e.RPS != nil {
+			w.Edges = append(w.Edges, e)
+		}
+		if consumes || tgt.Pool <= 0 || !st.has("loadlore_pool_max_connections") {
 			continue
 		}
 		pw := &PoolWindow{Service: s.Name, Target: t}
@@ -957,6 +995,69 @@ func (b *builder) pgbouncerPool(w *Window, s *plan.Service, wa, wb float64) {
 	}
 }
 
+// queue fills a queue's window from its exporter, its workers' job
+// metrics and its publishers' calls.
+func (b *builder) queue(sw *ServiceWindow, s *plan.Service, wa, wb float64) {
+	st := b.st
+	stream := eq("service", s.Name, "stream", s.Name)
+	if grid := st.gaugeGrid("redis_stream_length", stream, wa, wb); len(grid) > 0 {
+		mx := grid[0]
+		for _, v := range grid {
+			mx = math.Max(mx, v)
+		}
+		sw.Depth, sw.DepthEnd = num(mx, true), num(grid[len(grid)-1], true)
+	}
+	// The first entry's ID is the time Redis added it, in milliseconds;
+	// 0 when the queue is empty.
+	oldest, seen := 0.0, false
+	for _, ss := range st.match("redis_stream_first_entry_id", stream) {
+		for _, p := range ss.points {
+			if p.t >= wa && p.t < wb {
+				seen = true
+				if p.v > 0 {
+					oldest = math.Max(oldest, p.t-p.v/1000)
+				}
+			}
+		}
+	}
+	sw.OldestJobS = num(oldest, seen)
+	if n, ok := st.increase("redis_stream_entries_added_total", stream, wa, wb); ok {
+		sw.Published = num(n/(wb-wa), true)
+	}
+	q := eq("queue", s.Name)
+	if total, ok := st.increase("loadlore_jobs_total", q, wa, wb); ok {
+		bad, _ := st.increase("loadlore_jobs_total", and(q, eq("result", "error")), wa, wb)
+		sw.Finished = num(total/(wb-wa), true)
+		sw.JobErrorRate = num(bad/total, total > 0)
+	}
+	sw.JobWaitP99 = ms(quantile(st.classicBuckets("loadlore_job_wait_seconds", q, wa, wb), 0.99))
+	used, _, ok1 := st.gaugeSum("redis_memory_used_bytes", eq("service", s.Name), wa, wb)
+	limit, _, ok2 := st.gaugeSum("redis_memory_max_bytes", eq("service", s.Name), wa, wb)
+	sw.QueueUsed = num(used/limit, ok1 && ok2 && limit > 0)
+	pub := eq("target", s.Name, "op", "publish")
+	if n, ok := st.increase("loadlore_calls_total", and(pub, eq("outcome", "error")), wa, wb); ok {
+		sw.PublishErrors = num(n/(wb-wa), true)
+	}
+	if n, ok := st.increase("loadlore_call_errors_total", and(pub, eq("cause", synthetic.CauseQueueFull)), wa, wb); ok {
+		sw.QueueFull = num(n/(wb-wa), true)
+	}
+}
+
+// worker fills a worker's window from its job metrics.
+func (b *builder) worker(sw *ServiceWindow, s *plan.Service, wa, wb float64) {
+	st := b.st
+	svc := eq("service", s.Name)
+	if total, ok := st.increase("loadlore_jobs_total", svc, wa, wb); ok {
+		sw.Jobs = num(total/(wb-wa), true)
+	}
+	sum, ok1 := st.increase("loadlore_job_duration_seconds_sum", svc, wa, wb)
+	cnt, ok2 := st.increase("loadlore_job_duration_seconds_count", svc, wa, wb)
+	sw.JobMeanMs = num(sum/cnt*1000, ok1 && ok2 && cnt > 0)
+	if mx, mean, ok := st.gaugeSum("loadlore_jobs_running", svc, wa, wb); ok {
+		sw.Running, sw.RunningMean = num(mx, true), num(mean, true)
+	}
+}
+
 // Metric sources, cited wherever a number appears.
 const (
 	SrcOffered          = "the load profile in plan.json (offered arrival rate)"
@@ -990,6 +1091,15 @@ const (
 	SrcStaleReads       = "loadlore_read_after_write_total (the synthetic service): point reads of a key the same request had just written, stale when they didn't see the write"
 	SrcReplLagBytes     = "pg_stat_replication_pg_wal_lsn_diff (postgres_exporter, on the primary): WAL written that the replica hasn't replayed"
 	SrcHitRate          = "redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter)"
+	SrcQueueDepth       = "redis_stream_length (redis_exporter): jobs published and not yet finished, waiting or running"
+	SrcOldestJob        = "redis_stream_first_entry_id (redis_exporter): the oldest unfinished job's publish time"
+	SrcPublished        = "redis_stream_entries_added_total (redis_exporter)"
+	SrcJobs             = "loadlore_jobs_total (the workers' finished jobs, by result)"
+	SrcJobWait          = "loadlore_job_wait_seconds (the workers' histogram: publish to start)"
+	SrcJobDuration      = "loadlore_job_duration_seconds (the workers' histogram: time to run a job)"
+	SrcJobsRunning      = "loadlore_jobs_running (summed over the worker's replicas)"
+	SrcQueueMemory      = "redis_memory_used_bytes ÷ redis_memory_max_bytes (redis_exporter)"
+	SrcPublishErrors    = `loadlore_call_errors_total{op="publish"} (the publishers' failed publishes, by cause)`
 	SrcLBRequests       = "haproxy_backend_http_requests_total (HAProxy)"
 	SrcLBHealthy        = "haproxy_backend_active_servers (HAProxy)"
 	SrcLoadCPU          = "container_cpu_usage_seconds_total{service=\"lore-k6\"} ÷ the load generator's CPU budget"

@@ -201,6 +201,9 @@ func diagramSection(d *doc, a *analysis.Analysis) {
 	if kinds["redis"] {
 		src = append(src, "hit rate from "+analysis.SrcHitRate)
 	}
+	if kinds["queue"] {
+		src = append(src, "a queue's jobs from "+analysis.SrcQueueDepth+" and its oldest from "+analysis.SrcOldestJob+"; a worker's jobs/s from "+analysis.SrcJobs+" and busy runners from "+analysis.SrcJobsRunning)
+	}
 	d.p("<sub>Sources: %s.</sub>", strings.Join(src, "; "))
 }
 
@@ -248,12 +251,32 @@ func annotations(a *analysis.Analysis, w *analysis.Window) *diagram.Annotations 
 			}
 		case sw.HitRate != nil:
 			lines = append(lines, "hit rate "+analysis.Pct(*sw.HitRate))
+		case s.Kind == "queue" && sw.Depth != nil:
+			q := analysis.Count(*sw.Depth) + " jobs"
+			if sw.OldestJobS != nil && *sw.OldestJobS >= 1 {
+				q += ", oldest " + analysis.Ms(*sw.OldestJobS*1000)
+			}
+			lines = append(lines, q)
+		case s.Consume != nil && sw.Jobs != nil:
+			j := analysis.Rate(*sw.Jobs) + " jobs/s"
+			if sw.Running != nil {
+				j += fmt.Sprintf(", %s/%d busy", analysis.Count(*sw.Running), len(s.Running())*s.Consume.Concurrency)
+			}
+			lines = append(lines, j)
 		case sw.Healthy != nil && s.LB != nil:
 			lines = append(lines, fmt.Sprintf("%s/%d replicas up", analysis.Count(*sw.Healthy), len(s.LB.Servers)))
 		case sw.Inflight != nil:
 			lines = append(lines, "in flight "+analysis.Count(*sw.Inflight))
 		}
 		an.Nodes[s.Name] = lines
+	}
+	for _, s := range a.Plan.Services {
+		if s.Consume == nil {
+			continue
+		}
+		if sw := w.Services[s.Name]; sw != nil && sw.Jobs != nil {
+			an.Edges[[2]string{s.Consume.Queue, s.Name}] = []string{analysis.Rate(*sw.Jobs) + " jobs/s"}
+		}
 	}
 	for _, e := range w.Edges {
 		var parts []string
@@ -671,6 +694,7 @@ func thresholdsSection(d *doc, a *analysis.Analysis) {
 	d.line("- **Cold cache:** a cache's share of lookups that miss rising to %gx its level before or more, and to %s of lookups at least, while its callers' reads of the database behind it reach %gx their rate before (counted as at least %g a second, for a cache warm enough to send none).", analysis.ColdMissFactor, analysis.Pct(analysis.ColdMissMin), analysis.ColdReadFactor, analysis.ColdReadFloor)
 	d.line("- **Working set doesn't fit:** for two windows in a row, a Postgres answering less than %s of block reads from shared_buffers and reading %g blocks a second or more from outside them, while p99 was %gx the low-load p99 or more. When Postgres times its reads (track_io_timing, on with a disk block), each block read must also take %gx its low-load time or more, and %g ms more.", analysis.Pct(analysis.WorkingSetHitMax), analysis.WorkingSetMinReads, analysis.KneeLatencyFactor, analysis.WorkingSetReadFactor, analysis.WorkingSetReadMinMs)
 	d.line("- **Replication lag:** for two windows in a row, a read replica %g s or more behind its primary, or %s or more of the reads after a write it served missing the write.", analysis.ReplicationLagMinS, analysis.Pct(analysis.ReplicationStaleMin))
+	d.line("- **Consumer lag:** for two windows in a row, a queue's oldest unfinished job had waited %g s or more, or the queue held more jobs than its workers run at once and grew, with jobs published %s or more faster than they were finished. Named a full queue once its memory reached %s of its maxmemory or it refused jobs.", analysis.ConsumerLagMinS, analysis.Pct(analysis.ConsumerLagGrowth-1), analysis.Pct(analysis.QueueFullShare))
 	d.line("- **Autoscale lag:** the run broke while an autoscaled service's replicas were at %s or more of their CPU limit: below its max, the autoscaler hadn't caught up; at its max (autoscale ceiling), it had nothing left to add.", analysis.Pct(analysis.AutoscaleSaturated))
 	d.line("- **Hot rows:** for two windows in a row, %g or more of a Postgres's backends waiting on locks on average, while a caller's writes to it took %gx their low-load time or more (and %g ms more). Reads of the same rows may slow too, and the summary says when the database's CPU per request reached %gx its low-load value: the contention burning CPU. A queueing knee on that database's CPU at the same time then points at the rows. Windows with a disk_slow fault on the database don't count.", analysis.HotLockWaitsMin, analysis.HotWriteFactor, analysis.HotMinMs, analysis.HotCPUPerRequestFactor)
 	d.line("")
@@ -830,6 +854,28 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 				}
 				return "–"
 			}})
+		case "queue":
+			cols = append(cols, col{name + " jobs", func(w *analysis.Window) string {
+				if sw := w.Services[name]; sw != nil {
+					return opt(sw.DepthEnd, analysis.Count)
+				}
+				return "–"
+			}}, col{"oldest", func(w *analysis.Window) string {
+				if sw := w.Services[name]; sw != nil && sw.OldestJobS != nil {
+					return analysis.Ms(*sw.OldestJobS * 1000)
+				}
+				return "–"
+			}}, col{"published/s", func(w *analysis.Window) string {
+				if sw := w.Services[name]; sw != nil {
+					return opt(sw.Published, analysis.Rate)
+				}
+				return "–"
+			}}, col{"finished/s", func(w *analysis.Window) string {
+				if sw := w.Services[name]; sw != nil {
+					return opt(sw.Finished, analysis.Rate)
+				}
+				return "–"
+			}})
 		case "lb":
 			cols = append(cols, col{name + " up", func(w *analysis.Window) string {
 				if sw := w.Services[name]; sw != nil {
@@ -913,8 +959,12 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 	if hasReplica(a.Plan) {
 		conns += "; a replica's lag is from " + analysis.SrcReplLagS + ", and its stale share of reads after writes from " + analysis.SrcStaleReads
 	}
-	d.line("Columns: offered is %s; served is %s; dropped is %s; errors are %s; p50 and p99 are from %s; CPU is %s, mean over the window; conns are %s; hit rate is from %s; up is %s; pools are %s; k6 and Toxiproxy CPU are against their budgets.",
-		analysis.SrcOffered, analysis.SrcRPS, analysis.SrcDropped, analysis.SrcErrors, analysis.SrcK6Latency, analysis.SrcCPU, conns, analysis.SrcHitRate, analysis.SrcLBHealthy, pools)
+	queues := ""
+	if slices.ContainsFunc(a.Plan.Services, func(s *plan.Service) bool { return s.Kind == "queue" }) {
+		queues = fmt.Sprintf(" A queue's jobs are %s, at the window's end; oldest is %s, at most over the window; published is %s and finished %s.", analysis.SrcQueueDepth, analysis.SrcOldestJob, analysis.SrcPublished, analysis.SrcJobs)
+	}
+	d.line("Columns: offered is %s; served is %s; dropped is %s; errors are %s; p50 and p99 are from %s; CPU is %s, mean over the window; conns are %s; hit rate is from %s; up is %s; pools are %s; k6 and Toxiproxy CPU are against their budgets.%s",
+		analysis.SrcOffered, analysis.SrcRPS, analysis.SrcDropped, analysis.SrcErrors, analysis.SrcK6Latency, analysis.SrcCPU, conns, analysis.SrcHitRate, analysis.SrcLBHealthy, pools, queues)
 	if hostSampled {
 		d.line("")
 		d.line("Host steal is %s; other CPUs are %s.", analysis.SrcHostSteal, analysis.SrcHostOthers)

@@ -51,7 +51,10 @@ type metrics struct {
 
 // jobWaitBuckets reach further than latencyBuckets: a backed-up queue
 // holds jobs for minutes.
-var jobWaitBuckets = append(append([]float64{}, latencyBuckets...), 90, 120, 180, 300, 600, 1200, 1800)
+var jobWaitBuckets = []float64{
+	0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 7.5, 10,
+	12.5, 15, 17.5, 20, 25, 30, 35, 40, 50, 60, 75, 90, 120, 150, 180, 240, 300, 450, 600, 900, 1200, 1800,
+}
 
 func newMetrics(cfg *Config, pools func() []poolSnapshot) *metrics {
 	reg := prometheus.NewRegistry()
