@@ -15,9 +15,9 @@ flowchart LR
     db[("db<br/>postgres 17<br/>1 CPU · 2g")]
     load -->|"50% read · 50% write"| lb
     lb -->|"round-robin<br/>checks every 2s, out after 3"| api
-    api -->|"read on reads<br/>pool 40, min 20"| ro
-    api -->|"write on writes<br/>pool 40, min 20"| db
-    api -.->|"read on writes<br/>pool 40, min 20"| ro
+    api -->|"read on reads<br/>pool 40, min 40"| ro
+    api -->|"write on writes<br/>pool 40, min 40"| db
+    api -.->|"read on writes<br/>pool 40, min 40"| ro
     db -.->|"streams WAL"| ro
 ```
 

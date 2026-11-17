@@ -21,7 +21,7 @@ services:
         - { target: db, op: read }
       resilience:
         timeout_ms: 2000
-    pools: { db: 10 }
+    pools: { db: { size: 10, min: 10 } }   # opened when a replica starts
     autoscale: { max: 6, metric: cpu, target: 0.7 }   # Kubernetes' defaults otherwise: every 15 s, no wait to scale up
 
   db:

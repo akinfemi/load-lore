@@ -16,7 +16,7 @@ services:
       calls:
         - { target: db, op: read,  count: 3 }
         - { target: db, op: write, count: 1, when: write }
-    pools: { db: 24 }          # 4 x 24 = 96; exporter and reserved slots need the rest
+    pools: { db: { size: 24, min: 24 } }   # opened at start; 4 x 24 = 96, exporter and reserved slots need the rest
 
   db:
     kind: postgres

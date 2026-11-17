@@ -19,7 +19,7 @@ services:
       calls:
         - { target: db, op: read,  query: batch, rows: 3 }  # the page's three items in one query
         - { target: db, op: write, count: 1, when: write }
-    pools: { db: 24 }          # 4 replicas x 24 = 96 connections, under max_connections
+    pools: { db: { size: 24, min: 24 } }   # opened at start; 4 replicas x 24 = 96 connections, under max_connections
 
   db:
     kind: postgres

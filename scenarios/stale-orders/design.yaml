@@ -27,8 +27,8 @@ services:
       resilience:
         timeout_ms: 2000
     pools:   # per replica: 2 x 40 stays under the primary's max_connections
-      db: { size: 40, min: 20 }
-      ro: { size: 40, min: 20 }
+      db: { size: 40, min: 40 }
+      ro: { size: 40, min: 40 }
 
   db:
     kind: postgres

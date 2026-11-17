@@ -346,7 +346,7 @@ func withStalls(tl []Event, ws []*Window, sig [][]string, breakAt int, baseline,
 		for j < end && len(sig[j]) > 0 {
 			j++
 		}
-		tl = append(tl, Event{At: ws[i].Start, Kind: "stall", Detail: stallDetail(ws[i:j], baseline, limit, j == len(ws))})
+		tl = append(tl, Event{At: ws[i].Start, To: ws[j-1].Start + WindowSeconds, Kind: "stall", Detail: stallDetail(ws[i:j], baseline, limit, j == len(ws))})
 		added = true
 		i = j
 	}
@@ -383,6 +383,33 @@ func stallDetail(ws []*Window, baseline, limit *float64, last bool) string {
 		then = "until the load ended"
 	}
 	return fmt.Sprintf("%s for %d s, %s; too short to count as a break", strings.Join(parts, ", "), len(ws)*WindowSeconds, then)
+}
+
+// nameStalls says which diagnoses cover each stall: those whose first
+// stretch overlaps it, or ends as it starts, since a cause in one window
+// can show up in the next one's p99 (the connection storm counts that
+// one too). A stall no diagnosis covers says so.
+func nameStalls(a *Analysis) {
+	for i := range a.Timeline {
+		e := &a.Timeline[i]
+		if e.Kind != "stall" {
+			continue
+		}
+		var titles []string
+		for _, d := range a.Diagnoses {
+			if d.From < e.To && e.At <= d.To && !slices.Contains(titles, d.Title) {
+				titles = append(titles, d.Title)
+				if !slices.Contains(e.Rules, d.Rule) {
+					e.Rules = append(e.Rules, d.Rule)
+				}
+			}
+		}
+		if len(titles) == 0 {
+			e.Detail += "; no diagnosis covers it"
+		} else {
+			e.Detail += "; diagnosed as " + strings.Join(titles, " and ")
+		}
+	}
 }
 
 // momentWindow is the window the annotated diagram shows: the break, or

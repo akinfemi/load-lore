@@ -622,7 +622,7 @@ func timelineSection(d *doc, a *analysis.Analysis) {
 	d.line("")
 	src := "From events.jsonl: the fault timeline and Docker container events."
 	if slices.ContainsFunc(a.Timeline, func(e analysis.Event) bool { return e.Kind == "stall" }) {
-		src += " Stalls are from the per-window numbers below, judged by the thresholds."
+		src += " Stalls are from the per-window numbers below, judged by the thresholds; each names the diagnoses that cover it, counting one that ends as the stall starts."
 	}
 	d.p("<sub>" + src + "</sub>")
 }

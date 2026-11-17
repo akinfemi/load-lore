@@ -279,6 +279,10 @@ type Event struct {
 	At     float64 `json:"at_s"` // seconds from the start of the load
 	Kind   string  `json:"kind"`
 	Detail string  `json:"detail"`
+	// For a stall: where it ended, and the rules of the diagnoses that
+	// cover it (none: no rule explains it).
+	To    float64  `json:"to_s,omitempty"`
+	Rules []string `json:"rules,omitempty"`
 }
 
 // Environment is where and how the run happened.
@@ -410,6 +414,7 @@ func Analyze(dir string) (*Analysis, error) {
 		a.PeakVUsAll = maxPtr(a.PeakVUsAll, w.VUs)
 	}
 	a.Diagnoses = diagnose(a)
+	nameStalls(a)
 	a.Verdict.Summary += staleNote(a) + queueNote(a) + droppedNote(a) + quickNote(a)
 	a.Expect = scoreAll(a, a.Windows)
 	a.Windows = all

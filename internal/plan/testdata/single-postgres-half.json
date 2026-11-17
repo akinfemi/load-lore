@@ -59,6 +59,7 @@
                 "db:5432"
               ],
               "pool": 24,
+              "pool_min": 24,
               "database": "lab",
               "user": "loadlore",
               "password": "loadlore",
@@ -105,6 +106,7 @@
                 "db:5432"
               ],
               "pool": 24,
+              "pool_min": 24,
               "database": "lab",
               "user": "loadlore",
               "password": "loadlore",
@@ -151,6 +153,7 @@
                 "db:5432"
               ],
               "pool": 24,
+              "pool_min": 24,
               "database": "lab",
               "user": "loadlore",
               "password": "loadlore",
@@ -197,6 +200,7 @@
                 "db:5432"
               ],
               "pool": 24,
+              "pool_min": 24,
               "database": "lab",
               "user": "loadlore",
               "password": "loadlore",
@@ -395,8 +399,8 @@
     },
     {
       "field": "services.api.pools.db.min",
-      "value": "0",
-      "why": "the default, as pgxpool's: each replica opens connections only when callers need them, so a pool fills as load rises, and a burst opens many at once"
+      "value": "24",
+      "why": "set in the design: each replica opens 24 connections before the load starts and keeps them open"
     },
     {
       "field": "services.api.pools.db.hold",

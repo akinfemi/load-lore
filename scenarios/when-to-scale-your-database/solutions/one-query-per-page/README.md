@@ -26,11 +26,11 @@ In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 997
 
 A database benchmark predicts more. With pgbench on a 0.5-CPU Postgres and the same mix of 10% writes, one batched statement served 6,537 pages per second against 4,187 for three single-row queries (1.56×). In the full run, the api and the load balancer add their own work, each hop adds the network's round trip, and the database is CPU-throttled in bursts (next section).
 
-## Bursts on the way up
+## Bursts at the peak
 
-It isn't smooth on the way up. At 3:20, at 2,423 rps offered, the api's pools opened 81 connections to db within 10 seconds, and p99 reached 608 ms for one window (1.8 ms at low load): the report names it a connection storm. The pools open connections only when callers need them, so a short slowdown makes every replica open more at once, and each new Postgres connection costs db CPU just when it is short of it. The starting design had its own storm at 2:30. Both were too short to count as a break; the report lists them as stalls. Later, p99 rose to 40–45 ms in a few windows at the peak while every offered request was still served: bursts of queries use up the database's CPU quota early in each 100 ms scheduling period, and Postgres waits for the next one.
+It isn't smooth at the peak. p99 rose to 40–45 ms in a few windows while every offered request was still served: bursts of queries use up the database's CPU quota early in each 100 ms scheduling period, and Postgres waits for the next one.
 
-Small CPU limits are bursty, so compare peak throughput and the shape of the curves, not just the break time. A pool minimum, `pools: { db: { size: 24, min: 24 } }`, opens all 96 connections before the load, so there is no storm to name; fewer connections in the pool would likely smooth the later bursts, which is the subject of the connection pool scenario.
+Small CPU limits are bursty, so compare peak throughput and the shape of the curves, not just the break time. Fewer connections in the pool would likely smooth these bursts, which is the subject of the connection pool scenario.
 
 ## What it costs
 

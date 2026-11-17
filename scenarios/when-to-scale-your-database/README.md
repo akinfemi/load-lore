@@ -16,10 +16,10 @@ flowchart LR
     db[("db<br/>postgres 17<br/>0.4 CPU · 1g")]
     load -->|"90% read · 10% write"| lb
     lb -->|"round-robin<br/>checks every 2s, out after 3"| api
-    api -->|"read ×3, write on writes<br/>pool 24"| db
+    api -->|"read ×3, write on writes<br/>pool 24, min 24"| db
 ```
 
-The table has 5 million rows of 512 bytes, and requests pick keys from a zipf distribution, so some items are much more popular than others. Each api replica keeps a pool of up to 24 connections to Postgres.
+The table has 5 million rows of 512 bytes, and requests pick keys from a zipf distribution, so some items are much more popular than others. Each api replica keeps a pool of 24 connections to Postgres, all opened before the load starts.
 
 ## The question
 
@@ -58,6 +58,6 @@ Some directions: the database's resources, the work each request asks of it, the
 
 Scaling the database out is an option too: a design can add a read replica (a `postgres-replica` service with `primary: db`) and send the api's reads to it, and [Stale orders](../stale-orders/) covers what they cost. Sharding isn't modelled yet.
 
-You may also see a connection storm early in the ramp. [The connection pool trap](../connection-pool-trap/) covers it.
+The pools are warm so the break is the database's: with pools that open connections only when callers need them, a short slowdown on the ramp makes every replica open more at once, a connection storm, which moves the break by tens of seconds from run to run. [The connection pool trap](../connection-pool-trap/) covers pools under load.
 
 `solutions/` has one worked answer with its report. It gives the game away, so try your own first.

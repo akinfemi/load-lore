@@ -14,7 +14,7 @@ flowchart LR
     db[("db<br/>postgres 17<br/>1 CPU · 1g")]
     load -->|"90% read · 10% write"| lb
     lb -->|"round-robin<br/>checks every 1s, out after 3"| api
-    api -->|"read<br/>pool 10"| db
+    api -->|"read<br/>pool 10, min 10"| db
 ```
 
 This afternoon, someone posts about the product and it reaches the front page of Hacker News. Traffic goes from 200 requests a second to 1,800 in under a minute, and stays there.

@@ -137,9 +137,18 @@ func stormDiagnosis(a *Analysis, svc, target string, first, last, episodes int) 
 		src = SrcPoolOpen
 	}
 	t := fmt.Sprintf("%s new connections to %s from %s to %s", Count(total), target, Clock(w.Start), Clock(ws[last].Start+WindowSeconds))
-	if end := poolAt(ws[last], svc, target); first > 0 && end.Open != nil {
-		if prev := poolAt(ws[first-1], svc, target); prev != nil && prev.OpenEnd != nil {
-			t += fmt.Sprintf(": from %s open to %s of %s", Count(*prev.OpenEnd), Count(*end.Open), Count(*end.Max))
+	// The open gauge can lag the connect histogram by a scrape, so the
+	// count reached is the most open in the storm's windows or the next.
+	if first > 0 {
+		prev := poolAt(ws[first-1], svc, target)
+		var reached, of *float64
+		for i := first; i <= min(last+1, len(ws)-1); i++ {
+			if p := poolAt(ws[i], svc, target); p != nil {
+				reached, of = maxPtr(reached, p.Open), maxPtr(of, p.Max)
+			}
+		}
+		if prev != nil && prev.OpenEnd != nil && reached != nil && of != nil && *reached > *prev.OpenEnd {
+			t += fmt.Sprintf(": from %s open to %s of %s", Count(*prev.OpenEnd), Count(*reached), Count(*of))
 		}
 	}
 	ev(src, "%s", t)
