@@ -4,7 +4,7 @@ concepts: [read replicas, replication lag, read-your-writes, single-threaded rep
 minutes: 50
 
 # Available to Docker at --scale 1, Loadlore's own containers included:
-# 6.65 CPUs for the starting design, 7.5 for variants/two-replicas.
+# 6.05 CPUs for the starting design, 6.9 for variants/two-replicas.
 # reference and speed: the machine the scenario was checked on and the
 # host speed index loadl run printed there; it warns on a much slower host.
 host:
@@ -20,11 +20,11 @@ disk: legacy
 
 # Load generator VUs started before the load, at --scale 1, measured: the
 # larger of the peak rate x slo.p99_ms (1,800 x 0.5 s) and 1.5 x the most
-# VUs busy at once in any of the check's runs (134).
+# VUs busy at once in any of the check's runs (140).
 load:
   prealloc_vus: 900
-  peak_vus: 134
-  from: stale-orders-two-replicas-20261115-124239
+  peak_vus: 140
+  from: stale-orders-read-your-writes-20261117-145733
 
 # What `loadl scenario check` verifies, at --scale 1. The starting design
 # holds: its problem is the confirmation pages the replica serves stale.

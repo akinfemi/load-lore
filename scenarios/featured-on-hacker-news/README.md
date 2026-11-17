@@ -40,7 +40,7 @@ loadl run scenarios/featured-on-hacker-news/design.yaml
 loadl report latest --print | less
 ```
 
-The run takes about 4 minutes. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 7.3 CPUs, counting all six replicas the autoscaler may run. On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. The numbers here come from a MacBook Air M4 on mains power.
+The run takes about 4 minutes. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 6.3 CPUs, counting all six replicas the autoscaler may run. On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. The numbers here come from a MacBook Air M4 on mains power.
 
 Watch the run's output: each autoscaler decision and each new replica taking traffic prints as it happens, and the report's timeline lists them.
 

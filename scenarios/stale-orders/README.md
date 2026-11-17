@@ -9,13 +9,15 @@ You run the orders api for an online shop. Last quarter the database got busy, s
 ```mermaid
 flowchart LR
     load(["load<br/>up to 1,800 rps"])
-    api["api<br/>2 CPU · 1g"]
+    lb{{"lb<br/>load balancer<br/>0.4 CPU · 256m"}}
+    api["api ×2<br/>1 CPU · 1g"]
     ro[("ro<br/>postgres-replica 17<br/>0.75 CPU · 512m<br/>disk 1 ms · 3,000 IOPS")]
     db[("db<br/>postgres 17<br/>1 CPU · 2g")]
-    load -->|"50% read · 50% write"| api
-    api -->|"read on reads<br/>pool 80, min 40"| ro
-    api -->|"write on writes<br/>pool 80, min 40"| db
-    api -.->|"read on writes<br/>pool 80, min 40"| ro
+    load -->|"50% read · 50% write"| lb
+    lb -->|"round-robin<br/>checks every 2s, out after 3"| api
+    api -->|"read on reads<br/>pool 40, min 20"| ro
+    api -->|"write on writes<br/>pool 40, min 20"| db
+    api -.->|"read on writes<br/>pool 40, min 20"| ro
     db -.->|"streams WAL"| ro
 ```
 
@@ -44,7 +46,7 @@ loadl run scenarios/stale-orders/design.yaml
 loadl report latest --print | less
 ```
 
-The run takes about 5 minutes, plus about a minute the first time to seed the 2-million-row table. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 6.65 CPUs (7.5 for two replicas). Leave about 10 GB free on the disk Docker uses. On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. The numbers here come from a MacBook Air M4 on mains power.
+The run takes about 5 minutes, plus about a minute the first time to seed the 2-million-row table. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 6.05 CPUs (6.9 for two replicas). Leave about 10 GB free on the disk Docker uses. On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. The numbers here come from a MacBook Air M4 on mains power.
 
 Stuck? `loadl hint stale-orders` reveals one hint at a time.
 

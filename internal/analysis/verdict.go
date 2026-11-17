@@ -155,6 +155,9 @@ func verdict(a *Analysis) Verdict {
 	if why := suspended(a); why != "" {
 		v.Inconclusive = append([]string{why}, v.Inconclusive...)
 	}
+	if why := labFailed(a.Timeline); why != "" {
+		v.Inconclusive = append([]string{why}, v.Inconclusive...)
+	}
 	hardBreak := breakAt >= 0 && breakAt+1 < len(hard) && len(hard[breakAt]) > 0 && len(hard[breakAt+1]) > 0
 	if breakAt >= 0 && !hardBreak { // made by latency alone
 		v.Doubt = latencyDoubt(a, ws[breakAt:min(breakAt+BreakLatencyWindows, len(ws))], *v.LatencyLimit)
@@ -861,6 +864,19 @@ func suspended(a *Analysis) string {
 		return ""
 	}
 	return fmt.Sprintf("the %s load took %s on the wall clock: the host slept or stalled during it (on a laptop, idle sleep or a closed lid), so its windows don't hold the load the profile describes", durText(planned), durText(wall))
+}
+
+// labFailed says why a run didn't do what its design asked: a fault that
+// couldn't be injected, or an autoscaler decision that couldn't be carried
+// out. The run then measured a different design from the one it names.
+func labFailed(tl []Event) string {
+	for _, e := range tl {
+		switch e.Kind {
+		case "fault_error", "autoscale_error":
+			return fmt.Sprintf("at %s Loadlore couldn't carry out the design (%s), so the run isn't the design it names", Clock(e.At), e.Detail)
+		}
+	}
+	return ""
 }
 
 // durText is a duration in whole seconds, as 4m30s or 2h7m3s.

@@ -25,6 +25,6 @@ The cache was empty at 0:00 too. How many requests a second arrived then, and ho
 ## Ways out
 
 1. Make the requests that miss the same product at the same time share one query: the first runs it and fills the cache, the others wait for its answer. That's request coalescing, or single-flight; in the design it's one setting on the cache lookup.
-2. Let fewer queries run at once, so each finishes inside its timeout and fills the cache. Which setting decides how many run at once?
+2. Let fewer queries run at once, so each finishes inside its timeout and fills the cache. Which setting decides how many run at once? And where do the requests that don't get to run wait meanwhile, and for how long?
 
-Pick one, predict what the run will show in `expect`, run it, and compare. Both are worked in `solutions/`. Then think about what each costs, and what you'd do if the catalog were a hundred times bigger.
+Pick one, predict what the run will show in `expect`, run it, and compare. The first is worked in `solutions/`; the second is `variants/smaller-pool`. Then think about what each costs, and what you'd do if the catalog were a hundred times bigger.

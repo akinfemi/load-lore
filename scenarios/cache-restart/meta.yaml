@@ -40,7 +40,12 @@ check:
   solutions:
     # helps: recovers where the starting design never did.
     coalesce: { recovers: true }
-    smaller-pool: { recovers: true }
+  variants:
+    # Fewer connections stop the copies slowing each other, but requests
+    # still wait out most of their timeout for one: the herd drains slowly.
+    # Whether it ends before the load does varies run to run (1 of 3 on
+    # 17 Nov), so the check claims only the break.
+    smaller-pool: { verdict: broke, diagnoses: [cold-cache] }
 
 # What `loadl predict` asks before a run; each answer becomes an expect
 # line in design.yaml.

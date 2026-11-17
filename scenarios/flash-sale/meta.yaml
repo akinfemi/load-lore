@@ -4,7 +4,7 @@ concepts: [hot rows, row locks, commit latency, job queues, taking writes off th
 minutes: 45
 
 # Available to Docker at --scale 1, Loadlore's own containers included:
-# 6.8 CPUs for the starting design and variants/smaller-pool, 7.8 for
+# 5.3 CPUs for the starting design and variants/smaller-pool, 6.4 for
 # solutions/queue-the-orders.
 # reference and speed: the machine the scenario was checked on and the
 # host speed index loadl run printed there; it warns on a much slower host.

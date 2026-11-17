@@ -1,10 +1,9 @@
 version: 1
 name: cache-restart-smaller-pool
 
-# Solution: half the api's database connections, 5 per replica. Fewer of
-# the herd's queries share the database's one CPU at once, so each finishes
-# inside its timeout and fills the cache, instead of all of them running
-# out of time together.
+# Variant: half the api's database connections, 5 per replica. Fewer of
+# the herd's queries share the database's one CPU at once, so each runs
+# faster, but the requests that don't get a connection wait in the pool.
 
 services:
   lb:

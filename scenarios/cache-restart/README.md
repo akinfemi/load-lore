@@ -57,4 +57,4 @@ loadl compare <first-run> latest -o compare.md
 
 Some directions: how the api fills the cache on a miss, its pools, the database's capacity, or keeping the cache from coming back empty. For each, work out how many times the database runs the same query for the same product in the first second.
 
-`solutions/` has two worked answers with their reports. They give the game away, so try your own first.
+`solutions/` has a worked answer with its report. It gives the game away, so try your own first. `variants/smaller-pool` is the other fix you might reach for, a smaller database pool; its README says how it goes, so read that after you've tried it.

@@ -24,7 +24,7 @@ The starting design broke when Postgres ran out of CPU. For a lookup by primary 
 
 In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 997 and 1006), the starting design broke at 4:10, at 2,990 rps offered, with Postgres at 99% CPU; the most it served in any 10-second window was 2,873 requests per second. This design held the whole profile: it served the full 3,500 at the top, with Postgres at 53% CPU at 4:10 and about 64% at the peak. The profile stops at 3,500, so the gain is at least 1.22× and the real limit is higher. Peaks vary from run to run: compare your own pair of runs, not these numbers.
 
-A database benchmark predicts more. With pgbench on a 0.5-CPU Postgres and the same mix of 10% writes, one batched statement served 6,537 pages per second against 4,187 for three single-row queries (1.56×). In the full run, the api, the load balancer and Toxiproxy add their own latency, and the database is CPU-throttled in bursts (next section).
+A database benchmark predicts more. With pgbench on a 0.5-CPU Postgres and the same mix of 10% writes, one batched statement served 6,537 pages per second against 4,187 for three single-row queries (1.56×). In the full run, the api and the load balancer add their own work, each hop adds the network's round trip, and the database is CPU-throttled in bursts (next section).
 
 ## Bursts on the way up
 

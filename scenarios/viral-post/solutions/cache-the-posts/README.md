@@ -22,11 +22,11 @@ cache:
 
 ## Why it helps
 
-The viral post lives on one shard, db0, because its id hashes there. Six page views in ten are of it, and db0 also holds half of every other post, so it took 80% of the api's reads: 0.6 + 0.4 ÷ 2. In the starting design's reference check, db0 ran out of CPU 2:30 into the load, at 2,525 page views a second, while db1 sat at about a third of its CPU.
+The viral post lives on one shard, db0, because its id hashes there. Six page views in ten are of it, and db0 also holds half of every other post, so it took 80% of the api's reads: 0.6 + 0.4 ÷ 2. In the starting design's reference check, db0 ran out of CPU 2:40 into the load, at 2,675 page views a second, while db1 sat at about a third of its CPU.
 
-Adding shards can't move that post. With n shards its shard takes 0.6 + 0.4 ÷ n of the reads: 73% with three, 70% with four, and never less than 60%, however many there are. So from two shards, shards alone can move the break by at most a third (80% ÷ 60%), and the third shard bought 12% in the reference check ([variants/one-more-shard](../../variants/one-more-shard/)).
+Adding shards can't move that post. With n shards its shard takes 0.6 + 0.4 ÷ n of the reads: 73% with three, 70% with four, and never less than 60%, however many there are. So from two shards, shards alone can move the break by at most a third (80% ÷ 60%), and doubling to four shards bought 8% in the reference check ([variants/twice-the-shards](../../variants/twice-the-shards/)).
 
-A cache takes the viral post off the shards altogether. It's the same page for every viewer, so after its first miss every view of it is answered by Redis. In the reference check the cache answered 62–63% of lookups: the viral post's 60% and some of the others. What reached the shards was the long tail of other posts, spread evenly by the hash, and db0 and db1 each ran at about a third of their CPU at the 2,900-a-second peak. It held the whole profile, with a worst 10-second p99 of 4.9 ms.
+A cache takes the viral post off the shards altogether. It's the same page for every viewer, so after its first miss every view of it is answered by Redis. In the reference check the cache answered 62–63% of lookups: the viral post's 60% and some of the others. What reached the shards was the long tail of other posts, spread evenly by the hash, and db0 and db1 each ran at about a third of their CPU at the 2,900-a-second peak. It held the whole profile. Its p99 stayed in single-digit milliseconds except for one 10-second stall at 4:10, at 521 ms, with db0 at half its CPU; the same short stall shows up now and then in other scenarios' runs, and the run recovered from it at once.
 
 ## What it costs
 

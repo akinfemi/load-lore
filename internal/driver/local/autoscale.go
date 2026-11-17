@@ -146,6 +146,10 @@ func (d *Driver) startReplicas(ctx context.Context, service string, add []string
 		return
 	}
 	for _, c := range add {
+		if err := d.setServerAddr(ctx, service, c); err != nil {
+			fail(err)
+			return
+		}
 		if err := d.lbCommand(ctx, service, "enable server replicas/"+c); err != nil {
 			fail(err)
 			return
@@ -155,6 +159,49 @@ func (d *Driver) startReplicas(ctx context.Context, service string, add []string
 			ready(c, time.Since(start))
 		}
 	}
+}
+
+// setServerAddr gives a new replica's server on each lb in front of
+// service its address. A server the lb reaches directly started on a
+// placeholder, since the container didn't exist yet; one reached through
+// Toxiproxy has the proxy's, resolved at start, and keeps it.
+func (d *Driver) setServerAddr(ctx context.Context, service, c string) error {
+	for _, lb := range d.lbsFor(service) {
+		s := d.plan.Service(lb)
+		if s == nil || s.LB == nil {
+			continue
+		}
+		for _, srv := range s.LB.Servers {
+			if srv.Name != c {
+				continue
+			}
+			host, port, err := net.SplitHostPort(srv.Addr)
+			if err != nil {
+				return fmt.Errorf("%s: server %s: %w", lb, c, err)
+			}
+			if host != c {
+				continue
+			}
+			ids, err := d.containerIDs(ctx, c)
+			if err != nil {
+				return err
+			}
+			ip, err := d.ipOf(ctx, ids[0])
+			if err != nil {
+				return err
+			}
+			cmd := fmt.Sprintf("set server replicas/%s addr %s port %s", c, ip, port)
+			out, err := d.haproxy(ctx, lb, cmd)
+			if err != nil {
+				return fmt.Errorf("%s: %s: %w", lb, cmd, err)
+			}
+			// HAProxy answers a change with "IP changed from ...".
+			if t := strings.TrimSpace(out); t != "" && !strings.Contains(t, "changed") && !strings.Contains(t, "no need to change") {
+				return fmt.Errorf("%s: %s: %s", lb, cmd, t)
+			}
+		}
+	}
+	return nil
 }
 
 // awaitDrained waits until the lb has no requests in progress on any of

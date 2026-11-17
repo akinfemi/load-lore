@@ -38,7 +38,7 @@ loadl run scenarios/flash-sale/design.yaml
 loadl report latest --print | less
 ```
 
-The run takes about 6 minutes. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 6.8 CPUs. On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. The slower commits are a `disk_slow` fault on the database for the whole run. The numbers here come from a MacBook Air M4 on mains power.
+The run takes about 6 minutes. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 5.3 CPUs (6.4 for the worked answer). On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. The slower commits are a `disk_slow` fault on the database for the whole run. The numbers here come from a MacBook Air M4 on mains power.
 
 Stuck? `loadl hint flash-sale` reveals one hint at a time.
 

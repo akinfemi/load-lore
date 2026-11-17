@@ -340,7 +340,9 @@ func TestAutoscaleCompose(t *testing.T) {
 			t.Errorf("haproxy.cfg lacks %q:\n%s", want, cfg)
 		}
 	}
-	if !regexp.MustCompile(`server api-4 \S+ disabled`).MatchString(cfg) || regexp.MustCompile(`server api-1 \S+ disabled`).MatchString(cfg) {
+	// A replica that isn't running has no address yet: HAProxy has to start
+	// without resolving it.
+	if !regexp.MustCompile(`server api-4 \S+ disabled init-addr last,libc,127\.0\.0\.1\n`).MatchString(cfg) || regexp.MustCompile(`server api-1 \S+ disabled`).MatchString(cfg) {
 		t.Errorf("disabled servers wrong:\n%s", cfg)
 	}
 }

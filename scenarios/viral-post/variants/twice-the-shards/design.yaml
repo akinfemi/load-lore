@@ -1,5 +1,5 @@
 version: 1
-name: viral-post-one-more-shard
+name: viral-post-twice-the-shards
 
 # The posts api of a social app. The posts table outgrew one database, so
 # it is split across two Postgres shards by post id; a post's comments and
@@ -22,41 +22,49 @@ services:
       calls:
         # A post page: the post, its author, its counts and the top
         # comments, seven rows read from the post's shard.
-        - { shards: [db0, db1, db2], op: read, count: 7 }   # was two shards
+        - { shards: [db0, db1, db2, db3], op: read, count: 7 }   # was two shards
       resilience:
         timeout_ms: 2000
     pools:
       db0: { size: 20, min: 20 }   # opened at start, per replica
       db1: { size: 20, min: 20 }
       db2: { size: 20, min: 20 }
+      db3: { size: 20, min: 20 }
 
   db0:
     kind: postgres
     version: "17"
     resources: { cpu: 0.4, memory: 1g }
     config: { shared_buffers: 256MB }
-    dataset: { rows: 333334, row_bytes: 512 }   # a third of the million posts (was half)
+    dataset: { rows: 250000, row_bytes: 512 }   # a quarter of the million posts (was half)
     disk: { profile: gp3 }
   db1:
     kind: postgres
     version: "17"
     resources: { cpu: 0.4, memory: 1g }
     config: { shared_buffers: 256MB }
-    dataset: { rows: 333334, row_bytes: 512 }
+    dataset: { rows: 250000, row_bytes: 512 }
     disk: { profile: gp3 }
-  db2:   # the new shard
+  db2:   # a new shard
     kind: postgres
     version: "17"
     resources: { cpu: 0.4, memory: 1g }
     config: { shared_buffers: 256MB }
-    dataset: { rows: 333334, row_bytes: 512 }
+    dataset: { rows: 250000, row_bytes: 512 }
+    disk: { profile: gp3 }
+  db3:   # a new shard
+    kind: postgres
+    version: "17"
+    resources: { cpu: 0.4, memory: 1g }
+    config: { shared_buffers: 256MB }
+    dataset: { rows: 250000, row_bytes: 512 }
     disk: { profile: gp3 }
 
 workload:
   entry: lb
   mix: { read: 1, write: 0 }
   # One post in a million takes six page views in ten.
-  keys: { distribution: hotspot, share: 0.6, fraction: 0.000001, count: 1000002 }
+  keys: { distribution: hotspot, share: 0.6, fraction: 0.000001, count: 1000000 }
   profile:
     - ramp: { from: 200, to: 2900, over: 3m }   # the post spreads
     - hold: { rps: 2900, for: 2m }

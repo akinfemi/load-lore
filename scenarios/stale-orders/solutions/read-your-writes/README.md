@@ -14,7 +14,7 @@ The confirmation page reads the order from the primary instead of the replica. E
 
 The replica was always somewhat behind, and under the sale's load it fell seconds behind: a page reading it 200 ms after the order usually got the table as it was before the order. The primary has every committed write, so a read there after the commit sees it.
 
-In the reference run, under 0.1% of the pages after an order missed it. The replica still lags, by up to 3.7 s at the top of the ramp, and the report still says so: browsing reads a slightly old catalogue. For most pages that's fine. The rule this applies is "read your own writes": a page that shows what the same customer just changed reads the primary, and the rest can read a replica.
+In the reference run, under 0.1% of the pages after an order missed it. The replica still lags, by up to 1.9 s at the top of the ramp, and the report still says so: browsing reads a slightly old catalogue. For most pages that's fine. The rule this applies is "read your own writes": a page that shows what the same customer just changed reads the primary, and the rest can read a replica.
 
 ## What it costs
 

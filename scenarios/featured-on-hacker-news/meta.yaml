@@ -4,7 +4,7 @@ concepts: [autoscaling, scale-up lag, scaling metrics, headroom]
 minutes: 40
 
 # Available to Docker at --scale 1, Loadlore's own containers included:
-# 7.3 CPUs, counting all six replicas the autoscaler may run.
+# 6.3 CPUs, counting all six replicas the autoscaler may run.
 # reference and speed: the machine the scenario was checked on and the
 # host speed index loadl run printed there; it warns on a much slower host.
 host:

@@ -4,7 +4,7 @@ concepts: [saturation, queueing knee, connection pools]
 minutes: 45
 
 # Available to Docker at --scale 1, Loadlore's own containers included: the
-# design and its tooling add up to 8 CPUs. Smaller hosts need a smaller
+# design and its tooling add up to 5.9 CPUs. Smaller hosts need a smaller
 # --scale (loadl run warns and suggests one).
 #
 # reference and speed: the machine its numbers come from and its host speed

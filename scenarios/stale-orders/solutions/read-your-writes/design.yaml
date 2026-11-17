@@ -8,9 +8,16 @@ name: stale-orders-read-your-writes
 # kind of cloud disk.
 
 services:
+  lb:
+    kind: lb
+    target: api
+    resources: { cpu: 0.4, memory: 256m }
+    health_check: { interval_ms: 2000, fall: 3, rise: 2 }
+
   api:
     image: loadlore/synthetic
-    resources: { cpu: 2, memory: 1g }
+    replicas: 2
+    resources: { cpu: 1, memory: 1g }
     behavior:
       cpu_ms: 0.3
       calls:
@@ -19,9 +26,9 @@ services:
         - { target: db, op: read, when: write, mode: async, after_ms: 200 }   # the confirmation page reads the primary (was: ro)
       resilience:
         timeout_ms: 2000
-    pools:
-      db: { size: 80, min: 40 }   # under the primary's max_connections
-      ro: { size: 80, min: 40 }
+    pools:   # per replica: 2 x 40 stays under the primary's max_connections
+      db: { size: 40, min: 20 }
+      ro: { size: 40, min: 20 }
 
   db:
     kind: postgres
@@ -39,7 +46,7 @@ services:
     disk: {}   # a general-purpose volume at its baseline: about 1 ms a read, 3,000 IOPS
 
 workload:
-  entry: api
+  entry: lb
   profile:
     - ramp: { from: 200, to: 1800, over: 3m }
   mix: { read: 0.5, write: 0.5 }

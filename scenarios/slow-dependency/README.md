@@ -42,8 +42,6 @@ The run takes about 6 minutes. It needs 6 CPUs and 4 GB available to Docker, Loa
 
 Pricing's capacity here is set by CPU time per request, so it changes less from machine to machine than in the level-1 scenarios. Plug a laptop in all the same.
 
-Well after the starting design breaks, the report may note that Toxiproxy, which carries the calls between services, stalled new connections from api to pricing. That is the lab, not the system: Toxiproxy opens each upstream connection in turn, so one slow handshake holds up the rest. The errors and latencies from then on are partly its doing; the break, and everything that leads to it, come before.
-
 Stuck? `loadl hint slow-dependency` reveals one hint at a time.
 
 ## What to try next

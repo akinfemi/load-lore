@@ -40,7 +40,7 @@ loadl run scenarios/statement-day/design.yaml
 loadl report latest --print | less
 ```
 
-The run takes about 4 minutes, plus about a minute the first time to seed the 5-million-row table. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 6.8 CPUs (7.8 for the bigger database), and `solutions/more-memory` gives the database 4 GB. Leave about 10 GB free on the disk Docker uses. On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. Scale shrinks the table and the disk's IOPS with the load, but not the time a read waits. The numbers here come from a MacBook Air M4 on mains power.
+The run takes about 4 minutes, plus about a minute the first time to seed the 5-million-row table. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 5.3 CPUs (6.3 for the bigger database), and `solutions/more-memory` gives the database 4 GB. Leave about 10 GB free on the disk Docker uses. On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. Scale shrinks the table and the disk's IOPS with the load, but not the time a read waits. The numbers here come from a MacBook Air M4 on mains power.
 
 Stuck? `loadl hint statement-day` reveals one hint at a time.
 

@@ -10,7 +10,7 @@ The report names a hot shard. Look up how many of the api's calls went to each s
 
 ## Where a key lives
 
-A key lives on one shard: the shard its id hashes to. Six page views in ten are of one post, so six in ten of the reads go to its shard, wherever that is, plus that shard's half of everything else. Work out the busy shard's share of the reads with two shards, then with three. How much later does the third shard let it break? What's the most any number of shards could buy?
+A key lives on one shard: the shard its id hashes to. Six page views in ten are of one post, so six in ten of the reads go to its shard, wherever that is, plus that shard's half of everything else. Work out the busy shard's share of the reads with two shards, then with four. How much later do twice the shards let it break? What's the most any number of shards could buy?
 
 ## The share sets it
 

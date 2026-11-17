@@ -4,7 +4,7 @@ concepts: [buffer cache, working set, cache hit rate, disk IOPS]
 minutes: 40
 
 # Available to Docker at --scale 1, Loadlore's own containers included:
-# 6.8 CPUs for the starting design, 7.8 for variants/bigger-db.
+# 5.3 CPUs for the starting design, 6.3 for variants/bigger-db.
 # reference and speed: the machine the scenario was checked on and the
 # host speed index loadl run printed there; it warns on a much slower host.
 host:

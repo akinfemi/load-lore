@@ -484,7 +484,12 @@ backend replicas
 	for _, srv := range lb.Servers {
 		off := ""
 		if srv.Disabled {
-			off = " disabled"
+			// A replica that isn't running yet has no address to resolve
+			// when HAProxy starts. It starts on a placeholder, which it
+			// never sends to while disabled, and the autoscaler sets the
+			// real one before enabling it. Not "none": HAProxy's runtime
+			// API won't set an address on a server with no address family.
+			off = " disabled init-addr last,libc,127.0.0.1"
 		}
 		fmt.Fprintf(&b, "    server %s %s%s\n", srv.Name, srv.Addr, off)
 	}

@@ -38,7 +38,7 @@ loadl run scenarios/live-vote/design.yaml
 loadl report latest --print | less
 ```
 
-The run takes about 6 minutes. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 6.8 CPUs (7.8 for the bigger database). On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. Scale shrinks the request rate but not the time a row stays locked, so at small scales the votes may not collide enough to show the problem. The numbers here come from a MacBook Air M4 on mains power.
+The run takes about 6 minutes. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 5.8 CPUs (6.8 for the bigger database). On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. Scale shrinks the request rate but not the time a row stays locked, so at small scales the votes may not collide enough to show the problem. The numbers here come from a MacBook Air M4 on mains power.
 
 Stuck? `loadl hint live-vote` reveals one hint at a time.
 
