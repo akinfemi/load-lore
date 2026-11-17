@@ -78,11 +78,11 @@ func TestGoldenCompose(t *testing.T) {
 		t.Errorf("toxiproxy config: %s", cf.Configs["toxiproxy"].Content)
 	}
 
-	// The lb checks both replicas through their proxies, starts after
-	// them, and is scraped.
+	// The lb checks both replicas directly (no fault acts on them),
+	// starts after them, and is scraped.
 	hap := cf.Configs["haproxy-lb"].Content
 	for _, want := range []string{"balance roundrobin", "option httpchk GET /healthz", "default-server check inter 1000ms fall 2 rise 2",
-		"server api-0 lore-toxiproxy:20002", "server api-1 lore-toxiproxy:20003", "prometheus-exporter"} {
+		"server api-0 api-0:8080", "server api-1 api-1:8080", "prometheus-exporter"} {
 		if !strings.Contains(hap, want) {
 			t.Errorf("haproxy.cfg lacks %q:\n%s", want, hap)
 		}
@@ -154,14 +154,16 @@ func TestPgBouncerCompose(t *testing.T) {
 	if err := yaml.Unmarshal(got, &cf); err != nil {
 		t.Fatal(err)
 	}
+	if _, ok := cf.Services[svcToxiproxy]; ok || cf.Configs["toxiproxy"] != nil || strings.Contains(cf.Configs["prometheus"].Content, "toxiproxy") {
+		t.Errorf("Toxiproxy in a run whose faults act on no connection")
+	}
 	pgb := cf.Services["pgb"]
 	if pgb == nil || pgb.Entrypoint[0] != "/usr/bin/pgbouncer" || pgb.DependsOn["db"].Condition != "service_healthy" || pgb.Labels[LabelRole] != "pgbouncer" {
 		t.Fatalf("pgb service: %+v", pgb)
 	}
-	// It reaches db through its own proxy, so db's faults apply to it.
-	upstream := p.Service("pgb").PgBouncer.Upstream
+	// It reaches db directly: no fault acts on that connection.
 	ini := cf.Configs["pgbouncer-ini-pgb"].Content
-	for _, want := range []string{"[databases]\nlab = host=lore-toxiproxy port=" + strings.Split(upstream, ":")[1] + " dbname=lab\n",
+	for _, want := range []string{"[databases]\nlab = host=db port=5432 dbname=lab\n",
 		"pool_mode = transaction\n", "default_pool_size = 20\n", "max_client_conn = 200\n", "admin_users = loadlore\n", "auth_type = scram-sha-256\n"} {
 		if !strings.Contains(ini, want) {
 			t.Errorf("pgbouncer.ini lacks %q:\n%s", want, ini)
@@ -333,7 +335,7 @@ func TestAutoscaleCompose(t *testing.T) {
 		t.Errorf("lb ports %v", lb.Ports)
 	}
 	cfg := cf.Configs["haproxy-lb"].Content
-	for _, want := range []string{"stats socket ipv4@0.0.0.0:9999 level admin", "server api-1 lore-toxiproxy:", "server api-4 lore-toxiproxy:"} {
+	for _, want := range []string{"stats socket ipv4@0.0.0.0:9999 level admin", "server api-1 api-1:8080", "server api-4 api-4:8080"} {
 		if !strings.Contains(cfg, want) {
 			t.Errorf("haproxy.cfg lacks %q:\n%s", want, cfg)
 		}

@@ -410,14 +410,14 @@ func Analyze(dir string) (*Analysis, error) {
 		a.PeakVUsAll = maxPtr(a.PeakVUsAll, w.VUs)
 	}
 	a.Diagnoses = diagnose(a)
-	a.Verdict.Summary += staleNote(a) + queueNote(a) + droppedNote(a)
+	a.Verdict.Summary += staleNote(a) + queueNote(a) + droppedNote(a) + quickNote(a)
 	a.Expect = scoreAll(a, a.Windows)
 	a.Windows = all
 	return a, nil
 }
 
 var toolNames = map[string]string{
-	"lore-toxiproxy": "Toxiproxy, which carries every connection between services,", "lore-k6": "the load generator (k6)",
+	"lore-toxiproxy": "Toxiproxy, which carries the connections the scenario's faults act on,", "lore-k6": "the load generator (k6)",
 	"lore-prometheus": "Prometheus", "lore-cadvisor": "cAdvisor",
 }
 

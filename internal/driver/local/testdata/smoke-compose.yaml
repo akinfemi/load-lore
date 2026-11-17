@@ -6,7 +6,7 @@ services:
     image: loadlore/synthetic:dev
     pull_policy: never
     environment:
-      LOADLORE_SYNTHETIC_CONFIG: '{"service":"api","replica":0,"listen":":8080","concurrency":{"model":"threads","max":200},"cpu_ms":1,"cpu_jitter":0.1,"alloc_kb":0,"calls":[{"target":"cache","op":"get","count":1,"when":"read","mode":"sync","on_miss":[{"target":"db","op":"read","count":1,"when":"always","mode":"sync","query":"point"},{"target":"cache","op":"set","count":1,"when":"always","mode":"sync","ttl_s":60}]},{"target":"db","op":"write","count":1,"when":"write","mode":"sync"}],"resilience":{"timeout_ms":1000},"targets":{"cache":{"kind":"redis","addrs":["lore-toxiproxy:20000"],"pool":10,"row_bytes":256},"db":{"kind":"postgres","addrs":["lore-toxiproxy:20001"],"pool":10,"database":"lab","user":"loadlore","password":"loadlore","rows":20000,"row_bytes":256}}}'
+      LOADLORE_SYNTHETIC_CONFIG: '{"service":"api","replica":0,"listen":":8080","concurrency":{"model":"threads","max":200},"cpu_ms":1,"cpu_jitter":0.1,"alloc_kb":0,"calls":[{"target":"cache","op":"get","count":1,"when":"read","mode":"sync","on_miss":[{"target":"db","op":"read","count":1,"when":"always","mode":"sync","query":"point"},{"target":"cache","op":"set","count":1,"when":"always","mode":"sync","ttl_s":60}]},{"target":"db","op":"write","count":1,"when":"write","mode":"sync"}],"resilience":{"timeout_ms":1000},"targets":{"cache":{"kind":"redis","addrs":["cache:6379"],"pool":10,"row_bytes":256},"db":{"kind":"postgres","addrs":["lore-toxiproxy:20000"],"pool":10,"database":"lab","user":"loadlore","password":"loadlore","rows":20000,"row_bytes":256}}}'
     cpus: 0.5
     mem_limit: 256m
     memswap_limit: 256m
@@ -38,7 +38,7 @@ services:
     image: loadlore/synthetic:dev
     pull_policy: never
     environment:
-      LOADLORE_SYNTHETIC_CONFIG: '{"service":"api","replica":1,"listen":":8080","concurrency":{"model":"threads","max":200},"cpu_ms":1,"cpu_jitter":0.1,"alloc_kb":0,"calls":[{"target":"cache","op":"get","count":1,"when":"read","mode":"sync","on_miss":[{"target":"db","op":"read","count":1,"when":"always","mode":"sync","query":"point"},{"target":"cache","op":"set","count":1,"when":"always","mode":"sync","ttl_s":60}]},{"target":"db","op":"write","count":1,"when":"write","mode":"sync"}],"resilience":{"timeout_ms":1000},"targets":{"cache":{"kind":"redis","addrs":["lore-toxiproxy:20000"],"pool":10,"row_bytes":256},"db":{"kind":"postgres","addrs":["lore-toxiproxy:20001"],"pool":10,"database":"lab","user":"loadlore","password":"loadlore","rows":20000,"row_bytes":256}}}'
+      LOADLORE_SYNTHETIC_CONFIG: '{"service":"api","replica":1,"listen":":8080","concurrency":{"model":"threads","max":200},"cpu_ms":1,"cpu_jitter":0.1,"alloc_kb":0,"calls":[{"target":"cache","op":"get","count":1,"when":"read","mode":"sync","on_miss":[{"target":"db","op":"read","count":1,"when":"always","mode":"sync","query":"point"},{"target":"cache","op":"set","count":1,"when":"always","mode":"sync","ttl_s":60}]},{"target":"db","op":"write","count":1,"when":"write","mode":"sync"}],"resilience":{"timeout_ms":1000},"targets":{"cache":{"kind":"redis","addrs":["cache:6379"],"pool":10,"row_bytes":256},"db":{"kind":"postgres","addrs":["lore-toxiproxy:20000"],"pool":10,"database":"lab","user":"loadlore","password":"loadlore","rows":20000,"row_bytes":256}}}'
     cpus: 0.5
     mem_limit: 256m
     memswap_limit: 256m
@@ -356,8 +356,8 @@ configs:
           balance roundrobin
           option httpchk GET /healthz
           default-server check inter 1000ms fall 2 rise 2
-          server api-0 lore-toxiproxy:20002
-          server api-1 lore-toxiproxy:20003
+          server api-0 api-0:8080
+          server api-1 api-1:8080
   k6:
     content: |
       // script
@@ -415,27 +415,9 @@ configs:
     content: |-
       [
         {
-          "name": "api--cache",
-          "listen": "0.0.0.0:20000",
-          "upstream": "cache:6379",
-          "enabled": true
-        },
-        {
           "name": "api--db",
-          "listen": "0.0.0.0:20001",
+          "listen": "0.0.0.0:20000",
           "upstream": "db:5432",
-          "enabled": true
-        },
-        {
-          "name": "lb--api-0",
-          "listen": "0.0.0.0:20002",
-          "upstream": "api-0:8080",
-          "enabled": true
-        },
-        {
-          "name": "lb--api-1",
-          "listen": "0.0.0.0:20003",
-          "upstream": "api-1:8080",
           "enabled": true
         }
       ]

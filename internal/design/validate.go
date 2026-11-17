@@ -88,6 +88,7 @@ func (v *validator) validate() {
 	if v.d.Workload != nil {
 		v.workload()
 	}
+	v.network()
 	v.scenario()
 	v.expect()
 	v.assumptions()
@@ -1337,6 +1338,17 @@ func (v *validator) diskProfile(p string, dk *Disk) {
 		v.errorf(pathKey(p, "iops"), CodeRequired, "an %s volume is bought by its provisioned IOPS: set iops, %d to %d", pr.Name, pr.MinIOPS, pr.MaxIOPS)
 	case pr.Modeled() && dk.IOPS != nil && (*dk.IOPS < pr.MinIOPS || *dk.IOPS > pr.MaxIOPS):
 		v.errorf(pathKey(p, "iops"), CodeRange, "a %s volume takes %d to %d IOPS, not %d", pr.Name, pr.MinIOPS, pr.MaxIOPS, *dk.IOPS)
+	}
+}
+
+// network checks the network block's profile.
+func (v *validator) network() {
+	n := v.d.Network
+	if n == nil || n.Profile == nil {
+		return
+	}
+	if _, ok := NetworkProfiles[*n.Profile]; !ok {
+		v.errorf("network.profile", CodeInvalidValue, "profile must be one of %s, not %q", strings.Join(NetworkProfileNames(), ", "), *n.Profile)
 	}
 }
 

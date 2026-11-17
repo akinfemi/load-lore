@@ -71,6 +71,31 @@ func TestE2ESmoke(t *testing.T) {
 		t.Errorf("faults in events.jsonl:\n%s", evs)
 	}
 
+	// The stack got the network profile, and k6 too when it started,
+	// without errors.
+	var stack, k6 bool
+	for _, line := range strings.Split(string(evs), "\n") {
+		var ev struct {
+			Kind   string         `json:"kind"`
+			Fields map[string]any `json:"fields"`
+		}
+		if json.Unmarshal([]byte(line), &ev) != nil || ev.Kind != "network_profile" {
+			continue
+		}
+		if ev.Fields["error"] != nil {
+			t.Errorf("network profile: %v", ev.Fields)
+		}
+		if n, _ := ev.Fields["containers"].(float64); n > 0 {
+			stack = true
+		}
+		if ev.Fields["role"] == "load" {
+			k6 = true
+		}
+	}
+	if !stack || !k6 {
+		t.Errorf("network profile applied to the stack %v, to k6 %v:\n%s", stack, k6, evs)
+	}
+
 	// The killed replica shows in container state.
 	var states []struct {
 		Name     string `json:"name"`

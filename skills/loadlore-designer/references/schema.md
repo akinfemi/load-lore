@@ -10,6 +10,7 @@
 | `name` | yes | Short kebab-case name, used in run ids and reports |
 | `services` | yes | Map of service name to service definition |
 | `workload` | yes | How traffic arrives |
+| `network` | no | The network between the containers: `{ profile: same-zone }` by default (see Network) |
 | `scenario` | no | Timed fault injections |
 | `expect` | no | The user's predictions |
 | `assumptions` | no, but always written by AI | Every inferred value and its basis |
@@ -275,6 +276,24 @@ Keyspace: `count` defaults to the `dataset.rows` of the datastore the entry path
 
 Durations: `30s`, `5m`, `1h`, `1m30s`, `500ms`. A unit is required.
 
+## Network
+
+`network` picks the network between the stack's containers from a named profile, so every design stands on the same published network instead of the Docker bridge, where two containers reach each other in tens of microseconds, faster than any two machines in a data center.
+
+```yaml
+network: { profile: same-zone }    # the default
+network: { profile: cross-zone }   # every call crosses availability zones
+network: { profile: local }        # nothing added
+```
+
+| Profile | Round trip added | Source |
+|---|---|---|
+| `local` | none | the Docker bridge on one machine |
+| `same-zone` (default) | 0.3 ms | [AWS Architecture Blog: Availability Zone Affinity](https://aws.amazon.com/blogs/architecture/improving-performance-and-reducing-cost-using-availability-zone-affinity/): a round trip in one zone is "generally sub-millisecond" with enhanced networking |
+| `cross-zone` | 1.5 ms | [AWS Fault Isolation Boundaries: Availability Zones](https://docs.aws.amazon.com/whitepapers/latest/aws-fault-isolation-boundaries/availability-zones.html): zones in a region are close enough for synchronous replication "with single-digit millisecond latency" |
+
+How the numbers are read from the sources: AWS publishes bounds, not figures, so both round trips are Loadlore's own estimates: same-zone's 0.3 ms sits inside "sub-millisecond", and cross-zone's 1.5 ms is at the low end of "single-digit milliseconds". Reports say so next to the profile. The round trip is added between any two of the stack's containers (services, datastores, PgBouncers, lbs) and between the load generator and the entry point, as half of it on each side's outgoing packets (tc netem); it is fixed, with no jitter, and isn't scaled with `--scale`. Loadlore's own tooling (Prometheus, exporters, Toxiproxy) isn't slowed, so a connection a fault sends through Toxiproxy has the same round trip as a direct one. A container that restarts, or an autoscaler's new replica, gets the delay about a second after it starts. One profile covers the whole design: a replica in another zone, or one cross-zone call, isn't expressible yet.
+
 ## Scenario
 
 A list of fault injections, each with `at` and `inject`, and a `target` (except `partition`). Optional `for` ends the fault after that duration; otherwise it lasts to the end of the run. A fault must start before the workload ends.
@@ -293,6 +312,8 @@ A list of fault injections, each with `at` and `inject`, and a `target` (except 
 | `disk_slow` | `add_ms` (required) | The kernel's dm-delay under the datastore's data: every write and fsync waits `add_ms` longer; reads don't. Postgres only in local runs |
 
 `target` is a service name, or `name[i]` for one replica. Connection faults (`latency`, `loss`, `bandwidth`, `timeout`, `reset`) act on connections into the target, so something must call it (or it is the workload entry).
+
+Only connections that a `latency`, `bandwidth`, `timeout` or `reset` fault acts on go through Toxiproxy, from the start of the run: every other connection goes straight to its container, and a run with none of those faults has no Toxiproxy at all. Toxiproxy relaying a call costs CPU (about 67 µs per call, more than a Postgres statement), which would otherwise be a tax on every design. `loss` and `partition` act on the containers themselves, with tc netem, and keep the network profile's delay on everything they don't drop.
 
 ```yaml
 scenario:

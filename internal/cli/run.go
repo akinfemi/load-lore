@@ -28,6 +28,8 @@ func newRunCmd(g *globalOpts) *cobra.Command {
 		image   string
 		reuse   bool
 		repeat  int
+		quick   bool
+		from    string
 	)
 	cmd := &cobra.Command{
 		Use:   "run <design.yaml>",
@@ -51,6 +53,14 @@ In a terminal, the run shows the live dashboard; Ctrl-C on it stops the
 run, with teardown. --watch=false, --json or a pipe give plain progress
 lines instead.
 
+--quick skips the part of the climb an earlier run already measured: a
+30 s warm-up to 75% of where that run broke, then the profile from there,
+at its own slope. It starts from the latest run that broke on the same
+profile and scale, of a design in the same scenario (a variant or solution
+counts) or of the same design, or from --quick-from <run-id>. It refuses
+designs that autoscale or whose faults fall in the skipped part; its
+predictions aren't scored, and loadl scenario check never uses it.
+
 --repeat N runs the design N times with the same seed and writes a series
 summary to .loadlore/series/<id>/ with the spread of break time, peak
 served and p99 at the break. Runs after the first wait for the host speed
@@ -71,11 +81,14 @@ up; loadl compare uses the spread to say when a difference may be noise.`,
 			if !g.json {
 				progress = cmd.OutOrStdout()
 			}
-			opt := runner.Options{DesignPath: args[0], Scale: scale, Seed: seed, Keep: keep, Full: full, Timeout: timeout, SyntheticImage: image, ReuseData: reuse, Progress: progress}
+			opt := runner.Options{DesignPath: args[0], Scale: scale, Seed: seed, Keep: keep, Full: full, Timeout: timeout, SyntheticImage: image, ReuseData: reuse, Progress: progress,
+				Quick: quick || from != "", QuickFrom: from}
 			newDriver := func(ctx context.Context) (driver.Driver, error) { return local.New(ctx) }
 			switch {
 			case repeat < 1:
 				return fmt.Errorf("--repeat %d: give 1 or more runs", repeat)
+			case repeat > 1 && opt.Quick:
+				return errors.New("--quick and --repeat don't go together: a series measures the spread of the whole profile")
 			case repeat > 1 && keep:
 				return errors.New("--keep and --repeat don't go together: each run tears down before the next")
 			case repeat > 1:
@@ -132,6 +145,8 @@ up; loadl compare uses the spread to say when a difference may be noise.`,
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "stop and tear down after this long (default: 15m setup + the profile + 5m)")
 	cmd.Flags().BoolVar(&reuse, "reuse-data", false, "skip the fresh copy of seeded data and reuse a shared one; earlier runs' writes carry over, and the report says so")
 	cmd.Flags().StringVar(&image, "synthetic-image", "loadlore/synthetic:dev", "image for loadlore/synthetic services")
+	cmd.Flags().BoolVar(&quick, "quick", false, "start the climb near the latest earlier run's break instead of from the bottom")
+	cmd.Flags().StringVar(&from, "quick-from", "", "with --quick: the run whose break to start near")
 	cmd.Flags().IntVar(&repeat, "repeat", 1, "run the design this many times with the same seed and report the spread")
 	return cmd
 }

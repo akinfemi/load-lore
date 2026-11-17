@@ -56,6 +56,28 @@ type Preflight struct {
 	Warnings []string `json:"warnings"`
 }
 
+// NetworkResult is the network profile as a run applied it: the round
+// trip asked for and the one measured between two of the stack's
+// containers once applied, beyond what the Docker bridge takes by itself.
+// DelayUs is the delay set on each side's packets to get there: the
+// profile's half round trip, corrected by Factor where this host's netem
+// delays run long or short.
+type NetworkResult struct {
+	Profile      string  `json:"profile"`
+	RTTMs        float64 `json:"rtt_ms"`
+	MeasuredMs   float64 `json:"measured_rtt_ms,omitempty"`
+	BridgeMs     float64 `json:"bridge_rtt_ms,omitempty"`
+	Factor       float64 `json:"factor,omitempty"`
+	DelayUs      int     `json:"delay_us"`
+	Uncalibrated string  `json:"uncalibrated,omitempty"` // why it wasn't measured
+}
+
+// NetworkReporter is a driver that says how it applied the network
+// profile, once Up has returned.
+type NetworkReporter interface {
+	NetworkApplied() *NetworkResult
+}
+
 // Host describes where the run happens.
 type Host struct {
 	Driver         string `json:"driver"`

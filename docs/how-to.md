@@ -183,6 +183,7 @@ Point your editor's YAML language server at the schema and you get completion an
 | Flag | What it does |
 | --- | --- |
 | `--full` | Run the whole profile, even after a break. Use it when you compare designs by their peaks. |
+| `--quick` | Skip the part of the climb you already measured: a 30 s warm-up to 75% of where the latest earlier run broke (on the same profile, from the same scenario or design), then the profile from there at its own slope. On a 5-minute profile it saves about a minute and a half a run. Predictions aren't scored, it refuses designs that autoscale or have faults in the skipped part, and the verdict says when a break came so early that the warm-up may have set it. `--quick-from <run-id>` picks the run. |
 | `--seed N` | Fix the random keys and mix. Without it every run gets a new seed. Use the same seed for runs you compare; scenario checks use 1. |
 | `--repeat N` | Run N times with the same seed and write the spread of break time, peak and p99 to `.loadlore/series/<id>/series.md`. `compare` then says when a difference is within the spread. |
 | `--detach` | Start in the background and print the run id. `loadl status` shows its progress and, at the end, its verdict; `loadl watch` opens the dashboard on it. |

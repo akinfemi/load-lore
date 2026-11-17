@@ -101,15 +101,17 @@ func TestProxiesAndSyntheticTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Only the latency fault's connection goes through Toxiproxy: loss and
+	// partition act on the containers themselves.
 	var names []string
 	for _, x := range p.Proxies {
-		names = append(names, x.Name+"→"+x.Upstream)
+		names = append(names, x.Name+"→"+x.Addr())
 	}
-	if got := strings.Join(names, " "); got != "api--cache→cache:6379 api--db→db:5432 lb--api-0→api-0:8080 lb--api-1→api-1:8080" {
+	if got := strings.Join(names, " "); got != "api--cache→cache:6379 api--db→lore-toxiproxy:20000 lb--api-0→api-0:8080 lb--api-1→api-1:8080" {
 		t.Errorf("proxies: %s", got)
 	}
 	cfg := p.Service("api").Synthetic[1]
-	if cfg.Replica != 1 || cfg.Targets["db"].Addrs[0] != "lore-toxiproxy:20001" || cfg.Targets["cache"].Kind != "redis" {
+	if cfg.Replica != 1 || cfg.Targets["db"].Addrs[0] != "lore-toxiproxy:20000" || cfg.Targets["cache"].Addrs[0] != "cache:6379" || cfg.Targets["cache"].Kind != "redis" {
 		t.Errorf("replica 1 config: %+v", cfg)
 	}
 	if err := cfg.Validate(); err != nil {
@@ -125,7 +127,7 @@ func TestProxiesAndSyntheticTargets(t *testing.T) {
 	if got := byInject["kill"].Containers; len(got) != 1 || got[0] != "api-1" {
 		t.Errorf("kill fault containers: %v", got)
 	}
-	if c := byInject["partition"].Cuts; len(c) != 1 || c[0].Container != "api-0" {
+	if c := byInject["partition"].Cuts; len(c) != 1 || c[0].Container != "api-0" || len(c[0].Hosts) != 1 || c[0].Hosts[0] != "cache" || len(c[0].Ports) != 0 {
 		t.Errorf("partition cuts: %+v", c)
 	}
 	if f := p.Faults[1]; f.Inject != "loss" || f.Port != RedisPort || len(f.Containers) != 1 || f.Containers[0] != "cache" {
@@ -194,19 +196,32 @@ func TestInfraBudgets(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 3,500 rps at 2,500 rps per k6 CPU, rounded up to a half core (1.5,
-	// the floor). Proxied calls: 3,500 lb → api, plus 3,500 × (3 reads +
-	// 0.1 writes) api → db = 14,350, at 15,000 per Toxiproxy CPU and sized
-	// for 65% of the budget: 1.47, rounded up.
-	if p.Infra.LoadCPU != 1.5 || p.Infra.ExpectedOps != 14350 || p.Infra.ProxyCPU != 1.5 {
+	// the floor). No fault acts on a connection, so there is no Toxiproxy.
+	if p.Infra.LoadCPU != 1.5 || p.Infra.ExpectedOps != 0 || p.Infra.ProxyCPU != 0 || p.UsesToxiproxy() {
 		t.Errorf("infra %+v", p.Infra)
 	}
 	want := 0.0
 	for _, s := range p.Services {
 		want += s.CPU * float64(len(s.Containers))
 	}
-	want += 1.5 + 1.5 + 0.1 + 0.1 + 0.1 // k6, Toxiproxy, Prometheus, cAdvisor, postgres_exporter
+	want += 1.5 + 0.1 + 0.1 + 0.1 // k6, Prometheus, cAdvisor, postgres_exporter
 	if got := p.TotalCPU(); math.Abs(got-want) > 1e-9 || got > 8 {
 		t.Errorf("total CPU %v, want %v and at most 8 (the spec: it fits an 8-vCPU machine at scale 1)", got, want)
+	}
+
+	// A latency fault on db proxies api → db: 3,500 × (3 reads + 0.1
+	// writes) = 10,850 calls a second, at 15,000 per Toxiproxy CPU and
+	// sized for 65% of the budget: 1.11, rounded up to a half core.
+	src, err := os.ReadFile("../../examples/single-postgres.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = Build(load(t, string(src)+"\nscenario:\n  - { at: 1m, inject: latency, target: db, add_ms: 20, for: 30s }\n"), Options{RunID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Infra.ExpectedOps != 10850 || p.Infra.ProxyCPU != 1.5 || len(p.Proxied()) != 1 {
+		t.Errorf("with a fault: infra %+v", p.Infra)
 	}
 }
 
@@ -241,13 +256,13 @@ func TestLoadBalancers(t *testing.T) {
 	if lb.Algorithm != "least-conn" || lb.IntervalMs != 500 || lb.Fall != 2 || lb.Rise != 2 || lb.CheckPath != "/healthz" || lb.ServerPort != AppPort {
 		t.Errorf("lb settings: %+v", lb)
 	}
-	if got := strings.Join(servers, " "); got != "web-0@lore-toxiproxy:20000 web-1@lore-toxiproxy:20001" {
+	if got := strings.Join(servers, " "); got != "web-0@web-0:8080 web-1@web-1:8080" {
 		t.Errorf("servers: %s", got)
 	}
 	if got := strings.Join(p.Workload.URLs, " "); got != "http://edge:8080" {
 		t.Errorf("load urls: %s", got)
 	}
-	// inner calls inner-lb like any HTTP service, through its proxy.
+	// inner calls inner-lb like any HTTP service.
 	tgt := p.Service("inner").Synthetic[0].Targets["inner-lb"]
 	if tgt.Kind != "http" || len(tgt.Addrs) != 1 {
 		t.Errorf("inner → inner-lb: %+v", tgt)
@@ -255,10 +270,17 @@ func TestLoadBalancers(t *testing.T) {
 	if n := len(p.Service("inner-lb").LB.Servers); n != 3 {
 		t.Errorf("inner-lb has %d servers", n)
 	}
-	// 1,000 edge → web, 2,000 web → inner, 2,000 inner → inner-lb, 2,000
-	// inner-lb → worker.
-	if p.Infra.ExpectedOps != 7000 {
-		t.Errorf("proxied ops %v", p.Infra.ExpectedOps)
+	if p.UsesToxiproxy() {
+		t.Errorf("proxied with no fault: %+v", p.Proxied())
+	}
+	// A latency fault on worker[0] proxies inner-lb's connection to it: a
+	// third of inner-lb's 2,000 calls a second.
+	pf, err := Build(load(t, lbDesign+"scenario:\n  - { at: 10s, inject: latency, target: \"worker[0]\", add_ms: 20, for: 10s }\n"), Options{RunID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pf.Proxied(); len(got) != 1 || got[0].Name != "inner-lb--worker-0" || math.Abs(pf.Infra.ExpectedOps-2000.0/3) > 1e-9 {
+		t.Errorf("proxied %+v, ops %v", got, pf.Infra.ExpectedOps)
 	}
 	for _, a := range p.Assumptions {
 		if strings.Contains(a.Field, "replicas") {

@@ -140,8 +140,9 @@ const (
 	HoldRequest = "request"
 )
 
-// Target is how to reach one dependency. Addrs are usually Toxiproxy
-// listeners: one for a datastore, one per replica for an application
+// Target is how to reach one dependency. Addrs are its containers, or the
+// Toxiproxy listeners in front of them when a fault acts on the
+// connection: one for a datastore, one per replica for an application
 // service, which the HTTP client round-robins across.
 type Target struct {
 	Kind  string   `json:"kind"`

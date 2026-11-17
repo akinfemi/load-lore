@@ -49,8 +49,14 @@ type Driver struct {
 	running  map[string]int
 	starting map[string]int
 
-	tox  *toxiproxyClient
+	tox  *toxiproxyClient // nil when no connection is proxied
 	prom *promClient
+
+	// netReady is set once the stack has its network profile: containers
+	// that start after it get theirs from their start event.
+	netMu    sync.Mutex
+	netReady bool
+	net      *driver.NetworkResult
 
 	stopEvents func()
 	eventsDone chan struct{}
@@ -238,15 +244,18 @@ func (d *Driver) Up(ctx context.Context, p *plan.Plan, dir *rundir.Dir, progress
 	if err != nil {
 		return err
 	}
-	toxAddr, err := d.publishedPort(ctx, svcToxiproxy, toxiproxyAPI)
-	if err != nil {
-		return err
+	d.prom = newPromClient(promAddr)
+	if p.UsesToxiproxy() {
+		toxAddr, err := d.publishedPort(ctx, svcToxiproxy, toxiproxyAPI)
+		if err != nil {
+			return err
+		}
+		d.tox = newToxiproxyClient(toxAddr)
+		if err := d.tox.ping(ctx); err != nil {
+			return fmt.Errorf("toxiproxy API: %w", err)
+		}
 	}
-	d.prom, d.tox = newPromClient(promAddr), newToxiproxyClient(toxAddr)
-	if err := d.tox.ping(ctx); err != nil {
-		return fmt.Errorf("toxiproxy API: %w", err)
-	}
-	return nil
+	return d.applyNetwork(ctx)
 }
 
 func (d *Driver) publishedPort(ctx context.Context, service string, port int) (string, error) {
@@ -276,6 +285,11 @@ func (d *Driver) watchEvents() {
 			select {
 			case m := <-res.Messages:
 				action := string(m.Action)
+				if m.Actor.Attributes[LabelService] == "" {
+					// Loadlore's netem and netprobe helpers: not part of
+					// the stack, and they exit as they finish.
+					continue
+				}
 				switch {
 				case action == "start", action == "die", action == "kill", action == "oom", action == "restart",
 					action == "pause", action == "unpause", strings.HasPrefix(action, "health_status: unhealthy"):
@@ -284,6 +298,9 @@ func (d *Driver) watchEvents() {
 						f["exit_code"] = code
 					}
 					d.event("docker", f)
+				}
+				if action == "start" {
+					d.onStart(m.Actor.ID, m.Actor.Attributes[LabelRole], m.Actor.Attributes["name"])
 				}
 			case err := <-res.Err:
 				if err != nil && ctx.Err() == nil {
@@ -369,10 +386,13 @@ func parseSummary(b []byte, res *driver.LoadResult) {
 
 // --- Faults ---
 
-// Inject applies a fault through Toxiproxy or the Docker API.
+// Inject applies a fault through Toxiproxy, netem or the Docker API.
 func (d *Driver) Inject(ctx context.Context, f *plan.Fault) (func(context.Context) error, error) {
 	switch f.Inject {
 	case "latency", "bandwidth", "timeout", "reset":
+		if d.tox == nil {
+			return nil, fmt.Errorf("%s on %s: no Toxiproxy in this run", f.Inject, f.Target)
+		}
 		x := toxic{Name: fmt.Sprintf("fault-%d", f.Index), Stream: "downstream", Toxicity: 1, Attributes: map[string]int{}}
 		switch f.Inject {
 		case "latency":
@@ -443,12 +463,13 @@ func (d *Driver) Inject(ctx context.Context, f *plan.Fault) (func(context.Contex
 	return nil, fmt.Errorf("%s isn't supported by local runs yet", f.Inject)
 }
 
-// partition drops every packet each cut container sends to the proxies
-// that lead to the other side, with the same netem helper as loss.
+// partition drops every packet each cut container sends to the other
+// side: to its containers' addresses, or to the Toxiproxy ports in front
+// of them on connections another fault proxies. It uses the same netem
+// helper as loss, and ending it leaves the network profile's delay.
 func (d *Driver) partition(ctx context.Context, f *plan.Fault) (func(context.Context) error, error) {
 	type cut struct {
-		id    string
-		ports string
+		id, ports, ips string
 	}
 	var cuts []cut
 	for _, c := range f.Cuts {
@@ -460,19 +481,28 @@ func (d *Driver) partition(ctx context.Context, f *plan.Fault) (func(context.Con
 		for i, p := range c.Ports {
 			ps[i] = strconv.Itoa(p)
 		}
+		var ips []string
+		for _, h := range c.Hosts {
+			addrs, err := d.containerIPs(ctx, h)
+			if err != nil {
+				return nil, err
+			}
+			ips = append(ips, addrs...)
+		}
 		for _, id := range found {
-			cuts = append(cuts, cut{id, strings.Join(ps, ",")})
+			cuts = append(cuts, cut{id, joinOrDash(ps), joinOrDash(ips)})
 		}
 	}
+	us := strconv.Itoa(d.delayUs())
 	clear := func(ctx context.Context) error {
 		var errs []error
 		for _, c := range cuts {
-			errs = append(errs, d.netem(ctx, c.id, "clear"))
+			errs = append(errs, d.netemBase(ctx, c.id, d.delayUs()))
 		}
 		return errors.Join(errs...)
 	}
 	for _, c := range cuts {
-		if err := d.netem(ctx, c.id, "cut", c.ports); err != nil {
+		if err := d.netem(ctx, c.id, "cut", c.ports, c.ips, us); err != nil {
 			return clear, err
 		}
 	}
@@ -501,16 +531,16 @@ func (d *Driver) loss(ctx context.Context, f *plan.Fault) (func(context.Context)
 		}
 		ids = append(ids, found...)
 	}
-	netem := d.netem
 	clear := func(ctx context.Context) error {
 		var errs []error
 		for _, id := range ids {
-			errs = append(errs, netem(ctx, id, "clear"))
+			errs = append(errs, d.netemBase(ctx, id, d.delayUs()))
 		}
 		return errors.Join(errs...)
 	}
+	us := strconv.Itoa(d.delayUs())
 	for _, id := range ids {
-		if err := netem(ctx, id, strconv.Itoa(f.Port), strconv.FormatFloat(f.Percent, 'g', -1, 64)); err != nil {
+		if err := d.netem(ctx, id, "loss", strconv.Itoa(f.Port), strconv.FormatFloat(f.Percent, 'g', -1, 64), us); err != nil {
 			return clear, err
 		}
 	}

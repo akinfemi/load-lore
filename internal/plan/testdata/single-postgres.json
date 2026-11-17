@@ -56,7 +56,7 @@
             "db": {
               "kind": "postgres",
               "addrs": [
-                "lore-toxiproxy:20000"
+                "db:5432"
               ],
               "pool": 24,
               "database": "lab",
@@ -102,7 +102,7 @@
             "db": {
               "kind": "postgres",
               "addrs": [
-                "lore-toxiproxy:20000"
+                "db:5432"
               ],
               "pool": 24,
               "database": "lab",
@@ -148,7 +148,7 @@
             "db": {
               "kind": "postgres",
               "addrs": [
-                "lore-toxiproxy:20000"
+                "db:5432"
               ],
               "pool": 24,
               "database": "lab",
@@ -194,7 +194,7 @@
             "db": {
               "kind": "postgres",
               "addrs": [
-                "lore-toxiproxy:20000"
+                "db:5432"
               ],
               "pool": 24,
               "database": "lab",
@@ -251,19 +251,19 @@
         "servers": [
           {
             "name": "api-0",
-            "addr": "lore-toxiproxy:20001"
+            "addr": "api-0:8080"
           },
           {
             "name": "api-1",
-            "addr": "lore-toxiproxy:20002"
+            "addr": "api-1:8080"
           },
           {
             "name": "api-2",
-            "addr": "lore-toxiproxy:20003"
+            "addr": "api-2:8080"
           },
           {
             "name": "api-3",
-            "addr": "lore-toxiproxy:20004"
+            "addr": "api-3:8080"
           }
         ],
         "server_port": 8080,
@@ -277,35 +277,35 @@
       "from": "api",
       "to": "db",
       "upstream": "db:5432",
-      "listen": 20000
+      "direct": true
     },
     {
       "name": "lb--api-0",
       "from": "lb",
       "to": "api",
       "upstream": "api-0:8080",
-      "listen": 20001
+      "direct": true
     },
     {
       "name": "lb--api-1",
       "from": "lb",
       "to": "api",
       "upstream": "api-1:8080",
-      "listen": 20002
+      "direct": true
     },
     {
       "name": "lb--api-2",
       "from": "lb",
       "to": "api",
       "upstream": "api-2:8080",
-      "listen": 20003
+      "direct": true
     },
     {
       "name": "lb--api-3",
       "from": "lb",
       "to": "api",
       "upstream": "api-3:8080",
-      "listen": 20004
+      "direct": true
     }
   ],
   "workload": {
@@ -341,19 +341,23 @@
   "infra": {
     "load_cpu": 1.5,
     "load_memory": 2147483648,
-    "proxy_cpu": 1.5,
-    "proxy_memory": 1073741824,
+    "proxy_cpu": 0,
+    "proxy_memory": 0,
     "prometheus_cpu": 0.1,
     "prometheus_memory": 1073741824,
     "cadvisor_cpu": 0.1,
     "cadvisor_memory": 268435456,
     "exporter_cpu": 0.1,
     "exporter_memory": 134217728,
-    "expected_proxied_ops": 14350,
+    "expected_proxied_ops": 0,
     "synthetic_image": "loadlore/synthetic:dev"
   },
+  "network": {
+    "profile": "same-zone",
+    "rtt_ms": 0.3
+  },
   "notes": [
-    "Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 3500 rps), Toxiproxy 1.5 CPU (about 14350 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each"
+    "Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 3500 rps), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each. No fault acts on a connection, so every connection is direct and there is no Toxiproxy"
   ],
   "assumptions": [
     {
@@ -365,6 +369,11 @@
       "field": "workload.slo.p99_ms",
       "value": "500 ms",
       "why": "the default; a break on p99 alone needs p99 at or above this as well as 10x the low-load p99, so latency users would still accept isn't called a break"
+    },
+    {
+      "field": "network.profile",
+      "value": "same-zone: 0.3 ms round trip",
+      "why": "the default: every service in one availability zone. AWS says a round trip between two instances in the same zone is generally sub-millisecond with enhanced networking, and publishes no exact figure, so the 0.3 ms round trip Loadlore adds between any two containers is its own estimate, inside that bound. Applied between any two of the stack's containers, the load generator and the entry point included, as half the round trip on each side's outgoing packets; Loadlore's own tooling isn't slowed. Not scaled with --scale. Source: AWS Architecture Blog, Improving performance and reducing cost using Availability Zone Affinity: https://aws.amazon.com/blogs/architecture/improving-performance-and-reducing-cost-using-availability-zone-affinity/"
     },
     {
       "field": "resources.cpu_period_ms",

@@ -172,7 +172,14 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 		}
 	}
 
-	healthyDeps := map[string]composeDepend{svcToxiproxy: {Condition: "service_started"}}
+	// Services wait for Toxiproxy only when it carries connections.
+	toxDep := func(m map[string]composeDepend) map[string]composeDepend {
+		if p.UsesToxiproxy() {
+			m[svcToxiproxy] = composeDepend{Condition: "service_started"}
+		}
+		return m
+	}
+	healthyDeps := toxDep(map[string]composeDepend{})
 	for _, s := range p.Services {
 		switch s.Kind {
 		case "postgres":
@@ -270,7 +277,7 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 		c.Entrypoint = []string{"/usr/bin/pgbouncer"}
 		c.Command = []string{pgbouncerINI}
 		c.Healthcheck = &composeHealth{Test: []string{"CMD", "pg_isready", "-h", "127.0.0.1", "-p", strconv.Itoa(plan.PgBouncerPort), "-U", plan.DBUser, "-d", plan.DBName}, Interval: "1s", Timeout: "3s", Retries: 60}
-		c.DependsOn = map[string]composeDepend{svcToxiproxy: {Condition: "service_started"}, s.PgBouncer.Target: {Condition: "service_healthy"}}
+		c.DependsOn = toxDep(map[string]composeDepend{s.PgBouncer.Target: {Condition: "service_healthy"}})
 		cf.Services[s.Name] = c
 		healthyDeps[s.Name] = composeDepend{Condition: "service_healthy"}
 
@@ -294,7 +301,7 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 		c.Healthcheck = &composeHealth{Test: []string{"CMD", "bash", "-c", fmt.Sprintf("exec 3<>/dev/tcp/127.0.0.1/%d", plan.LBStatsPort)}, Interval: "1s", Timeout: "3s", Retries: 60}
 		// The replicas start first so the lb's first checks find them up;
 		// an autoscaler's later replicas aren't started yet.
-		deps := map[string]composeDepend{svcToxiproxy: {Condition: "service_started"}}
+		deps := toxDep(map[string]composeDepend{})
 		for _, srv := range s.LB.Servers {
 			if !srv.Disabled {
 				deps[srv.Name] = composeDepend{Condition: "service_healthy"}
@@ -336,18 +343,21 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 		}
 	}
 
-	// Toxiproxy: one listener per proxied connection.
-	tox := base(ImageToxiproxy, svcToxiproxy, "infra", -1, p.Infra.ProxyCPU, p.Infra.ProxyMemory)
-	tox.Command = []string{"-host=0.0.0.0", "-config=/config/toxiproxy.json", "-proxy-metrics", "-runtime-metrics"}
-	tox.Environment = map[string]string{"GOMEMLIMIT": goMemLimit(p.Infra.ProxyMemory)}
-	toxCfg, err := toxiproxyConfig(p)
-	if err != nil {
-		return nil, err
+	// Toxiproxy: one listener per proxied connection, and none at all when
+	// no fault acts on a connection.
+	if p.UsesToxiproxy() {
+		tox := base(ImageToxiproxy, svcToxiproxy, "infra", -1, p.Infra.ProxyCPU, p.Infra.ProxyMemory)
+		tox.Command = []string{"-host=0.0.0.0", "-config=/config/toxiproxy.json", "-proxy-metrics", "-runtime-metrics"}
+		tox.Environment = map[string]string{"GOMEMLIMIT": goMemLimit(p.Infra.ProxyMemory)}
+		toxCfg, err := toxiproxyConfig(p)
+		if err != nil {
+			return nil, err
+		}
+		cf.Configs["toxiproxy"] = &composeConfig{Content: string(toxCfg)}
+		tox.Configs = []composeConfigRef{{Source: "toxiproxy", Target: "/config/toxiproxy.json"}}
+		tox.Ports = []string{fmt.Sprintf("127.0.0.1::%d", toxiproxyAPI)}
+		cf.Services[svcToxiproxy] = tox
 	}
-	cf.Configs["toxiproxy"] = &composeConfig{Content: string(toxCfg)}
-	tox.Configs = []composeConfigRef{{Source: "toxiproxy", Target: "/config/toxiproxy.json"}}
-	tox.Ports = []string{fmt.Sprintf("127.0.0.1::%d", toxiproxyAPI)}
-	cf.Services[svcToxiproxy] = tox
 
 	// Monitoring.
 	prom := base(ImagePrometheus, svcPrometheus, "infra", -1, p.Infra.PromCPU, p.Infra.PromMemory)
@@ -499,7 +509,7 @@ type toxiProxy struct {
 
 func toxiproxyConfig(p *plan.Plan) ([]byte, error) {
 	proxies := []toxiProxy{}
-	for _, x := range p.Proxies {
+	for _, x := range p.Proxied() {
 		proxies = append(proxies, toxiProxy{Name: x.Name, Listen: fmt.Sprintf("0.0.0.0:%d", x.Listen), Upstream: x.Upstream, Enabled: true})
 	}
 	return json.MarshalIndent(proxies, "", "  ")
@@ -560,7 +570,9 @@ func prometheusConfig(p *plan.Plan) string {
 	for _, name := range lbs {
 		job("lb-"+name, []string{fmt.Sprintf("%s:%d", name, plan.LBStatsPort)}, fmt.Sprintf("        labels: {service: %q}\n", name))
 	}
-	job("toxiproxy", []string{fmt.Sprintf("%s:%d", svcToxiproxy, toxiproxyAPI)}, "")
+	if p.UsesToxiproxy() {
+		job("toxiproxy", []string{fmt.Sprintf("%s:%d", svcToxiproxy, toxiproxyAPI)}, "")
+	}
 	job("cadvisor", []string{svcCAdvisor + ":8080"}, fmt.Sprintf(`    metric_relabel_configs:
       - source_labels: [container_label_io_loadlore_run]
         regex: %q

@@ -56,6 +56,11 @@ type Plan struct {
 	Workload Workload   `json:"workload"`
 	Faults   []*Fault   `json:"faults"`
 	Infra    Infra      `json:"infra"`
+	// Network is the round trip added between the stack's containers.
+	Network Network `json:"network"`
+	// Quick is set when the profile was shortened to start near an
+	// earlier run's break (loadl run --quick).
+	Quick *Quick `json:"quick,omitempty"`
 
 	// Notes explain choices the plan made that a reader of the report
 	// should know about, such as values changed by scaling.
@@ -230,18 +235,55 @@ type LBServer struct {
 	Disabled bool `json:"disabled,omitempty"`
 }
 
-// Proxy is one proxied connection: callers of From reach the To container
-// through Listen, so faults can act on it.
+// Proxy is one caller-to-container connection: callers of From reach the
+// To container at Addr. Only a connection that a fault in the scenario
+// acts on goes through Toxiproxy, on Listen; the rest are Direct, straight
+// to the container, since a relay with nothing to do still costs CPU.
 type Proxy struct {
 	Name     string `json:"name"`
 	From     string `json:"from"` // service, or "load" for the load generator
 	To       string `json:"to"`   // service
 	Upstream string `json:"upstream"`
-	Listen   int    `json:"listen"`
+	Listen   int    `json:"listen,omitempty"`
+	// Direct: no Toxiproxy in between. Plans from before direct
+	// connections have every connection proxied.
+	Direct bool `json:"direct,omitempty"`
 }
 
-// Addr is the proxy's address inside the stack.
-func (p *Proxy) Addr() string { return fmt.Sprintf("%s:%d", ProxyHost, p.Listen) }
+// Addr is where callers connect: the proxy inside the stack, or the
+// container itself.
+func (p *Proxy) Addr() string {
+	if p.Direct {
+		return p.Upstream
+	}
+	return fmt.Sprintf("%s:%d", ProxyHost, p.Listen)
+}
+
+// Container is the container the connection leads to.
+func (p *Proxy) Container() string { return strings.SplitN(p.Upstream, ":", 2)[0] }
+
+// Proxied lists the connections that go through Toxiproxy.
+func (p *Plan) Proxied() []*Proxy {
+	var out []*Proxy
+	for _, x := range p.Proxies {
+		if !x.Direct {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// Network is the network profile: the round trip added between any two
+// of the stack's containers, the load generator's included, half on each
+// side's outgoing packets. Toxiproxy's own container gets none, so a
+// proxied connection has the same round trip as a direct one.
+type Network struct {
+	Profile string  `json:"profile"`
+	RTTMs   float64 `json:"rtt_ms"`
+}
+
+// DelayUs is the delay on each side's outgoing packets, in microseconds.
+func (n Network) DelayUs() int { return int(math.Round(n.RTTMs * 1000 / 2)) }
 
 // Workload is the load profile, scaled.
 type Workload struct {
@@ -298,11 +340,13 @@ type Fault struct {
 }
 
 // Cut is one container's share of a partition: every packet it sends to
-// these Toxiproxy ports is dropped, as on a network that silently stopped
-// carrying them.
+// these containers (Hosts, resolved to their addresses when the fault
+// starts), or to these Toxiproxy ports on connections that a fault also
+// proxies, is dropped, as on a network that silently stopped carrying them.
 type Cut struct {
-	Container string `json:"container"`
-	Ports     []int  `json:"ports"`
+	Container string   `json:"container"`
+	Hosts     []string `json:"hosts,omitempty"`
+	Ports     []int    `json:"ports,omitempty"`
 }
 
 // Infra is the budget for Loadlore's own containers. They get explicit
@@ -469,6 +513,8 @@ func Build(d *design.Design, opt Options) (*Plan, error) {
 	if err := p.faults(d, byName); err != nil {
 		return nil, err
 	}
+	pr := design.NetworkProfiles[*d.Network.Profile]
+	p.Network = Network{Profile: pr.Name, RTTMs: pr.RTTMs}
 	p.infra(d)
 	p.assume(d)
 	return p, nil
@@ -696,15 +742,32 @@ var memorySetting = map[string]bool{
 	"maxmemory": true,
 }
 
-// proxies creates one proxy per caller service and target container.
+// proxies creates one connection per caller service and target container,
+// through Toxiproxy only into the containers a connection fault targets.
 func (p *Plan) proxies(d *design.Design, byName map[string]*Service) {
+	faulted := map[string]bool{}
+	for _, f := range d.Scenario {
+		if f.Target == nil || !connectionFault[f.Inject] {
+			continue
+		}
+		cs := byName[f.Target.Name].Containers
+		if f.Target.Index != nil {
+			cs = []string{cs[*f.Target.Index]}
+		}
+		for _, c := range cs {
+			faulted[c] = true
+		}
+	}
 	port := ProxyBasePort
 	add := func(from, to, container string, upPort int) {
-		p.Proxies = append(p.Proxies, &Proxy{
-			Name: from + "--" + container, From: from, To: to,
-			Upstream: fmt.Sprintf("%s:%d", container, upPort), Listen: port,
-		})
-		port++
+		x := &Proxy{Name: from + "--" + container, From: from, To: to, Upstream: fmt.Sprintf("%s:%d", container, upPort)}
+		if faulted[container] {
+			x.Listen = port
+			port++
+		} else {
+			x.Direct = true
+		}
+		p.Proxies = append(p.Proxies, x)
 	}
 	for _, name := range d.ServiceNames() {
 		ds := d.Services[name]
@@ -789,7 +852,7 @@ func (p *Plan) lbs(d *design.Design, byName map[string]*Service) {
 		t := byName[s.LB.Target]
 		running := t.Running()
 		for _, x := range p.proxiesInto(name, s.LB.Target) {
-			c := strings.SplitN(x.Upstream, ":", 2)[0]
+			c := x.Container()
 			s.LB.Servers = append(s.LB.Servers, LBServer{Name: c, Addr: x.Addr(), Disabled: !slices.Contains(running, c)})
 		}
 		s.LB.ServerPort = t.Port
@@ -1063,7 +1126,7 @@ func (p *Plan) faults(d *design.Design, byName map[string]*Service) error {
 		}
 		if connectionFault[f.Inject] {
 			for _, x := range p.Proxies {
-				if x.To == pf.Target && slices.ContainsFunc(containers, func(c string) bool { return strings.HasPrefix(x.Upstream, c+":") }) {
+				if !x.Direct && x.To == pf.Target && slices.Contains(containers, x.Container()) {
 					pf.Proxies = append(pf.Proxies, x.Name)
 				}
 			}
@@ -1096,34 +1159,57 @@ func (p *Plan) infra(d *design.Design) {
 		in.LoadMemory = 2 << 30
 	}
 
+	in.PromCPU, in.PromMemory = promCPU, 1<<30
+	in.CAdvisorCPU, in.CAdvisorMem = cadvisorCPU, 256<<20
+	in.ExporterCPU, in.ExporterMem = exporterCPU, 128<<20
+	if !p.UsesToxiproxy() {
+		p.note("Loadlore's own containers get fixed budgets: load generator %s CPU (peak %s rps), Prometheus %s, cAdvisor %s, exporters %s each. No fault acts on a connection, so every connection is direct and there is no Toxiproxy",
+			fmtF(in.LoadCPU), fmtF(math.Round(peak)), fmtF(in.PromCPU), fmtF(in.CAdvisorCPU), fmtF(in.ExporterCPU))
+		return
+	}
 	in.ExpectedOps = p.proxiedOps(d, peak)
 	// Sized so the estimated peak uses at most ProxyShareLimit of it: above
 	// that, Toxiproxy was CPU-throttled in bursts.
 	in.ProxyCPU = clampHalf(in.ExpectedOps/proxyOpsPerCPU/ProxyShareLimit, minProxyCPU, maxProxyCPU)
 	in.ProxyMemory = proxyMemory
-	in.PromCPU, in.PromMemory = promCPU, 1<<30
-	in.CAdvisorCPU, in.CAdvisorMem = cadvisorCPU, 256<<20
-	in.ExporterCPU, in.ExporterMem = exporterCPU, 128<<20
-	p.note("Loadlore's own containers get fixed budgets: load generator %s CPU (peak %s rps), Toxiproxy %s CPU (about %s proxied calls/s at peak), Prometheus %s, cAdvisor %s, exporters %s each",
-		fmtF(in.LoadCPU), fmtF(math.Round(peak)), fmtF(in.ProxyCPU), fmtF(math.Round(in.ExpectedOps)), fmtF(in.PromCPU), fmtF(in.CAdvisorCPU), fmtF(in.ExporterCPU))
+	p.note("Loadlore's own containers get fixed budgets: load generator %s CPU (peak %s rps), Toxiproxy %s CPU (about %s calls/s at peak on the %s it proxies for faults), Prometheus %s, cAdvisor %s, exporters %s each",
+		fmtF(in.LoadCPU), fmtF(math.Round(peak)), fmtF(in.ProxyCPU), fmtF(math.Round(in.ExpectedOps)), plural(len(p.Proxied()), "connection"), fmtF(in.PromCPU), fmtF(in.CAdvisorCPU), fmtF(in.ExporterCPU))
 }
 
-// proxiedOps estimates the proxied calls per second at a given entry rate,
-// following the call graph: each lb forwards what reaches it, and each
-// synthetic service makes its calls for every request that reaches it.
-// on_miss calls count as if every get missed, so it is an upper bound.
+// UsesToxiproxy is whether any connection goes through Toxiproxy: only
+// then does the run start it.
+func (p *Plan) UsesToxiproxy() bool { return len(p.Proxied()) > 0 }
+
+// proxiedOps estimates the calls per second through Toxiproxy at a given
+// entry rate, following the call graph: each lb forwards what reaches it,
+// and each synthetic service makes its calls for every request that
+// reaches it. Only connections a fault proxies count, spread evenly over
+// a target's containers. on_miss calls count as if every get missed, so
+// it is an upper bound.
 func (p *Plan) proxiedOps(d *design.Design, rate float64) float64 {
-	readShare := p.Workload.ReadShare
-	var ops float64
-	if len(p.proxiesInto(loadGeneratorKey, d.Workload.Entry)) > 0 {
-		ops += rate
+	// proxied is the share of from's connections into to that go through
+	// Toxiproxy.
+	proxied := func(from, to string) float64 {
+		xs := p.proxiesInto(from, to)
+		if len(xs) == 0 {
+			return 0
+		}
+		n := 0
+		for _, x := range xs {
+			if !x.Direct {
+				n++
+			}
+		}
+		return float64(n) / float64(len(xs))
 	}
+	readShare := p.Workload.ReadShare
+	ops := rate * proxied(loadGeneratorKey, d.Workload.Entry)
 	var visit func(name string, r float64)
 	visit = func(name string, r float64) {
 		ds := d.Services[name]
 		switch {
 		case ds.Kind == "lb":
-			ops += r
+			ops += r * proxied(name, ds.Target)
 			visit(ds.Target, r)
 		case ds.IsSynthetic() && ds.Behavior != nil:
 			var walk func(calls []*design.Call, r float64)
@@ -1138,19 +1224,23 @@ func (p *Plan) proxiedOps(d *design.Design, rate float64) float64 {
 					}
 					n := r * share * float64(*c.Count)
 					if len(c.Shards) > 0 {
-						// A fan-out is one call to each shard.
-						if c.ShardBy == "all" {
-							n *= float64(len(c.Shards))
+						// A fan-out is one call to each shard; a keyed call
+						// goes to one of them.
+						each := n
+						if c.ShardBy != "all" {
+							each = n / float64(len(c.Shards))
 						}
-						ops += n
+						for _, sh := range c.Shards {
+							ops += each * proxied(name, sh)
+						}
 						continue
 					}
-					ops += n
+					ops += n * proxied(name, c.Target)
 					switch t := d.Services[c.Target]; {
 					case t.IsApp() || t.Kind == "lb":
 						visit(c.Target, n)
 					case t.Kind == "pgbouncer":
-						ops += n // and on from PgBouncer to its Postgres
+						ops += n * proxied(c.Target, t.Target) // and on from PgBouncer to its Postgres
 					}
 					walk(c.OnMiss, n)
 				}
@@ -1179,6 +1269,7 @@ func (p *Plan) assume(d *design.Design) {
 	p.Assumptions = append(p.Assumptions, Assumption{
 		Field: "workload.slo.p99_ms", Value: fmtF(p.Workload.SLOP99Ms) + " ms", Why: why,
 	})
+	p.assumeNetwork()
 	p.assumePeriods(d)
 	for _, name := range d.ServiceNames() {
 		if s := d.Services[name]; s.Kind == "pgbouncer" {
@@ -1264,6 +1355,20 @@ func (p *Plan) assume(d *design.Design) {
 // assumeDisk says what a postgres's data disk is: the Docker host's, which
 // on a laptop answers reads that miss memory from the host's own memory,
 // or one modelled like a cloud volume.
+// assumeNetwork prints the network profile and its source.
+func (p *Plan) assumeNetwork() {
+	pr := design.NetworkProfiles[p.Network.Profile]
+	a := Assumption{Field: "network.profile", Value: pr.Name + ": nothing added"}
+	if pr.RTTMs > 0 {
+		a.Value = fmt.Sprintf("%s: %s ms round trip", pr.Name, fmtF(pr.RTTMs))
+	}
+	a.Why = pr.Basis + ". Applied between any two of the stack's containers, the load generator and the entry point included, as half the round trip on each side's outgoing packets; Loadlore's own tooling isn't slowed. Not scaled with --scale. Source: " + pr.Source
+	if pr.Name == design.DefaultNetwork {
+		a.Why = "the default: " + a.Why
+	}
+	p.Assumptions = append(p.Assumptions, a)
+}
+
 func (p *Plan) assumeDisk(name string, ds *design.Service) {
 	s := p.Service(name)
 	if s == nil {
@@ -1442,6 +1547,13 @@ func sizeStr(b int64) string { return design.Size(b).String() }
 
 func fmtF(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
 
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
 func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -1472,17 +1584,23 @@ func (p *Plan) partition(pf *Fault, f *design.Fault, byName map[string]*Service)
 	}
 	for _, pair := range [][2]design.TargetRef{{refs[0], refs[1]}, {refs[1], refs[0]}} {
 		from, to := pair[0], pair[1]
+		var hosts []string
 		var ports []int
 		for _, x := range p.proxiesInto(from.Name, to.Name) {
-			if slices.ContainsFunc(containers(to), func(c string) bool { return strings.HasPrefix(x.Upstream, c+":") }) {
+			if !slices.Contains(containers(to), x.Container()) {
+				continue
+			}
+			if x.Direct {
+				hosts = append(hosts, x.Container())
+			} else {
 				ports = append(ports, x.Listen)
 			}
 		}
-		if len(ports) == 0 {
+		if len(hosts)+len(ports) == 0 {
 			continue
 		}
 		for _, c := range containers(from) {
-			pf.Cuts = append(pf.Cuts, Cut{Container: c, Ports: ports})
+			pf.Cuts = append(pf.Cuts, Cut{Container: c, Hosts: hosts, Ports: ports})
 		}
 	}
 	if len(pf.Cuts) == 0 {

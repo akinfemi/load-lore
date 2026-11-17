@@ -9,6 +9,7 @@ type Design struct {
 	Name        string              `yaml:"name" json:"name" jsonschema:"required,pattern=^[a-z0-9]+(-[a-z0-9]+)*$,maxLength=63" jsonschema_description:"Short kebab-case name used in run ids and reports."`
 	Services    map[string]*Service `yaml:"services" json:"services" jsonschema:"required,minProperties=1" jsonschema_description:"Map of service name to service. Names are lowercase letters, digits and '-'."`
 	Workload    *Workload           `yaml:"workload" json:"workload" jsonschema:"required"`
+	Network     *Network            `yaml:"network,omitempty" json:"network,omitempty" jsonschema_description:"The network between the stack's containers. Default profile same-zone."`
 	Scenario    []*Fault            `yaml:"scenario,omitempty" json:"scenario,omitempty" jsonschema_description:"Timed fault injections."`
 	Expect      []*Expectation      `yaml:"expect,omitempty" json:"expect,omitempty" jsonschema_description:"The learner's predictions, scored after the run."`
 	Assumptions []*Assumption       `yaml:"assumptions,omitempty" json:"assumptions,omitempty" jsonschema_description:"Every value the user did not state, with its basis. Printed in every report."`
@@ -80,6 +81,12 @@ type Disk struct {
 	Profile *string `yaml:"profile,omitempty" json:"profile,omitempty" jsonschema:"enum=laptop,enum=gp3,enum=io2" jsonschema_description:"A named disk with numbers from published specs: laptop (the Docker host's own), gp3 (1 ms per read and write, 3,000 IOPS and 125 MiB/s baseline) or io2 (provisioned IOPS, no added wait). Every report prints the profile and its source."`
 	ReadMs  *int    `yaml:"read_ms,omitempty" json:"read_ms,omitempty" jsonschema:"minimum=0,maximum=100,default=1" jsonschema_description:"Without a profile only: milliseconds every read from the disk waits, in whole milliseconds."`
 	IOPS    *int    `yaml:"iops,omitempty" json:"iops,omitempty" jsonschema:"minimum=100" jsonschema_description:"Reads a second the disk serves, and writes a second, each. With gp3, provisioned IOPS from 3000 (the default) to 80000; with io2, required, 100 to 256000; not with laptop. Without a profile, at least 100, default 3000. Scaled with --scale."`
+}
+
+// Network is the network between the stack's containers, the load
+// generator's included.
+type Network struct {
+	Profile *string `yaml:"profile,omitempty" json:"profile,omitempty" jsonschema:"enum=local,enum=same-zone,enum=cross-zone,default=same-zone" jsonschema_description:"A named network with a round trip from published figures, added between any two containers: local (nothing added), same-zone (0.3 ms) or cross-zone (1.5 ms). Every report prints the profile and its source."`
 }
 
 // HealthCheck is an lb's active check of each replica: an HTTP GET every

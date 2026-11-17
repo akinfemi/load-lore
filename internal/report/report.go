@@ -684,8 +684,14 @@ func thresholdsSection(d *doc, a *analysis.Analysis) {
 	d.line("")
 	d.line("- **Broke:** %d windows in a row with at least %s of requests failing or successful responses below %s of the offered rate, or %d windows in a row with any of those or p99 at least %s. A shorter episode is shown as a stall in the timeline, not a break.", analysis.BreakWindows, analysis.Pct(analysis.BreakErrorRate), analysis.Pct(analysis.BreakShortfall), analysis.BreakLatencyWindows, lat)
 	d.line("- **Doubtful:** a break on p99 alone, when the load generator was stalled at its CPU limit in %s or more of its scheduling periods in one of the break's windows and the entry service's own p99 (%s) was below the limit in one of them. The verdict stays what it was.", analysis.Pct(analysis.ToolThrottleNote), analysis.SrcAppLatency)
-	d.line("- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than %s of a window's arrivals (more than %s in a window where the system itself failed %s or more of requests; up to that it's a caveat that gives the share), or the load generator or Toxiproxy used %s or more of its CPU budget, or was stalled at its CPU limit in %s or more of its scheduling periods (from %s it's noted as a caveat). The first %g s of load are a warm-up and don't count: the load generator starts its VUs and connections open then. A cause is named only with evidence: on a Linux host, the hypervisor giving %s or more of CPU time to other virtual machines (steal), or other programs using %s or more of the host's CPUs (at least %g); inside a VM on this machine, only as a possibility.", analysis.Pct(analysis.DroppedShareLimit), analysis.Pct(analysis.DroppedFailingLimit), analysis.Pct(analysis.BreakErrorRate), analysis.Pct(analysis.ToolCPULimit), analysis.Pct(analysis.ToolThrottleLimit), analysis.Pct(analysis.ToolThrottleNote), analysis.ToolWarmupSeconds, analysis.Pct(analysis.HostStealLimit), analysis.Pct(analysis.HostOthersShare), analysis.HostOthersMin)
-	d.line("- **Toxiproxy stalls:** no new connection accepted on one of Toxiproxy's edges for %g s or more, where it had accepted %g a second or more over the %g s before, then %d or more accepted within %g ms with a median spacing under %g ms: connections queued behind one upstream dial, which a real network doesn't do. Up to the end of the break's first window it makes the run inconclusive; after a break the system didn't recover from, it's a doubt on the recovery, and `loadl scenario check` doesn't judge claims that rest on not recovering; in a run that held, or recovered, it's a caveat: a stall only adds failure.", analysis.StallGapSeconds, analysis.StallRateMin, analysis.StallLookback, analysis.StallDrainMin, analysis.StallDrainSeconds*1000, analysis.StallDrainSpacing*1000)
+	toolNames := "the load generator"
+	if a.Plan.UsesToxiproxy() {
+		toolNames = "the load generator or Toxiproxy"
+	}
+	d.line("- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than %s of a window's arrivals (more than %s in a window where the system itself failed %s or more of requests; up to that it's a caveat that gives the share), or %s used %s or more of its CPU budget, or was stalled at its CPU limit in %s or more of its scheduling periods (from %s it's noted as a caveat). The first %g s of load are a warm-up and don't count: the load generator starts its VUs and connections open then. A cause is named only with evidence: on a Linux host, the hypervisor giving %s or more of CPU time to other virtual machines (steal), or other programs using %s or more of the host's CPUs (at least %g); inside a VM on this machine, only as a possibility.", analysis.Pct(analysis.DroppedShareLimit), analysis.Pct(analysis.DroppedFailingLimit), analysis.Pct(analysis.BreakErrorRate), toolNames, analysis.Pct(analysis.ToolCPULimit), analysis.Pct(analysis.ToolThrottleLimit), analysis.Pct(analysis.ToolThrottleNote), analysis.ToolWarmupSeconds, analysis.Pct(analysis.HostStealLimit), analysis.Pct(analysis.HostOthersShare), analysis.HostOthersMin)
+	if a.Plan.UsesToxiproxy() {
+		d.line("- **Toxiproxy stalls:** no new connection accepted on one of Toxiproxy's edges for %g s or more, where it had accepted %g a second or more over the %g s before, then %d or more accepted within %g ms with a median spacing under %g ms: connections queued behind one upstream dial, which a real network doesn't do. Up to the end of the break's first window it makes the run inconclusive; after a break the system didn't recover from, it's a doubt on the recovery, and `loadl scenario check` doesn't judge claims that rest on not recovering; in a run that held, or recovered, it's a caveat: a stall only adds failure.", analysis.StallGapSeconds, analysis.StallRateMin, analysis.StallLookback, analysis.StallDrainMin, analysis.StallDrainSeconds*1000, analysis.StallDrainSpacing*1000)
+	}
 	busy := fmt.Sprintf("its CPU at %s or more, or its time per call with a connection at least %gx the low-load value and %g ms above it; CPU throttling alone doesn't count", analysis.Pct(analysis.PoolTargetCPUMax), analysis.TargetSlowFactor, analysis.TargetSlowMinMs)
 	d.line("- **Connection pool exhausted:** for two windows in a row, a pool at %s or more of its size with callers waiting, while the target wasn't busy (busy: %s) and the caller's CPU stayed below %s.", analysis.Pct(analysis.PoolFullShare), busy, analysis.Pct(analysis.PoolCallerCPUMax))
 	d.line("- **Queueing knee:** for %d windows in a row, p99 at least %gx the low-load p99 and %g ms above it, with a CPU or pool at %s or more. When that is a pool whose target was busy in any of those windows, or a service's CPU whose requests spent %s or more of their time in calls to a busy target, the knee is the target's.", analysis.KneeWindows, analysis.KneeLatencyFactor, analysis.KneeLatencyMinMs, analysis.Pct(analysis.KneeUtilization), analysis.Pct(analysis.KneeDownstreamShare))
@@ -915,13 +921,19 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 			}})
 		}
 	}
-	cols = append(cols,
-		col{"k6 CPU", func(w *analysis.Window) string { return opt(w.LoadCPU, analysis.Pct) }},
-		col{"Toxiproxy CPU", func(w *analysis.Window) string { return opt(w.ProxyCPU, analysis.Pct) }},
-		col{"k6 / Toxiproxy stalled", func(w *analysis.Window) string {
-			return opt(w.LoadThrottled, analysis.Pct) + " / " + opt(w.ProxyThrottled, analysis.Pct)
-		}},
-	)
+	cols = append(cols, col{"k6 CPU", func(w *analysis.Window) string { return opt(w.LoadCPU, analysis.Pct) }})
+	tools := "k6 CPU is against its budget"
+	if a.Plan.UsesToxiproxy() {
+		tools = "k6 and Toxiproxy CPU are against their budgets"
+		cols = append(cols,
+			col{"Toxiproxy CPU", func(w *analysis.Window) string { return opt(w.ProxyCPU, analysis.Pct) }},
+			col{"k6 / Toxiproxy stalled", func(w *analysis.Window) string {
+				return opt(w.LoadThrottled, analysis.Pct) + " / " + opt(w.ProxyThrottled, analysis.Pct)
+			}},
+		)
+	} else {
+		cols = append(cols, col{"k6 stalled", func(w *analysis.Window) string { return opt(w.LoadThrottled, analysis.Pct) }})
+	}
 	hostSampled := slices.ContainsFunc(a.Windows, func(w *analysis.Window) bool { return w.HostSteal != nil })
 	if hostSampled {
 		cols = append(cols,
@@ -964,8 +976,8 @@ func windowsSection(d *doc, a *analysis.Analysis) {
 	if slices.ContainsFunc(a.Plan.Services, func(s *plan.Service) bool { return s.Kind == "queue" }) {
 		queues = fmt.Sprintf(" A queue's jobs are %s, at the window's end; oldest is %s, at most over the window; published is %s and finished %s.", analysis.SrcQueueDepth, analysis.SrcOldestJob, analysis.SrcPublished, analysis.SrcJobs)
 	}
-	d.line("Columns: offered is %s; served is %s; dropped is %s; errors are %s; p50 and p99 are from %s; CPU is %s, mean over the window; conns are %s; hit rate is from %s; up is %s; pools are %s; k6 and Toxiproxy CPU are against their budgets.%s",
-		analysis.SrcOffered, analysis.SrcRPS, analysis.SrcDropped, analysis.SrcErrors, analysis.SrcK6Latency, analysis.SrcCPU, conns, analysis.SrcHitRate, analysis.SrcLBHealthy, pools, queues)
+	d.line("Columns: offered is %s; served is %s; dropped is %s; errors are %s; p50 and p99 are from %s; CPU is %s, mean over the window; conns are %s; hit rate is from %s; up is %s; pools are %s; %s.%s",
+		analysis.SrcOffered, analysis.SrcRPS, analysis.SrcDropped, analysis.SrcErrors, analysis.SrcK6Latency, analysis.SrcCPU, conns, analysis.SrcHitRate, analysis.SrcLBHealthy, pools, tools, queues)
 	if hostSampled {
 		d.line("")
 		d.line("Host steal is %s; other CPUs are %s.", analysis.SrcHostSteal, analysis.SrcHostOthers)

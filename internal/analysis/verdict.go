@@ -599,7 +599,7 @@ func inconclusive(ws []*Window, breakAt int) (reasons, caveats []string, short [
 		reasons = append(reasons, fmt.Sprintf("at %s the load generator used %s of its CPU budget (%s), so it may have been slowing requests down itself", Clock(load.Start), Pct(*load.LoadCPU), SrcLoadCPU))
 	}
 	if proxy != nil {
-		reasons = append(reasons, fmt.Sprintf("at %s Toxiproxy, which carries every connection between services, used %s of its CPU budget (%s), so it may have added latency of its own", Clock(proxy.Start), Pct(*proxy.ProxyCPU), SrcProxyCPU))
+		reasons = append(reasons, fmt.Sprintf("at %s Toxiproxy, which carries the connections the scenario's faults act on, used %s of its CPU budget (%s), so it may have added latency of its own", Clock(proxy.Start), Pct(*proxy.ProxyCPU), SrcProxyCPU))
 	}
 	for _, t := range tools {
 		if t.worst == nil {

@@ -79,6 +79,10 @@ func setDefault[T any](p **T, v T) {
 // fields that are valid for their context, so validation can run afterwards.
 // The keyspace default needs the call graph and is set during validation.
 func applyDefaults(d *Design) {
+	if d.Network == nil {
+		d.Network = &Network{}
+	}
+	setDefault(&d.Network.Profile, DefaultNetwork)
 	for _, s := range d.Services {
 		if s == nil {
 			continue

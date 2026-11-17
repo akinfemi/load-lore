@@ -124,7 +124,7 @@ Evidence:
 
 **Try next:** Add PgBouncer, or resize the pools across replicas: 1 replica × 10 connections = 10.
 
-<sub>Rules version 17. Rules are deterministic and offline; their thresholds are listed below.</sub>
+<sub>Rules version 18. Rules are deterministic and offline; their thresholds are listed below.</sub>
 
 ## Predictions
 
@@ -160,6 +160,7 @@ The design lists no assumptions.
 | --- | --- | --- |
 | workload.timeout_ms | 10s | the default; k6 gives up on a request after this long and counts it as failed |
 | workload.slo.p99_ms | 100 ms | set in the design; a break on p99 alone needs p99 at or above this as well as 10x the low-load p99 |
+| network.profile | same-zone: 0.3 ms round trip | the default: every service in one availability zone. AWS says a round trip between two instances in the same zone is generally sub-millisecond with enhanced networking, and publishes no exact figure, so the 0.3 ms round trip Loadlore adds between any two containers is its own estimate, inside that bound. Applied between any two of the stack's containers, the load generator and the entry point included, as half the round trip on each side's outgoing packets; Loadlore's own tooling isn't slowed. Not scaled with --scale. Source: AWS Architecture Blog, Improving performance and reducing cost using Availability Zone Affinity: https://aws.amazon.com/blogs/architecture/improving-performance-and-reducing-cost-using-availability-zone-affinity/ |
 | resources.cpu_period_ms | 100 ms for api, db | Docker's default. A container that uses its CPU share early in a period stalls until the next one, which can show up in p99 when a service has a fraction of a CPU |
 | services.db.disk | laptop: the Docker host's | no disk block: a read that misses db's memory goes to the Docker host's disk, which on a laptop mostly answers from the host's own memory, fast and uncapped, and a commit's fsync returns in a fraction of a millisecond. Add disk: { profile: gp3 } for a cloud volume's waits and caps |
 | services.api.pools.db.min | 0 | the default, as pgxpool's: each replica opens connections only when callers need them, so a pool fills as load rises, and a burst opens many at once |
@@ -167,14 +168,13 @@ The design lists no assumptions.
 
 ### How the run was planned
 
-- Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 1000 rps), Toxiproxy 1 CPU (about 1000 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each
+- Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 1000 rps), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each. No fault acts on a connection, so every connection is direct and there is no Toxiproxy
 
 ## Thresholds
 
 - **Broke:** 2 windows in a row with at least 1.0% of requests failing or successful responses below 90% of the offered rate, or 3 windows in a row with any of those or p99 at least 10x the low-load p99 (the median p99 of windows offered at most 25% of the peak, before errors or a shortfall in 2 windows in a row) and at least the SLO, 100 ms (workload.slo.p99_ms): 100 ms in this run. A shorter episode is shown as a stall in the timeline, not a break.
 - **Doubtful:** a break on p99 alone, when the load generator was stalled at its CPU limit in 1.0% or more of its scheduling periods in one of the break's windows and the entry service's own p99 (loadlore_request_duration_seconds (the service's own histogram)) was below the limit in one of them. The verdict stays what it was.
-- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than 1.0% of a window's arrivals (more than 5.0% in a window where the system itself failed 1.0% or more of requests; up to that it's a caveat that gives the share), or the load generator or Toxiproxy used 90% or more of its CPU budget, or was stalled at its CPU limit in 5.0% or more of its scheduling periods (from 1.0% it's noted as a caveat). The first 10 s of load are a warm-up and don't count: the load generator starts its VUs and connections open then. A cause is named only with evidence: on a Linux host, the hypervisor giving 2.0% or more of CPU time to other virtual machines (steal), or other programs using 10% or more of the host's CPUs (at least 0.5); inside a VM on this machine, only as a possibility.
-- **Toxiproxy stalls:** no new connection accepted on one of Toxiproxy's edges for 1 s or more, where it had accepted 10 a second or more over the 5 s before, then 10 or more accepted within 100 ms with a median spacing under 0.5 ms: connections queued behind one upstream dial, which a real network doesn't do. Up to the end of the break's first window it makes the run inconclusive; after a break the system didn't recover from, it's a doubt on the recovery, and `loadl scenario check` doesn't judge claims that rest on not recovering; in a run that held, or recovered, it's a caveat: a stall only adds failure.
+- **Inconclusive:** before the break (or anywhere, if nothing broke), the load generator dropped more than 1.0% of a window's arrivals (more than 5.0% in a window where the system itself failed 1.0% or more of requests; up to that it's a caveat that gives the share), or the load generator used 90% or more of its CPU budget, or was stalled at its CPU limit in 5.0% or more of its scheduling periods (from 1.0% it's noted as a caveat). The first 10 s of load are a warm-up and don't count: the load generator starts its VUs and connections open then. A cause is named only with evidence: on a Linux host, the hypervisor giving 2.0% or more of CPU time to other virtual machines (steal), or other programs using 10% or more of the host's CPUs (at least 0.5); inside a VM on this machine, only as a possibility.
 - **Connection pool exhausted:** for two windows in a row, a pool at 95% or more of its size with callers waiting, while the target wasn't busy (busy: its CPU at 80% or more, or its time per call with a connection at least 3x the low-load value and 1 ms above it; CPU throttling alone doesn't count) and the caller's CPU stayed below 90%.
 - **Queueing knee:** for 3 windows in a row, p99 at least 3x the low-load p99 and 10 ms above it, with a CPU or pool at 70% or more. When that is a pool whose target was busy in any of those windows, or a service's CPU whose requests spent 50% or more of their time in calls to a busy target, the knee is the target's.
 - **Connection storm:** up to the break, a service's pools to a Postgres opening at least 50% of their combined size, and 10 or more connections, in one window, while p99 in that window or the next was at least 10x the low-load p99 and 10 ms above it. New connections are counted by loadlore_pool_connect_seconds (new connections the pools opened, and how long each took), or for runs from before it, from the rise in open connections.
@@ -199,20 +199,20 @@ The design lists no assumptions.
 
 <details><summary>10 windows of 10 seconds</summary>
 
-| t | offered | served | dropped | errors | p50 | p99 | api CPU | db CPU | db conns | api→db pool | wait | k6 CPU | Toxiproxy CPU | k6 / Toxiproxy stalled |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0:00 | 50 | 50 | 0 | 0% | 2.0 ms | 5.0 ms | 2.2% | 2.8% | – | 4/10 | 0.1 ms | 20% | – | – / – |
-| 0:10 | 150 | 150 | 0 | 0% | 2.0 ms | 5.0 ms | 6.2% | 7.7% | – | 6/10 | 0.1 ms | 20% | – | – / – |
-| 0:20 | 250 | 250 | 0 | 0% | 2.0 ms | 5.0 ms | 10% | 13% | – | 8/10 | 0.1 ms | 20% | – | – / – |
-| 0:30 | 350 | 350 | 0 | 0% | 2.0 ms | 5.0 ms | 14% | 18% | – | 10/10 | 0.1 ms | 20% | – | – / – |
-| 0:40 | 450 | 450 | 0 | 0% | 2.0 ms | 120 ms | 18% | 23% | – | 10/10 +27 | 28 ms | 20% | – | – / – |
-| 0:50 | 550 | 550 | 0 | 0% | 2.0 ms | 319 ms | 22% | 28% | – | 10/10 +57 | 78 ms | 20% | – | – / – |
-| 1:00 | 650 | 650 | 0 | 0% | 2.0 ms | 518 ms | 26% | 33% | – | 10/10 +87 | 128 ms | 20% | – | – / – |
-| 1:10 | 750 | 750 | 0 | 0% | 2.0 ms | 718 ms | 30% | 38% | – | 10/10 +117 | 178 ms | 20% | – | – / – |
-| 1:20 | 850 | 850 | 0 | 0% | 2.0 ms | 917 ms | 34% | 43% | – | 10/10 +147 | 228 ms | 20% | – | – / – |
-| 1:30 | 950 | 950 | 0 | 0% | 2.0 ms | 1.12 s | 38% | 48% | – | 10/10 +177 | 278 ms | 20% | – | – / – |
+| t | offered | served | dropped | errors | p50 | p99 | api CPU | db CPU | db conns | api→db pool | wait | k6 CPU | k6 stalled |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0:00 | 50 | 50 | 0 | 0% | 2.0 ms | 5.0 ms | 2.2% | 2.8% | – | 4/10 | 0.1 ms | 20% | – |
+| 0:10 | 150 | 150 | 0 | 0% | 2.0 ms | 5.0 ms | 6.2% | 7.7% | – | 6/10 | 0.1 ms | 20% | – |
+| 0:20 | 250 | 250 | 0 | 0% | 2.0 ms | 5.0 ms | 10% | 13% | – | 8/10 | 0.1 ms | 20% | – |
+| 0:30 | 350 | 350 | 0 | 0% | 2.0 ms | 5.0 ms | 14% | 18% | – | 10/10 | 0.1 ms | 20% | – |
+| 0:40 | 450 | 450 | 0 | 0% | 2.0 ms | 120 ms | 18% | 23% | – | 10/10 +27 | 28 ms | 20% | – |
+| 0:50 | 550 | 550 | 0 | 0% | 2.0 ms | 319 ms | 22% | 28% | – | 10/10 +57 | 78 ms | 20% | – |
+| 1:00 | 650 | 650 | 0 | 0% | 2.0 ms | 518 ms | 26% | 33% | – | 10/10 +87 | 128 ms | 20% | – |
+| 1:10 | 750 | 750 | 0 | 0% | 2.0 ms | 718 ms | 30% | 38% | – | 10/10 +117 | 178 ms | 20% | – |
+| 1:20 | 850 | 850 | 0 | 0% | 2.0 ms | 917 ms | 34% | 43% | – | 10/10 +147 | 228 ms | 20% | – |
+| 1:30 | 950 | 950 | 0 | 0% | 2.0 ms | 1.12 s | 38% | 48% | – | 10/10 +177 | 278 ms | 20% | – |
 
-Columns: offered is the load profile in plan.json (offered arrival rate); served is k6_http_reqs_total{expected_response="true"} (k6: successful responses); dropped is k6_dropped_iterations_total (k6: arrivals it couldn't start); errors are k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6); p50 and p99 are from k6_http_req_duration_seconds (k6 histogram, end to end); CPU is container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window; conns are pg_stat_activity_count and pg_settings_max_connections (postgres_exporter); hit rate is from redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter); up is haproxy_backend_active_servers (HAProxy); pools are loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections (peak in use/size, +peak waiting), wait is the mean from loadlore_pool_wait_seconds (time to get a connection); k6 and Toxiproxy CPU are against their budgets.
+Columns: offered is the load profile in plan.json (offered arrival rate); served is k6_http_reqs_total{expected_response="true"} (k6: successful responses); dropped is k6_dropped_iterations_total (k6: arrivals it couldn't start); errors are k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6); p50 and p99 are from k6_http_req_duration_seconds (k6 histogram, end to end); CPU is container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window; conns are pg_stat_activity_count and pg_settings_max_connections (postgres_exporter); hit rate is from redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter); up is haproxy_backend_active_servers (HAProxy); pools are loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections (peak in use/size, +peak waiting), wait is the mean from loadlore_pool_wait_seconds (time to get a connection); k6 CPU is against its budget.
 
 </details>
 

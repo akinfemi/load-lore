@@ -44,6 +44,11 @@ func scoreAll(a *Analysis, ws []*Window) []ExpectResult {
 			out = append(out, ExpectResult{Note: e.Note, Text: e.Text, Status: ExpectNote})
 			continue
 		}
+		if a.Plan != nil && a.Plan.Quick != nil {
+			out = append(out, ExpectResult{Text: e.Text, Metric: e.Prediction.Subject.String(), Status: ExpectUnscored,
+				Message: "not scored on a quick run: it skips part of the climb, which moves timed predictions and can move the break"})
+			continue
+		}
 		if _, ok := design.RunMetrics[e.Prediction.Subject.Metric]; ok && e.Prediction.Subject.Service == "" {
 			out = append(out, scoreRun(a, e, ws))
 			continue

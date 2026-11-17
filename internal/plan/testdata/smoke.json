@@ -71,7 +71,7 @@
             "cache": {
               "kind": "redis",
               "addrs": [
-                "lore-toxiproxy:20000"
+                "cache:6379"
               ],
               "pool": 10,
               "row_bytes": 256
@@ -79,7 +79,7 @@
             "db": {
               "kind": "postgres",
               "addrs": [
-                "lore-toxiproxy:20001"
+                "lore-toxiproxy:20000"
               ],
               "pool": 10,
               "database": "lab",
@@ -142,7 +142,7 @@
             "cache": {
               "kind": "redis",
               "addrs": [
-                "lore-toxiproxy:20000"
+                "cache:6379"
               ],
               "pool": 10,
               "row_bytes": 256
@@ -150,7 +150,7 @@
             "db": {
               "kind": "postgres",
               "addrs": [
-                "lore-toxiproxy:20001"
+                "lore-toxiproxy:20000"
               ],
               "pool": 10,
               "database": "lab",
@@ -221,11 +221,11 @@
         "servers": [
           {
             "name": "api-0",
-            "addr": "lore-toxiproxy:20002"
+            "addr": "api-0:8080"
           },
           {
             "name": "api-1",
-            "addr": "lore-toxiproxy:20003"
+            "addr": "api-1:8080"
           }
         ],
         "server_port": 8080,
@@ -239,28 +239,28 @@
       "from": "api",
       "to": "cache",
       "upstream": "cache:6379",
-      "listen": 20000
+      "direct": true
     },
     {
       "name": "api--db",
       "from": "api",
       "to": "db",
       "upstream": "db:5432",
-      "listen": 20001
+      "listen": 20000
     },
     {
       "name": "lb--api-0",
       "from": "lb",
       "to": "api",
       "upstream": "api-0:8080",
-      "listen": 20002
+      "direct": true
     },
     {
       "name": "lb--api-1",
       "from": "lb",
       "to": "api",
       "upstream": "api-1:8080",
-      "listen": 20003
+      "direct": true
     }
   ],
   "workload": {
@@ -329,8 +329,8 @@
       "cuts": [
         {
           "container": "api-0",
-          "ports": [
-            20000
+          "hosts": [
+            "cache"
           ]
         }
       ]
@@ -367,11 +367,15 @@
     "cadvisor_memory": 268435456,
     "exporter_cpu": 0.1,
     "exporter_memory": 134217728,
-    "expected_proxied_ops": 1140,
+    "expected_proxied_ops": 300,
     "synthetic_image": "loadlore/synthetic:dev"
   },
+  "network": {
+    "profile": "same-zone",
+    "rtt_ms": 0.3
+  },
   "notes": [
-    "Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 300 rps), Toxiproxy 1 CPU (about 1140 proxied calls/s at peak), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each"
+    "Loadlore's own containers get fixed budgets: load generator 1.5 CPU (peak 300 rps), Toxiproxy 1 CPU (about 300 calls/s at peak on the 1 connection it proxies for faults), Prometheus 0.1, cAdvisor 0.1, exporters 0.1 each"
   ],
   "assumptions": [
     {
@@ -393,6 +397,11 @@
       "field": "workload.slo.p99_ms",
       "value": "500 ms",
       "why": "the default; a break on p99 alone needs p99 at or above this as well as 10x the low-load p99, so latency users would still accept isn't called a break"
+    },
+    {
+      "field": "network.profile",
+      "value": "same-zone: 0.3 ms round trip",
+      "why": "the default: every service in one availability zone. AWS says a round trip between two instances in the same zone is generally sub-millisecond with enhanced networking, and publishes no exact figure, so the 0.3 ms round trip Loadlore adds between any two containers is its own estimate, inside that bound. Applied between any two of the stack's containers, the load generator and the entry point included, as half the round trip on each side's outgoing packets; Loadlore's own tooling isn't slowed. Not scaled with --scale. Source: AWS Architecture Blog, Improving performance and reducing cost using Availability Zone Affinity: https://aws.amazon.com/blogs/architecture/improving-performance-and-reducing-cost-using-availability-zone-affinity/"
     },
     {
       "field": "resources.cpu_period_ms",

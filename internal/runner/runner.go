@@ -55,6 +55,11 @@ type Options struct {
 	// Full runs the whole profile. Otherwise the load stops
 	// EarlyStopAfter after the live check confirms a break.
 	Full bool
+	// Quick shortens the profile to start near an earlier run's break:
+	// QuickFrom's, or the latest broken run's of the same scenario and
+	// profile (see plan.Quicken).
+	Quick     bool
+	QuickFrom string
 	// OnDir, when set, is called with the run folder once it exists and
 	// has its status, as for a dashboard that follows the run.
 	OnDir func(dir string)
@@ -80,15 +85,22 @@ const (
 
 // Result is the run's outcome, also written to run.json.
 type Result struct {
-	RunID       string              `json:"run_id"`
-	Dir         string              `json:"dir"`
-	Design      string              `json:"design"`
-	DesignPath  string              `json:"design_path"` // the file run, absolute
-	Status      string              `json:"status"`
-	Error       string              `json:"error,omitempty"`
-	Scale       float64             `json:"scale"`
-	Seed        int64               `json:"seed"`
-	ReuseData   bool                `json:"reuse_data"`
+	RunID      string  `json:"run_id"`
+	Dir        string  `json:"dir"`
+	Design     string  `json:"design"`
+	DesignPath string  `json:"design_path"` // the file run, absolute
+	Status     string  `json:"status"`
+	Error      string  `json:"error,omitempty"`
+	Scale      float64 `json:"scale"`
+	Seed       int64   `json:"seed"`
+	ReuseData  bool    `json:"reuse_data"`
+	// Network is the network profile the run stood on, as the driver
+	// applied and measured it, and Proxied how many connections went
+	// through Toxiproxy for faults.
+	Network *driver.NetworkResult `json:"network,omitempty"`
+	Proxied int                   `json:"proxied_connections"`
+	// Quick is set on a run whose profile was shortened (--quick).
+	Quick       *plan.Quick         `json:"quick,omitempty"`
 	Started     time.Time           `json:"started"`
 	LoadStarted *time.Time          `json:"load_started,omitempty"`
 	LoadEnded   *time.Time          `json:"load_ended,omitempty"`
@@ -198,7 +210,23 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 	if err != nil {
 		return nil, err
 	}
+	if opt.Quick {
+		src, err := findQuickSource(root, opt.QuickFrom, designPath, d.Name, p)
+		if err != nil {
+			return nil, err
+		}
+		ok, err := p.Quicken(src.id, src.breakRPS)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			fmt.Fprintf(out, "quick: %s broke at %s rps, too early in the profile to skip much; running the whole profile\n", src.id, fmtF(src.breakRPS))
+		}
+	}
 	res.Scale, res.Notes = p.Scale, p.Notes
+	res.Quick = p.Quick
+	res.Network = &driver.NetworkResult{Profile: p.Network.Profile, RTTMs: p.Network.RTTMs, DelayUs: p.Network.DelayUs()}
+	res.Proxied = len(p.Proxied())
 	if err := dir.WriteJSON("plan.json", p); err != nil {
 		return nil, err
 	}
@@ -346,6 +374,17 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 		defer cancel()
 		_ = drv.Collect(cctx, dir, time.Time{}, time.Time{})
 		return fmt.Errorf("starting the stack: %w", err)
+	}
+	if nr, ok := drv.(driver.NetworkReporter); ok {
+		if n := nr.NetworkApplied(); n != nil {
+			res.Network = n
+			switch {
+			case n.Uncalibrated != "" && n.RTTMs > 0:
+				res.Warnings = append(res.Warnings, fmt.Sprintf("network profile %s: the round trip couldn't be measured (%s), so it is netem's own, which on some hosts runs long", n.Profile, n.Uncalibrated))
+			case n.RTTMs > 0:
+				progress(fmt.Sprintf("network profile %s: %s ms round trip asked, %s ms measured between two containers", n.Profile, fmtF(n.RTTMs), fmtF(n.MeasuredMs)))
+			}
+		}
 	}
 
 	loadCtx, stopLoad := context.WithCancel(ctx)
