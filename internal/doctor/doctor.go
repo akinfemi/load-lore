@@ -12,6 +12,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/driver"
 	"github.com/akinfemi/load-lore/internal/power"
 	"github.com/akinfemi/load-lore/internal/scenario"
+	"github.com/akinfemi/load-lore/internal/version"
 )
 
 // Status is a check's outcome.
@@ -94,7 +95,11 @@ func Checks(f Facts) []Check {
 
 	// Image.
 	if in.ImageErr != nil {
-		add("Image", Fail, in.ImageErr.Error(), "Build it from the repository with make image.")
+		fix := "Build it from the repository with make image."
+		if version.Pullable(in.Image) {
+			fix = "Check the network and that Docker can reach the registry, then run loadl doctor again; docker pull " + in.Image + " shows the error."
+		}
+		add("Image", Fail, in.ImageErr.Error(), fix)
 		add("Speed", Skip, "needs the image", "")
 	} else {
 		add("Image", OK, in.Image, "")

@@ -4,7 +4,7 @@ This guide covers everything with `loadl` alone, in a terminal: setting up, work
 
 ## 1. Set up
 
-Loadlore runs your design on real containers, so it needs Docker. There are no published releases yet; build from source.
+Loadlore runs your design on real containers, so it needs Docker.
 
 1. **Docker** with Compose 2.23 or later, on cgroup v2. On a Mac, use [Colima](https://github.com/abiosoft/colima). A dedicated profile keeps runs away from your other containers:
 
@@ -15,11 +15,19 @@ Loadlore runs your design on real containers, so it needs Docker. There are no p
 
    Put the `export` in your shell profile, or run it in each terminal you use for Loadlore. On Linux, the Docker engine you already have works. Docker Desktop and WSL2 aren't verified yet.
 
-2. **Go**, the version in `go.mod` (the toolchain downloads itself). Then, from a checkout of this repo:
+2. **loadl.** On a Mac, with Homebrew:
+
+   ```sh
+   brew install akinfemi/tap/loadlore
+   ```
+
+   On Linux, download the archive for your machine from [Releases](https://github.com/akinfemi/load-lore/releases) and put `loadl` on your `PATH`, or, with Go installed, `go install github.com/akinfemi/load-lore/cmd/loadl@latest`. A release runs its services on the synthetic image of its own version, `ghcr.io/akinfemi/loadlore-synthetic`, and pulls it the first time it needs it.
+
+   To build from source instead, you need Go, the version in `go.mod` (the toolchain downloads itself). Then, from a checkout of this repo:
 
    ```sh
    make build    # bin/loadl
-   make image    # the loadlore/synthetic:dev image every design's services run on
+   make image    # the loadlore/synthetic:dev image a source build's services run on
    export PATH="$PWD/bin:$PATH"
    ```
 
@@ -33,7 +41,7 @@ Loadlore runs your design on real containers, so it needs Docker. There are no p
 
 ## 2. Work through a scenario
 
-Scenarios are guided experiments: a starting design that breaks, a story, questions to answer before you run it, hints, and worked solutions. Eleven are built:
+Scenarios are guided experiments: a starting design that breaks, a story, questions to answer before you run it, hints, and worked solutions. Fourteen are built:
 
 | Scenario | Level | Teaches |
 | --- | --- | --- |
@@ -308,6 +316,6 @@ loadl down --all  # and the cached seeded datasets
 | "needs N CPUs available to Docker" | Give Docker more CPUs (on Colima, `colima stop loadlore` then `colima start loadlore --cpu N`), or run with the `--scale` the warning suggests. |
 | The verdict is inconclusive | Read why in the verdict. Quiet the machine, plug in, keep the lid open, and run again. |
 | A result far from the scenario README's | Compare your host speed index with the README's reference machine; check power and other load on the machine. |
-| `loadl doctor` fails on the image | `make image` in the repo builds `loadlore/synthetic:dev`. |
+| `loadl doctor` fails on the image | A release pulls its image from `ghcr.io`; `docker pull` with the image doctor names shows why it can't. A source build needs `make image` in the repo, which builds `loadlore/synthetic:dev`. |
 | Containers left behind | `loadl down`. |
 | Want to look inside a running stack | `loadl run --keep`, then use `docker ps` and `docker logs` with the same `DOCKER_HOST`, and `loadl down` when done. |

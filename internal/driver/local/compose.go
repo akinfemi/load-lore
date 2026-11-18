@@ -11,6 +11,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/akinfemi/load-lore/internal/plan"
+	"github.com/akinfemi/load-lore/internal/version"
 )
 
 // Pinned images for Loadlore's own containers.
@@ -326,7 +327,10 @@ func buildCompose(p *plan.Plan, in stackInput) ([]byte, error) {
 			c := base(image, s.Name, "app", i, s.CPU, s.Memory)
 			setPeriod(c, s)
 			if i < len(s.Synthetic) {
-				c.PullPolicy = "never" // built locally: make image
+				c.PullPolicy = "missing"
+				if !version.Pullable(image) {
+					c.PullPolicy = "never" // built locally: make image
+				}
 				cfg, err := json.Marshal(s.Synthetic[i])
 				if err != nil {
 					return nil, err

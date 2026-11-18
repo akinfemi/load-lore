@@ -6,7 +6,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/akinfemi/load-lore/internal/version.Version=${VERSION}" -o /out/synthetic ./cmd/synthetic
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X github.com/akinfemi/load-lore/internal/version.Version=${VERSION}" -o /out/synthetic ./cmd/synthetic
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/synthetic /synthetic

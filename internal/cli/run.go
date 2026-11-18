@@ -13,6 +13,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/driver"
 	"github.com/akinfemi/load-lore/internal/driver/local"
 	"github.com/akinfemi/load-lore/internal/runner"
+	"github.com/akinfemi/load-lore/internal/version"
 )
 
 func newRunCmd(g *globalOpts) *cobra.Command {
@@ -144,7 +145,7 @@ up; loadl compare uses the spread to say when a difference may be noise.`,
 	cmd.Flags().BoolVar(&full, "full", false, "run the whole profile; without it the load stops 60 s after the live check confirms a break")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "stop and tear down after this long (default: 15m setup + the profile + 5m)")
 	cmd.Flags().BoolVar(&reuse, "reuse-data", false, "skip the fresh copy of seeded data and reuse a shared one; earlier runs' writes carry over, and the report says so")
-	cmd.Flags().StringVar(&image, "synthetic-image", "loadlore/synthetic:dev", "image for loadlore/synthetic services")
+	cmd.Flags().StringVar(&image, "synthetic-image", version.SyntheticImage(), "image for loadlore/synthetic services")
 	cmd.Flags().BoolVar(&quick, "quick", false, "start the climb near the latest earlier run's break instead of from the bottom")
 	cmd.Flags().StringVar(&from, "quick-from", "", "with --quick: the run whose break to start near")
 	cmd.Flags().IntVar(&repeat, "repeat", 1, "run the design this many times with the same seed and report the spread")

@@ -26,6 +26,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/load"
 	"github.com/akinfemi/load-lore/internal/plan"
 	"github.com/akinfemi/load-lore/internal/rundir"
+	"github.com/akinfemi/load-lore/internal/version"
 )
 
 // Driver is the local Docker driver. One Driver runs one plan.
@@ -130,12 +131,35 @@ func (d *Driver) Inspect(ctx context.Context, image string) (*driver.Inspection,
 		return nil, err
 	}
 	in := &driver.Inspection{Host: h, DockerHost: d.host, ComposeErr: composeErr, Image: image}
-	if _, err := d.api.ImageInspect(ctx, image); err != nil {
-		in.ImageErr = fmt.Errorf("image %s isn't available to Docker", image)
+	if err := d.ensureImage(ctx, image); err != nil {
+		in.ImageErr = err
+		if !version.Pullable(image) {
+			in.ImageErr = fmt.Errorf("image %s isn't available to Docker", image) // doctor says how to build it
+		}
 		return in, nil
 	}
 	in.Host.Speed, in.SpeedErr = d.speed(ctx, image)
 	return in, nil
+}
+
+// ensureImage makes sure Docker has image, pulling it when it's missing
+// and published, as a release's synthetic image is.
+func (d *Driver) ensureImage(ctx context.Context, image string) error {
+	if _, err := d.api.ImageInspect(ctx, image); err == nil {
+		return nil
+	}
+	if !version.Pullable(image) {
+		return fmt.Errorf("image %s isn't available to Docker: build it with `make image`", image)
+	}
+	resp, err := d.api.ImagePull(ctx, image, client.ImagePullOptions{})
+	if err == nil {
+		err = resp.Wait(ctx)
+		_ = resp.Close()
+	}
+	if err != nil {
+		return fmt.Errorf("image %s isn't available to Docker, and pulling it failed: %w", image, err)
+	}
+	return nil
 }
 
 // Preflight checks Docker, Compose, images and host capacity.
@@ -154,8 +178,8 @@ func (d *Driver) Preflight(ctx context.Context, p *plan.Plan) (*driver.Preflight
 	}
 	for _, s := range p.Services {
 		if s.Kind == "app" && len(s.Synthetic) > 0 {
-			if _, err := d.api.ImageInspect(ctx, p.Infra.SyntheticImg); err != nil {
-				return nil, fmt.Errorf("image %s isn't available to Docker: build it with `make image`", p.Infra.SyntheticImg)
+			if err := d.ensureImage(ctx, p.Infra.SyntheticImg); err != nil {
+				return nil, err
 			}
 			break
 		}

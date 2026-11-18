@@ -11,12 +11,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/doctor"
 	"github.com/akinfemi/load-lore/internal/driver/local"
 	"github.com/akinfemi/load-lore/internal/power"
 	"github.com/akinfemi/load-lore/internal/runner"
 	"github.com/akinfemi/load-lore/internal/scenario"
+	"github.com/akinfemi/load-lore/internal/version"
 )
 
 func newDoctorCmd(g *globalOpts) *cobra.Command {
@@ -57,7 +57,7 @@ but results may drift or differ from the scenario READMEs.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&image, "synthetic-image", design.SyntheticImage+":dev", "image for loadlore/synthetic services")
+	cmd.Flags().StringVar(&image, "synthetic-image", version.SyntheticImage(), "image for loadlore/synthetic services")
 	return cmd
 }
 

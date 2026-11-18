@@ -13,6 +13,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/driver/local"
 	"github.com/akinfemi/load-lore/internal/runner"
 	"github.com/akinfemi/load-lore/internal/sweep"
+	"github.com/akinfemi/load-lore/internal/version"
 )
 
 func newSweepCmd(g *globalOpts) *cobra.Command {
@@ -83,7 +84,7 @@ make about 135 runs, overnight on an 8-CPU Docker host. --list prints the cases.
 	cmd.Flags().IntVar(&repeat, "repeat", sweep.DefaultRepeat, "runs per case and size")
 	cmd.Flags().Int64Var(&seed, "seed", 1, "seed for every run's keys and mix")
 	cmd.Flags().StringVar(&resume, "resume", "", "continue the sweep with this id")
-	cmd.Flags().StringVar(&image, "synthetic-image", "loadlore/synthetic:dev", "image for loadlore/synthetic services")
+	cmd.Flags().StringVar(&image, "synthetic-image", version.SyntheticImage(), "image for loadlore/synthetic services")
 	cmd.Flags().BoolVar(&list, "list", false, "print the cases and exit")
 	return cmd
 }

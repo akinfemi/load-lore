@@ -1,0 +1,58 @@
+# Releases: push a v* tag and .github/workflows/release.yml runs this.
+# Check it locally with: goreleaser check, and goreleaser release --snapshot --clean
+# (builds into dist/, publishes nothing).
+version: 2
+project_name: loadlore
+
+builds:
+  - id: loadl
+    main: ./cmd/loadl
+    binary: loadl
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/akinfemi/load-lore/internal/version.Version={{ .Version }}
+      - -X github.com/akinfemi/load-lore/internal/version.Commit={{ .ShortCommit }}
+      # The synthetic image the release workflow pushes for this version.
+      - -X github.com/akinfemi/load-lore/internal/version.Image=ghcr.io/akinfemi/loadlore-synthetic:{{ .Version }}
+
+archives:
+  - id: loadl
+    formats: [tar.gz]
+    name_template: "loadl_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+
+release:
+  github:
+    owner: akinfemi
+    name: load-lore
+  prerelease: auto
+
+homebrew_casks:
+  - name: loadlore
+    binaries: [loadl]
+    homepage: https://github.com/akinfemi/load-lore
+    description: Run a system design on real containers under load and see where and why it breaks
+    repository:
+      owner: akinfemi
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    # Pre-release tags (v0.2.0-rc.1) don't update the tap.
+    skip_upload: auto
+    # loadl isn't signed or notarized, so macOS would refuse to open it.
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/loadl"]
+          end

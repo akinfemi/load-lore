@@ -6,7 +6,7 @@ The [spec](https://claude.ai/artifact/TEkM1GHG5mpmKXTcH3jJ6m) is the source of t
 
 - Go: the version in `go.mod` (the toolchain downloads itself).
 - Docker with Compose 2.23 or later, on cgroup v2. Verified on Colima (Apple Silicon, Ubuntu 24.04 VM); Docker Desktop and WSL2 aren't verified yet.
-- `make image` builds `loadlore/synthetic:dev`, which `loadl run` uses by default.
+- `make image` builds `loadlore/synthetic:dev`, which a source build of `loadl run` uses by default (a release uses `ghcr.io/akinfemi/loadlore-synthetic:<its version>`).
 
 On Colima, a dedicated profile keeps experiments away from other work:
 
@@ -52,3 +52,11 @@ These were found while building the local driver. Keep them in mind when changin
 A scenario is a folder in `scenarios/`; the format is in [`skills/loadlore-designer/references/scenario-authoring.md`](skills/loadlore-designer/references/scenario-authoring.md). `loadl` embeds the folder, so `loadl scenarios` and `loadl hint` work outside a checkout. `go test ./internal/scenario/` and the `scenarios` workflow run the static checks on every scenario. The workflow's full check, which runs every design, is started by hand on a runner as large as the scenarios' `meta.yaml` asks for: standard GitHub-hosted runners are too small (see the comment in the workflow). Run `loadl scenario check <folder>` at `--scale 1` on an idle machine before opening a pull request.
 
 Don't count on small scales to reproduce a scenario. At `--scale 0.25` the first scenario's Postgres gets 0.125 CPU, CFS throttling alone puts its low-load p99 at 85–130 ms, and it breaks at the very start of the ramp instead of at its queueing knee. A 10 ms CFS period made it worse, not better.
+
+## Releasing
+
+Push a tag such as `v0.1.0` from `main`. The `release` workflow runs the tests, pushes the synthetic image for that version to `ghcr.io/akinfemi/loadlore-synthetic` for amd64 and arm64, and only then runs GoReleaser ([`.goreleaser.yaml`](.goreleaser.yaml)). GoReleaser publishes `loadl` for macOS and Linux to GitHub Releases and updates the cask in `akinfemi/homebrew-tap`. A release build of `loadl` defaults to the image of its own version and pulls it when it's missing; a `go install …@v0.1.0` build does the same. A pre-release tag (`v0.2.0-rc.1`) is marked as one and leaves the tap alone.
+
+The tap update uses the `HOMEBREW_TAP_GITHUB_TOKEN` secret, a fine-grained token with write access to the tap's contents only. A new GHCR package starts private, so after the first release set `loadlore-synthetic` to public in its package settings.
+
+To check the config without publishing anything: `goreleaser check`, then `goreleaser release --snapshot --clean`, which builds everything into `dist/`.

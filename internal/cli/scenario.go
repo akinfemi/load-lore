@@ -18,6 +18,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/rundir"
 	"github.com/akinfemi/load-lore/internal/runner"
 	"github.com/akinfemi/load-lore/internal/scenario"
+	"github.com/akinfemi/load-lore/internal/version"
 )
 
 func newScenariosCmd(g *globalOpts) *cobra.Command {
@@ -343,7 +344,7 @@ run, so they never run again.`,
 	cmd.Flags().Float64Var(&scale, "scale", 0, "run every design at this scale, such as 0.25 (default: each design's modes.local.scale, else 1)")
 	cmd.Flags().Int64Var(&seed, "seed", 1, "seed for the load generator, the same for every design so runs compare")
 	cmd.Flags().BoolVar(&static, "static", false, "check the folder without running anything")
-	cmd.Flags().StringVar(&image, "synthetic-image", "loadlore/synthetic:dev", "image for loadlore/synthetic services")
+	cmd.Flags().StringVar(&image, "synthetic-image", version.SyntheticImage(), "image for loadlore/synthetic services")
 	return cmd
 }
 

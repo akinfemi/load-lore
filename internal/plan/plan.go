@@ -16,6 +16,7 @@ import (
 	"github.com/akinfemi/load-lore/internal/dataset"
 	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/synthetic"
+	"github.com/akinfemi/load-lore/internal/version"
 )
 
 // Fixed names and ports inside a stack.
@@ -481,7 +482,7 @@ func Build(d *design.Design, opt Options) (*Plan, error) {
 	p := &Plan{RunID: opt.RunID, Name: d.Name, Scale: scale, Seed: opt.Seed, Duration: d.TotalDuration(), ReuseData: opt.ReuseData}
 	p.Infra.SyntheticImg = opt.SyntheticImage
 	if p.Infra.SyntheticImg == "" {
-		p.Infra.SyntheticImg = design.SyntheticImage + ":dev"
+		p.Infra.SyntheticImg = version.SyntheticImage()
 	}
 	if scale != 1 {
 		p.note("scale %s: CPU, memory, memory settings, dataset rows, the keyspace and request rates are multiplied by %s; replicas, pool sizes, connection limits and per-request work are not", fmtF(scale), fmtF(scale))
