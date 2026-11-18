@@ -27,4 +27,4 @@ A rule of thumb gives `shared_buffers` about a quarter of the memory and leaves 
 
 ## The reference run
 
-`report.md` is the reference run on a MacBook Air M4 on mains power. It has one slow stretch, p99 402 ms at 2:00, while Toxiproxy (the proxy Loadlore puts between services) was stalled at its CPU limit; the report notes it as a caveat. The database's reads stayed under a millisecond each, so the working-set diagnosis doesn't fire.
+`report.md` is the reference run on a MacBook Air M4 on mains power. Its worst 10-second p99 was 8.7 ms. The database's reads stayed under a millisecond each, so the working-set diagnosis doesn't fire.

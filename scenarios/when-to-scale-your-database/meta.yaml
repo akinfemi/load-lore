@@ -15,7 +15,7 @@ host:
   cpus: 8
   memory: 8g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 1000
+  speed: 993
 
 # Measured before disk profiles: its designs keep their disks until its
 # next re-measure, so its reference results don't change. Then each
@@ -29,8 +29,8 @@ disk: legacy
 # its break.
 load:
   prealloc_vus: 1750
-  peak_vus: 956
-  from: when-to-scale-your-database-one-query-per-page-20261111-161415
+  peak_vus: 481
+  from: when-to-scale-your-database-20261117-212641
 
 # What `loadl scenario check` verifies, at --scale 1. At small scales the
 # 0.25-CPU-or-less Postgres stalls under CPU throttling and breaks early.
@@ -41,8 +41,9 @@ check:
   solutions:
     # helps: holds, or serves min_gain x the starting design's peak
     # throughput or more. At --scale 1 with a 0.4-CPU Postgres and a
-    # 3,500 rps peak it held the profile, against 2,873 rps for the
-    # starting design (at least 1.22x).
+    # 3,500 rps peak it served all 3,500 at the top of the ramp, against
+    # 2,872 rps for the starting design (1.22x), then broke 10 s into the
+    # hold; its best window served 3,656 (1.27x).
     one-query-per-page: { min_gain: 1.15 }
 
 # What `loadl predict` asks before a run; each answer becomes an expect

@@ -11,7 +11,7 @@ host:
   cpus: 8
   memory: 8g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 987
+  speed: 970
 
 # Measured before disk profiles: its designs keep their disks until its
 # next re-measure, so its reference results don't change. Then each
@@ -20,11 +20,11 @@ disk: legacy
 
 # Load generator VUs started before the load, at --scale 1, measured: the
 # most VUs busy at once in a whole run, as recovery claims judge the
-# windows after a break (3,600, with up to 4 s responses at 1,800 rps).
+# windows after a break (4,000, the cap, in the starting design's run).
 load:
   prealloc_vus: 4000
-  peak_vus: 3600
-  from: featured-on-hacker-news-scale-on-inflight-20261115-140046
+  peak_vus: 4000
+  from: featured-on-hacker-news-20261117-214206
 
 # What `loadl scenario check` verifies, at --scale 1.
 check:

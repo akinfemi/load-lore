@@ -11,7 +11,7 @@ host:
   cpus: 8
   memory: 8g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 1028
+  speed: 981
 
 # Measured before disk profiles: its designs keep their disks until its
 # next re-measure, so its reference results don't change. Then each
@@ -24,7 +24,7 @@ disk: legacy
 load:
   prealloc_vus: 300
   peak_vus: 2
-  from: backed-up-queue-more-runners-20261116-132248
+  from: backed-up-queue-20261118-002856
 
 # What `loadl scenario check` verifies, at --scale 1.
 check:

@@ -22,13 +22,13 @@ Everything else is the same: the same 0.4-CPU Postgres, the same pools, the same
 
 The starting design broke when Postgres ran out of CPU. For a lookup by primary key, most of that CPU isn't spent finding the row. It goes on everything around it, once per statement: receiving the query, binding its parameters, starting the executor, sending the result back, and the network round trip. Three statements per page pay that three times; one statement pays it once. In a pgbench run on a 0.5-CPU Postgres (this scenario's earlier size) with reads only, it managed 10,951 single-row lookups per second, but only 5,830 batches of three rows: fetching three rows in one statement cost about twice as much as fetching one, not three times.
 
-In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 997 and 1006), the starting design broke at 4:10, at 2,990 rps offered, with Postgres at 99% CPU; the most it served in any 10-second window was 2,873 requests per second. This design held the whole profile: it served the full 3,500 at the top, with Postgres at 53% CPU at 4:10 and about 64% at the peak. The profile stops at 3,500, so the gain is at least 1.22× and the real limit is higher. Peaks vary from run to run: compare your own pair of runs, not these numbers.
+In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 993 and 974), the starting design broke at 4:10, at 2,990 rps offered, with Postgres at 87% CPU; the most it served in any 10-second window was 2,872 requests per second. This design got through the rest of the ramp, with Postgres at 49% CPU at 4:10 and 76% when the load reached 3,500 at 5:00, and served every one of the 3,500 requests a second there, 1.22× the starting design's peak. It broke 10 seconds into the hold, at 5:10, with Postgres out of CPU again. Peaks vary from run to run: compare your own pair of runs, not these numbers.
 
 A database benchmark predicts more. With pgbench on a 0.5-CPU Postgres and the same mix of 10% writes, one batched statement served 6,537 pages per second against 4,187 for three single-row queries (1.56×). In the full run, the api and the load balancer add their own work, each hop adds the network's round trip, and the database is CPU-throttled in bursts (next section).
 
 ## Bursts at the peak
 
-It isn't smooth at the peak. p99 rose to 40–45 ms in a few windows while every offered request was still served: bursts of queries use up the database's CPU quota early in each 100 ms scheduling period, and Postgres waits for the next one.
+It isn't smooth near the peak. p99 rose to 20–30 ms in a few windows while every offered request was still served: bursts of queries use up the database's CPU quota early in each 100 ms scheduling period, and Postgres waits for the next one.
 
 Small CPU limits are bursty, so compare peak throughput and the shape of the curves, not just the break time. Fewer connections in the pool would likely smooth these bursts, which is the subject of the connection pool scenario.
 

@@ -26,4 +26,4 @@ With it off, a commit returns once its changes are in the log's memory buffer. T
 
 ## Reference run
 
-In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 1014 for the starting design and 1008 for this one), 20–27% of requests failed in each 10 seconds of the slow disk in the starting design, with p99 from 1.5 to 5.2 s and the database's CPU at most 22%. Here none failed, and p99 stayed at 1 ms throughout: nothing waited for the disk. [`report.md`](report.md) is this run's report. Compare your own pair of runs, not these numbers.
+In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 977 for the starting design and 990 for this one), 18–25% of requests failed in each 10 seconds of the slow disk in the starting design, with p99 from 2.4 to 5.2 s and the database's CPU at most 17%. Here none failed, and p99 stayed at 2 ms throughout: nothing waited for the disk. [`report.md`](report.md) is this run's report. Compare your own pair of runs, not these numbers.

@@ -22,4 +22,4 @@ Backoff decides when a retry is sent, not whether it is. Each failing request st
 
 The report's retry storm diagnosis gives the count: four calls per request, three quarters of them retries. To end the storm, the number of calls per failing request has to come down, with fewer retries, or to zero for a while, with a circuit breaker; both are in [`solutions/`](../../solutions/).
 
-In the reference run (host speed index 1020), it broke at 2:00 like the starting design, with 4.0 calls to pricing per request from 2:10 to the end, pricing at 100% of its CPU, and every request failing. p99 was 1.67 s instead of 1.09 s: the same four attempts, with the waits between them added.
+In the reference run (host speed index 984), it broke at 2:00 like the starting design, with 4.0 calls to pricing per request from 2:10 to the end, pricing at 100% of its CPU, and every request failing. p99 was 1.67 s instead of 1.09 s: the same four attempts, with the waits between them added.

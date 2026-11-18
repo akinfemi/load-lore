@@ -27,4 +27,4 @@ More connections let more commits wait at once, and Postgres makes waiting toget
 
 ## Reference run
 
-In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 1014 for the starting design and 1043 for this one), 20–27% of requests failed in each 10 seconds of the slow disk in the starting design. Here none failed; p99 was 123 to 277 ms while the disk was slow, against 1 ms with `synchronous_commit` off (`solutions/async-commit`), and the database's CPU stayed at most 5%. [`report.md`](report.md) is this run's report. Compare your own pair of runs, not these numbers.
+In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 977 for the starting design and 1001 for this one), 18–25% of requests failed in each 10 seconds of the slow disk in the starting design. Here none failed; p99 was 123 to 270 ms while the disk was slow, against 2 ms with `synchronous_commit` off (`solutions/async-commit`), and the database's CPU stayed at most 5%. [`report.md`](report.md) is this run's report. Compare your own pair of runs, not these numbers.

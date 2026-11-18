@@ -12,7 +12,7 @@ host:
   cpus: 6
   memory: 4g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 1000
+  speed: 966
 
 # Measured before disk profiles: its designs keep their disks until its
 # next re-measure, so its reference results don't change. Then each
@@ -23,11 +23,10 @@ disk: legacy
 # busy at once before a break in the check's runs (the circuit breaker's
 # pause window, with requests taking up to a second), above the peak rate x
 # slo.p99_ms of 75. loadl scenario check reports what its runs call for.
-# With 168 up front, that run dropped no arrivals and k6 peaked at 67 MB.
 load:
-  prealloc_vus: 227
-  peak_vus: 151
-  from: slow-dependency-circuit-breaker-20261112-083030
+  prealloc_vus: 224
+  peak_vus: 149
+  from: slow-dependency-circuit-breaker-20261117-224638
 
 # What `loadl scenario check` verifies, at --scale 1.
 check:

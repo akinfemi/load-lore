@@ -12,7 +12,7 @@ host:
   cpus: 8
   memory: 8g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 1002
+  speed: 988
 
 # Measured before disk profiles: its designs keep their disks until its
 # next re-measure, so its reference results don't change. Then each
@@ -21,11 +21,11 @@ disk: legacy
 
 # Load generator VUs started before the load, at --scale 1, measured: the
 # larger of the peak rate x slo.p99_ms (1,500 x 0.5 s) and 1.5 x the most
-# VUs busy at once before a break in any of the check's runs (87).
+# VUs busy at once before a break in any of the check's runs (6).
 load:
   prealloc_vus: 750
-  peak_vus: 87
-  from: flash-sale-smaller-pool-20261116-160309
+  peak_vus: 6
+  from: flash-sale-queue-the-orders-20261118-005055
 
 # What `loadl scenario check` verifies, at --scale 1.
 check:

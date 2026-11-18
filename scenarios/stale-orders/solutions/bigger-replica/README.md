@@ -18,7 +18,7 @@ The primary applies orders from 80 connections at once. The replica replays ever
 
 Replaying also writes: the replica writes the WAL it receives to its own disk, in small pieces and synced as they arrive, and later the pages it changed. At the top of the ramp those writes alone approach 3,000 a second, the baseline volume's limit. A probe with the memory but the baseline disk kept up to about 1,650 requests a second and then fell 2.4 s behind in one window.
 
-With the primary's memory, the replica holds the whole table: replaying a change needs no disk read, and its reads stop queuing. With provisioned IOPS, its writes have room. In the reference run it stayed within 20 ms of the primary through the ramp, and no page 200 ms after an order missed it.
+With the primary's memory, the replica holds the whole table: replaying a change needs no disk read, and its reads stop queuing. With provisioned IOPS, its writes have room. In the reference run it stayed at most 108 ms behind the primary through the ramp, and under 0.1% of the pages 200 ms after an order missed it until the last window, where 2.0% did.
 
 ## What it costs
 

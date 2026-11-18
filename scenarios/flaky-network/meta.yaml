@@ -11,7 +11,7 @@ host:
   cpus: 6
   memory: 4g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 1000
+  speed: 984
 
 # Measured before disk profiles: its designs keep their disks until its
 # next re-measure, so its reference results don't change. Then each
@@ -20,11 +20,11 @@ disk: legacy
 
 # Load generator VUs started before the load, at --scale 1: the peak rate x
 # slo.p99_ms (300 x 0.5 s), well above 1.5 x the most busy at once before a
-# break in the check's runs (13).
+# break in the check's runs (19).
 load:
   prealloc_vus: 150
-  peak_vus: 13
-  from: flaky-network-timeout-for-the-tail-20261112-110604
+  peak_vus: 19
+  from: flaky-network-timeout-for-the-tail-20261117-230945
 
 # What `loadl scenario check` verifies, at --scale 1.
 check:

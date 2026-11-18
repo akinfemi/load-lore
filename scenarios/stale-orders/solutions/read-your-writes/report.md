@@ -1,10 +1,10 @@
 # stale-orders-read-your-writes: run report
 
-_run `stale-orders-read-your-writes-20261117-145733` · completed · 17 Nov 2026 14:57 UTC · scale 1 · seed 1_
+_run `stale-orders-read-your-writes-20261118-011051` · completed · 18 Nov 2026 01:11 UTC · scale 1 · seed 1_
 
 ## Verdict
 
-**Held.** Held the whole profile: up to 1,800 rps offered, 1,754 rps served at best, worst 10-second p99 331 ms, at most 0% errors. But ro fell behind db, so reads from it returned old data (see replication lag).
+**Held.** Held the whole profile: up to 1,800 rps offered, 1,754 rps served at best, worst 10-second p99 69 ms, at most 0% errors. But ro fell behind db, so reads from it returned old data (see replication lag).
 
 <sub>Sources: offered load: the load profile in plan.json (offered arrival rate); served: k6_http_reqs_total{expected_response="true"} (k6: successful responses); p99: k6_http_req_duration_seconds (k6 histogram, end to end); errors: k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6). Windows are 10 seconds; what counts as broken is under [Thresholds](#thresholds).</sub>
 
@@ -15,15 +15,15 @@ Measured in the 10-second window from 2:50 to 3:00 (the busiest window: the most
 ```mermaid
 flowchart LR
     load(["load<br/>up to 1,800 rps<br/>offered 1,756 rps"])
-    lb{{"lb<br/>load balancer<br/>0.4 CPU · 256m<br/>CPU 26%<br/>2/2 replicas up"}}
-    api["api ×2<br/>1 CPU · 1g<br/>CPU 43%<br/>in flight 13"]
-    ro[("ro<br/>postgres-replica 17<br/>0.75 CPU · 512m<br/>disk 1 ms · 3,000 IOPS<br/>CPU 26%<br/>conns 81/100<br/>lag 1.92 s")]
-    db[("db<br/>postgres 17<br/>1 CPU · 2g<br/>CPU 28%<br/>conns 81/100")]
-    load -->|"50% read · 50% write<br/>1,754 rps · p99 40 ms"| lb
-    lb -->|"round-robin<br/>checks every 2s, out after 3<br/>1,728 rps · p99 44 ms"| api
-    api -->|"read on reads<br/>pool 40, min 20<br/>870 calls/s · p99 61 ms<br/>in use 11/80"| ro
-    api -->|"write on writes<br/>pool 40, min 20<br/>1,737 calls/s · p99 7.8 ms<br/>in use 6/80"| db
-    api -.->|"read on writes<br/>pool 40, min 20<br/>1,737 calls/s · p99 7.8 ms<br/>in use 6/80"| db
+    lb{{"lb<br/>load balancer<br/>0.4 CPU · 256m<br/>CPU 23%<br/>2/2 replicas up"}}
+    api["api ×2<br/>1 CPU · 1g<br/>CPU 41%<br/>in flight 6"]
+    ro[("ro<br/>postgres-replica 17<br/>0.75 CPU · 512m<br/>disk 1 ms · 3,000 IOPS<br/>CPU 21%<br/>conns 81/100<br/>lag 4.39 s")]
+    db[("db<br/>postgres 17<br/>1 CPU · 2g<br/>CPU 22%<br/>conns 81/100")]
+    load -->|"50% read · 50% write<br/>1,754 rps · p99 69 ms"| lb
+    lb -->|"round-robin<br/>checks every 2s, out after 3<br/>1,736 rps · p99 72 ms"| api
+    api -->|"read on reads<br/>pool 40, min 40<br/>867 calls/s · p99 84 ms<br/>in use 4/80"| ro
+    api -->|"write on writes<br/>pool 40, min 40<br/>1,735 calls/s · p99 4.8 ms<br/>in use 4/80"| db
+    api -.->|"read on writes<br/>pool 40, min 40<br/>1,735 calls/s · p99 4.8 ms<br/>in use 4/80"| db
     db -.->|"streams WAL"| ro
     classDef ok fill:#d4edda,stroke:#28a745,color:#000
     classDef warm fill:#fff3cd,stroke:#d39e00,color:#000
@@ -50,7 +50,7 @@ xychart-beta
     x-axis "seconds" 0 --> 170
     y-axis "requests/s" 0 --> 2000
     line [244.444, 333.333, 422.222, 511.111, 600, 688.889, 777.778, 866.667, 955.556, 1044.444, 1133.333, 1222.222, 1311.111, 1400, 1488.889, 1577.778, 1666.667, 1755.556]
-    line [238.344, 331.274, 420.252, 509.283, 597.974, 686.918, 775.871, 864.733, 953.613, 1042.584, 1131.608, 1220.089, 1309.126, 1398.106, 1486.96, 1575.561, 1664.915, 1753.69]
+    line [237.39, 330.957, 419.894, 508.928, 597.798, 686.502, 775.529, 864.505, 953.244, 1042.173, 1131.126, 1219.893, 1308.889, 1397.763, 1486.59, 1575.552, 1664.231, 1753.591]
 ```
 
 <sub>Grey: offered load (the load profile in plan.json (offered arrival rate)). Blue: successful responses (k6_http_reqs_total{expected_response="true"} (k6: successful responses)).</sub>
@@ -66,10 +66,10 @@ config:
 xychart-beta
     title "Latency, end to end"
     x-axis "seconds" 0 --> 170
-    y-axis "ms" 0 --> 400
-    line [2.237, 1.82, 1.789, 1.758, 1.722, 1.685, 1.689, 1.699, 1.69, 1.696, 1.696, 1.691, 1.702, 1.728, 1.763, 1.874, 2.031, 2.129]
-    line [3.716, 3.279, 3.055, 2.941, 2.507, 2.517, 2.607, 2.519, 2.706, 2.605, 2.963, 2.959, 3.012, 3.264, 4.541, 37.226, 73.616, 8.401]
-    line [4.553, 3.554, 3.467, 3.833, 3.353, 3.418, 3.894, 3.405, 4.133, 3.705, 6.504, 6.263, 6.425, 34.42, 54.095, 218.986, 331.126, 39.974]
+    y-axis "ms" 0 --> 80
+    line [2.21, 1.868, 1.794, 1.748, 1.7, 1.671, 1.672, 1.678, 1.662, 1.664, 1.682, 1.662, 1.697, 1.685, 1.698, 1.728, 1.814, 1.894]
+    line [3.752, 3.398, 3.126, 2.818, 2.508, 2.502, 2.615, 2.526, 2.743, 2.635, 2.905, 2.724, 3.111, 3.21, 3.928, 4.51, 7.163, 20.966]
+    line [4.688, 3.589, 3.516, 3.438, 3.138, 3.178, 3.998, 3.356, 4.083, 3.617, 7.114, 4.948, 8.159, 35.878, 51.829, 57.383, 59.32, 68.564]
 ```
 
 <sub>Green: p50. Orange: p95. Red: p99 (k6_http_req_duration_seconds (k6 histogram, end to end)).</sub>
@@ -103,44 +103,44 @@ xychart-beta
     title "CPU against each limit"
     x-axis "seconds" 0 --> 170
     y-axis "% of limit" 0 --> 100
-    line [6.226, 7.97, 10.021, 12.006, 13.891, 15.735, 17.805, 19.651, 21.718, 23.558, 25.392, 27.37, 29.424, 31.618, 33.897, 37.334, 43.281, 43.414]
-    line [4.694, 5.18, 5.98, 7.069, 7.177, 7.89, 8.607, 9.081, 10.257, 10.268, 10.738, 11.318, 12.262, 13.728, 14.812, 19.047, 33.985, 27.819]
-    line [5.593, 5.866, 7.206, 8.664, 9.107, 10.716, 11.697, 12.709, 13.463, 10.997, 12.451, 11.811, 13.218, 14.405, 16.173, 19.225, 30.384, 26.487]
-    line [5.887, 6.809, 7.455, 9.038, 9.066, 10.351, 11.205, 12.497, 12.991, 13.542, 13.969, 14.879, 15.776, 16.55, 18.748, 21.427, 29.292, 25.657]
+    line [6.159, 7.924, 9.857, 11.849, 13.707, 15.604, 17.645, 19.522, 21.54, 23.309, 25.225, 27.206, 29.137, 31.061, 33.202, 35.726, 38.742, 40.983]
+    line [4.483, 5.069, 5.553, 6.385, 6.726, 7.522, 8.335, 8.943, 9.364, 9.815, 10.392, 11.149, 12.022, 12.566, 13.287, 15.105, 19.603, 21.698]
+    line [5.612, 5.958, 7.131, 8.306, 9.341, 10.621, 10.88, 12.222, 10.797, 11.191, 12.173, 12.001, 13.098, 13.71, 15.184, 17.18, 19.468, 23.469]
+    line [5.792, 6.809, 7.485, 8.302, 8.897, 10.078, 10.788, 12.008, 12.337, 13.134, 13.782, 15.144, 14.869, 15.633, 16.142, 18.595, 18.256, 20.803]
 ```
 
 <sub>Blue: api. Orange: db. Green: lb. Purple: ro (container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window).</sub>
 
 ## Diagnosis
 
-### 1. Replication lag (ro behind db), from 2:10
+### 1. Replication lag (ro behind db), from 2:20
 
-From 2:10, ro fell behind db, by up to 1.9 s at 2:50 (15 MB of WAL it hadn't replayed), so reads from it returned data from before the primary's latest writes. Its block reads took 2.4 ms each against 0.8 ms at low load: a replica replays its primary's writes in one process, and each change to a page it doesn't hold in memory waits for the disk, which its own queries also queue for.
+From 2:20, ro fell behind db, by up to 4.4 s at 2:50 (34 MB of WAL it hadn't replayed), so reads from it returned data from before the primary's latest writes. Its block reads took 5.0 ms each against 0.8 ms at low load: a replica replays its primary's writes in one process, and each change to a page it doesn't hold in memory waits for the disk, which its own queries also queue for.
 
 Evidence:
 
-- ro 1.9 s behind db at 2:50, 15 MB of WAL it hadn't replayed <sub>(pg_stat_replication_pg_wal_lsn_diff ÷ the rate of pg_stat_replication_pg_current_wal_lsn_bytes (postgres_exporter, on the primary): the WAL the replica hadn't replayed, in seconds of the primary's writing; without them, pg_replication_lag_seconds on the replica)</sub>
-- 2.4 ms per block read on ro at 2:50, against 0.8 ms at low load <sub>(pg_stat_database_blk_read_time ÷ pg_stat_database_blks_read (postgres_exporter, track_io_timing on))</sub>
-- ro CPU at 26% of its limit at 2:50 <sub>(container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit)</sub>
+- ro 4.4 s behind db at 2:50, 34 MB of WAL it hadn't replayed <sub>(pg_stat_replication_pg_wal_lsn_diff ÷ the rate of pg_stat_replication_pg_current_wal_lsn_bytes (postgres_exporter, on the primary): the WAL the replica hadn't replayed, in seconds of the primary's writing; without them, pg_replication_lag_seconds on the replica)</sub>
+- 5.0 ms per block read on ro at 2:50, against 0.8 ms at low load <sub>(pg_stat_database_blk_read_time ÷ pg_stat_database_blks_read (postgres_exporter, track_io_timing on))</sub>
+- ro CPU at 21% of its limit at 2:50 <sub>(container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit)</sub>
 
 **Try next:** Send reads that must see a request's own writes, such as the page after a form post, to db (read-your-writes), or let ro keep up: memory for the rows its writes touch, or a faster disk. More replicas don't help: each one replays every write.
 
-### 2. Working set doesn't fit in memory (ro), from 2:20
+### 2. Working set doesn't fit in memory (ro), from 2:30
 
-From 2:20, ro answered only 81% of its block reads from shared_buffers and read 1,028 blocks a second from outside them, each taking 2.4 ms against 0.8 ms at low load. The rows requests touch no longer fit in its memory, so reads wait for the disk.
+From 2:30, ro answered only 81% of its block reads from shared_buffers and read 1,014 blocks a second from outside them, each taking 3.0 ms against 0.8 ms at low load. The rows requests touch no longer fit in its memory, so reads wait for the disk.
 
 Evidence:
 
-- 81% of block reads from shared_buffers at 2:50 <sub>(pg_stat_database_blks_hit ÷ (blks_hit + blks_read) (postgres_exporter))</sub>
-- 1,028 blocks read per second from outside them at 2:50 <sub>(pg_stat_database_blks_read (postgres_exporter): blocks read from outside shared_buffers)</sub>
-- 2.4 ms per block read at 2:50, against 0.8 ms at low load <sub>(pg_stat_database_blk_read_time ÷ pg_stat_database_blks_read (postgres_exporter, track_io_timing on))</sub>
-- p99 40 ms at 2:50, against 3.6 ms at low load <sub>(k6_http_req_duration_seconds (k6 histogram, end to end))</sub>
-- ro CPU at 26% of its limit at 2:50 <sub>(container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit)</sub>
+- 81% of block reads from shared_buffers at 2:30 <sub>(pg_stat_database_blks_hit ÷ (blks_hit + blks_read) (postgres_exporter))</sub>
+- 1,014 blocks read per second from outside them at 2:30 <sub>(pg_stat_database_blks_read (postgres_exporter): blocks read from outside shared_buffers)</sub>
+- 3.0 ms per block read at 2:30, against 0.8 ms at low load <sub>(pg_stat_database_blk_read_time ÷ pg_stat_database_blks_read (postgres_exporter, track_io_timing on))</sub>
+- p99 57 ms at 2:30, against 3.6 ms at low load <sub>(k6_http_req_duration_seconds (k6 histogram, end to end))</sub>
+- ro CPU at 19% of its limit at 2:30 <sub>(container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit)</sub>
 - ro has a dataset of about 977 MB, shared_buffers 128MB, a 512 MB memory limit <sub>(plan.json)</sub>
 
 **Try next:** Make the hot rows fit: give ro more memory (its limit and shared_buffers), read fewer rows per request (an index that covers the query, or narrower rows), or split the data so each node's working set fits.
 
-<sub>Rules version 19. Rules are deterministic and offline; their thresholds are listed below.</sub>
+<sub>Rules version 21. Rules are deterministic and offline; their thresholds are listed below.</sub>
 
 ## Predictions
 
@@ -148,7 +148,7 @@ Evidence:
 
 | Prediction | Result | Worst value | Checked over | Notes |
 | --- | --- | --- | --- | --- |
-| `p99_ms < 500 until load_rps >= 1000` | **held** | 4.6 ms | 0:00 to 1:30, when load_rps >= 1,000 rps first held | source: k6_http_req_duration_seconds (k6 histogram, end to end) |
+| `p99_ms < 500 until load_rps >= 1000` | **held** | 4.7 ms | 0:00 to 1:30, when load_rps >= 1,000 rps first held | source: k6_http_req_duration_seconds (k6 histogram, end to end) |
 
 Loads and request rates depend on this machine: slower cores break the same design at a lower load, so a load guess can miss even when the reasoning behind it was right.
 
@@ -178,7 +178,7 @@ Loads and request rates depend on this machine: slower cores break the same desi
 | services.ro.disk | no profile: 1 ms per read, 3000 IOPS | set in the design: every read that misses ro's memory waits this long, and reads and writes are each capped at this rate, as on a cloud volume (unset values default to about a gp3 volume's: 1 ms, 3000 IOPS) |
 | services.ro replication | asynchronous streaming from db | the replica starts from a copy of db's seeded data and replays its WAL as it arrives, directly, not through Toxiproxy: a commit on db doesn't wait for it, so a read on ro can miss a write that just committed |
 | services.db.config.wal_keep_size | 1GB | Loadlore's default: enough for a replica that falls behind under write load to catch up |
-| services.api.pools.db.min | 20 | set in the design: each replica opens 20 connections before the load starts and keeps them open |
+| services.api.pools.db.min | 40 | set in the design: each replica opens 40 connections before the load starts and keeps them open |
 | services.api.pools.db.hold | call | the default, as pgxpool's: a request takes a connection for each call and hands it back straight away |
 
 ### How the run was planned
@@ -207,26 +207,26 @@ Loads and request rates depend on this machine: slower cores break the same desi
 - loadl dev, profile 3m0s, scale 1, seed 1
 - Host: 8 CPUs, 9.7 GiB memory, Ubuntu 24.04.4 LTS (aarch64, kernel 6.8.0-117-generic), cgroup v2
 - Docker 29.5.2, Compose 5.1.1
-- Host speed index 982 (hash 927, memory 1020, syscalls 1003): one CPU's work against the reference machine's 1000 (MacBook Air M4 (4 performance and 6 efficiency cores), Colima VM with 8 vCPUs). CPU limits are fractions of this host's cores, so a lower index means the design breaks at a lower load
-- Cool-down: none needed; the first benchmark (982) was within 5.0% of the run it's compared with (1019)
+- Host speed index 980 (hash 926, memory 1035, syscalls 983): one CPU's work against the reference machine's 1000 (MacBook Air M4 (4 performance and 6 efficiency cores), Colima VM with 8 vCPUs). CPU limits are fractions of this host's cores, so a lower index means the design breaks at a lower load
+- Cool-down: none needed; the first benchmark (980) was within 5.0% of the run it's compared with (995)
 - Host CPU: Docker runs in a VM on this machine, so other programs' use of the CPU can't be seen
 - Data: a fresh copy of the cached seeded dataset
-- Load generator summary (k6): 179,990 requests, 0 dropped arrivals, 0% failed
+- Load generator summary (k6): 179,994 requests, 0 dropped arrivals, 0% failed
 
 <details><summary>Containers and images</summary>
 
 | Container | Image |
 | --- | --- |
-| loadlore-stale-orders-read-your-writes-20261117-145733-api-0-1 | loadlore/synthetic:dev |
-| loadlore-stale-orders-read-your-writes-20261117-145733-api-1-1 | loadlore/synthetic:dev |
-| loadlore-stale-orders-read-your-writes-20261117-145733-db-1 | postgres:17.11 |
-| loadlore-stale-orders-read-your-writes-20261117-145733-lb-1 | haproxy:3.2.26 |
-| loadlore-stale-orders-read-your-writes-20261117-145733-lore-cadvisor-1 | ghcr.io/google/cadvisor:v0.60.6 |
-| loadlore-stale-orders-read-your-writes-20261117-145733-lore-k6-1 | grafana/k6:2.3.0 |
-| loadlore-stale-orders-read-your-writes-20261117-145733-lore-pgexp-db-1 | quay.io/prometheuscommunity/postgres-exporter:v0.20.1 |
-| loadlore-stale-orders-read-your-writes-20261117-145733-lore-pgexp-ro-1 | quay.io/prometheuscommunity/postgres-exporter:v0.20.1 |
-| loadlore-stale-orders-read-your-writes-20261117-145733-lore-prometheus-1 | prom/prometheus:v3.16.0 |
-| loadlore-stale-orders-read-your-writes-20261117-145733-ro-1 | postgres:17.11 |
+| loadlore-stale-orders-read-your-writes-20261118-011051-api-0-1 | loadlore/synthetic:dev |
+| loadlore-stale-orders-read-your-writes-20261118-011051-api-1-1 | loadlore/synthetic:dev |
+| loadlore-stale-orders-read-your-writes-20261118-011051-db-1 | postgres:17.11 |
+| loadlore-stale-orders-read-your-writes-20261118-011051-lb-1 | haproxy:3.2.26 |
+| loadlore-stale-orders-read-your-writes-20261118-011051-lore-cadvisor-1 | ghcr.io/google/cadvisor:v0.60.6 |
+| loadlore-stale-orders-read-your-writes-20261118-011051-lore-k6-1 | grafana/k6:2.3.0 |
+| loadlore-stale-orders-read-your-writes-20261118-011051-lore-pgexp-db-1 | quay.io/prometheuscommunity/postgres-exporter:v0.20.1 |
+| loadlore-stale-orders-read-your-writes-20261118-011051-lore-pgexp-ro-1 | quay.io/prometheuscommunity/postgres-exporter:v0.20.1 |
+| loadlore-stale-orders-read-your-writes-20261118-011051-lore-prometheus-1 | prom/prometheus:v3.16.0 |
+| loadlore-stale-orders-read-your-writes-20261118-011051-ro-1 | postgres:17.11 |
 
 </details>
 
@@ -236,24 +236,24 @@ Loads and request rates depend on this machine: slower cores break the same desi
 
 | t | offered | served | dropped | errors | p50 | p99 | api CPU | db CPU | db conns | lb CPU | lb up | ro CPU | ro conns | ro lag | api→db pool | wait | api→ro pool | wait | k6 CPU | k6 stalled |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0:00 | 244 | 238 | 0 | 0% | 2.2 ms | 4.6 ms | 6.2% | 4.7% | 41 | 5.6% | 2 | 5.9% | 41 | 9.1 ms | 2/80 +1 | 0.0 ms | 1/80 | 0.0 ms | 5.3% | 1.0% |
-| 0:10 | 333 | 331 | 0 | 0% | 1.8 ms | 3.6 ms | 8.0% | 5.2% | 41 | 5.9% | 2 | 6.8% | 41 | 7.2 ms | 1/80 | 0.0 ms | 1/80 | 0.0 ms | 3.2% | 0% |
-| 0:20 | 422 | 420 | 0 | 0% | 1.8 ms | 3.5 ms | 10% | 6.0% | 41 | 7.2% | 2 | 7.5% | 41 | 6.4 ms | 2/80 | 0.0 ms | 1/80 | 0.0 ms | 4.5% | 0% |
-| 0:30 | 511 | 509 | 0 | 0% | 1.8 ms | 3.8 ms | 12% | 7.1% | 41 | 8.7% | 2 | 9.0% | 41 | 5.8 ms | 1/80 | 0.0 ms | 1/80 | 0.0 ms | 5.2% | 0% |
-| 0:40 | 600 | 598 | 0 | 0% | 1.7 ms | 3.4 ms | 14% | 7.2% | 41 | 9.1% | 2 | 9.1% | 41 | 5.6 ms | 1/80 | 0.0 ms | 1/80 | 0.0 ms | 5.3% | 0% |
-| 0:50 | 689 | 687 | 0 | 0% | 1.7 ms | 3.4 ms | 16% | 7.9% | 41 | 11% | 2 | 10% | 41 | 5.3 ms | 2/80 | 0.0 ms | 1/80 | 0.0 ms | 6.2% | 0% |
-| 1:00 | 778 | 776 | 0 | 0% | 1.7 ms | 3.9 ms | 18% | 8.6% | 41 | 12% | 2 | 11% | 41 | 7.8 ms | 2/80 | 0.0 ms | 1/80 | 0.0 ms | 7.6% | 0% |
-| 1:10 | 867 | 865 | 0 | 0% | 1.7 ms | 3.4 ms | 20% | 9.1% | 41 | 13% | 2 | 12% | 41 | 2.7 ms | 1/80 | 0.0 ms | 1/80 | 0.0 ms | 7.7% | 0% |
-| 1:20 | 956 | 954 | 0 | 0% | 1.7 ms | 4.1 ms | 22% | 10% | 41 | 13% | 2 | 13% | 41 | 369 ms | 1/80 | 0.0 ms | 2/80 | 0.0 ms | 8.5% | 0% |
-| 1:30 | 1,044 | 1,043 | 0 | 0% | 1.7 ms | 3.7 ms | 24% | 10% | 41 | 11% | 2 | 14% | 41 | 289 ms | 2/80 | 0.0 ms | 1/80 | 0.0 ms | 9.1% | 0% |
-| 1:40 | 1,133 | 1,132 | 0 | 0% | 1.7 ms | 6.5 ms | 25% | 11% | 41 | 12% | 2 | 14% | 41 | 1.09 s | 4/80 | 0.0 ms | 2/80 | 0.0 ms | 9.3% | 0% |
-| 1:50 | 1,222 | 1,220 | 0 | 0% | 1.7 ms | 6.3 ms | 27% | 11% | 41 | 12% | 2 | 15% | 49 | 819 ms | 2/80 | 0.0 ms | 1/80 | 0.0 ms | 9.9% | 0% |
-| 2:00 | 1,311 | 1,309 | 0 | 0% | 1.7 ms | 6.4 ms | 29% | 12% | 41 | 13% | 2 | 16% | 54 | 609 ms | 3/80 +1 | 0.0 ms | 2/80 | 0.0 ms | 11% | 0% |
-| 2:10 | 1,400 | 1,398 | 0 | 0% | 1.7 ms | 34 ms | 32% | 14% | 41 | 14% | 2 | 17% | 63 | 1.35 s | 3/80 | 0.0 ms | 20/80 | 0.0 ms | 12% | 0% |
-| 2:20 | 1,489 | 1,487 | 0 | 0% | 1.8 ms | 54 ms | 34% | 15% | 41 | 16% | 2 | 19% | 63 | 1.69 s | 1/80 | 0.0 ms | 8/80 | 0.0 ms | 13% | 0% |
-| 2:30 | 1,578 | 1,576 | 0 | 0% | 1.9 ms | 219 ms | 37% | 19% | 81 | 19% | 2 | 21% | 81 | 1.78 s | 42/80 +86 | 2.2 ms | 46/80 +19 | 1.4 ms | 14% | 0% |
-| 2:40 | 1,667 | 1,665 | 0 | 0% | 2.0 ms | 331 ms | 43% | 34% | 81 | 30% | 2 | 29% | 81 | 1.79 s | 80/80 +176 | 6.4 ms | 20/80 +1 | 0.0 ms | 22% | 1.0% |
-| 2:50 | 1,756 | 1,754 | 0 | 0% | 2.1 ms | 40 ms | 43% | 28% | 81 | 26% | 2 | 26% | 81 | 1.92 s | 6/80 | 0.0 ms | 11/80 | 0.0 ms | 18% | 0% |
+| 0:00 | 244 | 237 | 0 | 0% | 2.2 ms | 4.7 ms | 6.2% | 4.5% | 81 | 5.6% | 2 | 5.8% | 81 | 9.2 ms | 1/80 | 0.0 ms | 1/80 | 0.0 ms | 5.2% | 1.0% |
+| 0:10 | 333 | 331 | 0 | 0% | 1.9 ms | 3.6 ms | 7.9% | 5.1% | 81 | 6.0% | 2 | 6.8% | 81 | 7.2 ms | 1/80 | 0.0 ms | 1/80 | 0.0 ms | 3.2% | 0% |
+| 0:20 | 422 | 420 | 0 | 0% | 1.8 ms | 3.5 ms | 9.9% | 5.6% | 81 | 7.1% | 2 | 7.5% | 81 | 3.4 ms | 1/80 | 0.0 ms | 1/80 | 0.0 ms | 4.3% | 0% |
+| 0:30 | 511 | 509 | 0 | 0% | 1.7 ms | 3.4 ms | 12% | 6.4% | 81 | 8.3% | 2 | 8.3% | 81 | 3.2 ms | 2/80 | 0.0 ms | 2/80 | 0.0 ms | 4.9% | 0% |
+| 0:40 | 600 | 598 | 0 | 0% | 1.7 ms | 3.1 ms | 14% | 6.7% | 81 | 9.3% | 2 | 8.9% | 81 | 5.6 ms | 2/80 | 0.0 ms | 1/80 | 0.0 ms | 5.2% | 0% |
+| 0:50 | 689 | 687 | 0 | 0% | 1.7 ms | 3.2 ms | 16% | 7.5% | 81 | 11% | 2 | 10% | 81 | 5.3 ms | 2/80 | 0.0 ms | 2/80 | 0.0 ms | 5.9% | 0% |
+| 1:00 | 778 | 776 | 0 | 0% | 1.7 ms | 4.0 ms | 18% | 8.3% | 81 | 11% | 2 | 11% | 81 | 354 ms | 2/80 | 0.0 ms | 1/80 | 0.0 ms | 7.1% | 0% |
+| 1:10 | 867 | 865 | 0 | 0% | 1.7 ms | 3.4 ms | 20% | 8.9% | 81 | 12% | 2 | 12% | 81 | 2.8 ms | 2/80 | 0.0 ms | 2/80 | 0.0 ms | 7.6% | 0% |
+| 1:20 | 956 | 953 | 0 | 0% | 1.7 ms | 4.1 ms | 22% | 9.4% | 81 | 11% | 2 | 12% | 81 | 1.01 s | 2/80 | 0.0 ms | 2/80 | 0.0 ms | 8.4% | 0% |
+| 1:30 | 1,044 | 1,042 | 0 | 0% | 1.7 ms | 3.6 ms | 23% | 9.8% | 81 | 11% | 2 | 13% | 81 | 199 ms | 2/80 | 0.0 ms | 2/80 | 0.0 ms | 8.8% | 0% |
+| 1:40 | 1,133 | 1,131 | 0 | 0% | 1.7 ms | 7.1 ms | 25% | 10% | 81 | 12% | 2 | 14% | 81 | 502 ms | 2/80 | 0.0 ms | 11/80 | 0.0 ms | 9.1% | 0% |
+| 1:50 | 1,222 | 1,220 | 0 | 0% | 1.7 ms | 4.9 ms | 27% | 11% | 81 | 12% | 2 | 15% | 81 | 187 ms | 2/80 | 0.0 ms | 2/80 | 0.0 ms | 9.5% | 0% |
+| 2:00 | 1,311 | 1,309 | 0 | 0% | 1.7 ms | 8.2 ms | 29% | 12% | 81 | 13% | 2 | 15% | 81 | 1.06 s | 3/80 | 0.0 ms | 7/80 | 0.0 ms | 11% | 0% |
+| 2:10 | 1,400 | 1,398 | 0 | 0% | 1.7 ms | 36 ms | 31% | 13% | 81 | 14% | 2 | 16% | 81 | 749 ms | 3/80 | 0.0 ms | 10/80 | 0.0 ms | 11% | 0% |
+| 2:20 | 1,489 | 1,487 | 0 | 0% | 1.7 ms | 52 ms | 33% | 13% | 81 | 15% | 2 | 16% | 81 | 1.45 s | 2/80 | 0.0 ms | 13/80 | 0.0 ms | 12% | 0% |
+| 2:30 | 1,578 | 1,576 | 0 | 0% | 1.7 ms | 57 ms | 36% | 15% | 81 | 17% | 2 | 19% | 81 | 1.56 s | 3/80 | 0.0 ms | 14/80 | 0.0 ms | 13% | 0% |
+| 2:40 | 1,667 | 1,664 | 0 | 0% | 1.8 ms | 59 ms | 39% | 20% | 81 | 19% | 2 | 18% | 81 | 2.55 s | 4/80 | 0.0 ms | 15/80 | 0.0 ms | 14% | 0% |
+| 2:50 | 1,756 | 1,754 | 0 | 0% | 1.9 ms | 69 ms | 41% | 22% | 81 | 23% | 2 | 21% | 81 | 4.39 s | 4/80 | 0.0 ms | 4/80 | 0.0 ms | 15% | 0% |
 
 Columns: offered is the load profile in plan.json (offered arrival rate); served is k6_http_reqs_total{expected_response="true"} (k6: successful responses); dropped is k6_dropped_iterations_total (k6: arrivals it couldn't start); errors are k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6); p50 and p99 are from k6_http_req_duration_seconds (k6 histogram, end to end); CPU is container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window; conns are pg_stat_activity_count and pg_settings_max_connections (postgres_exporter); a replica's lag is from pg_stat_replication_pg_wal_lsn_diff ÷ the rate of pg_stat_replication_pg_current_wal_lsn_bytes (postgres_exporter, on the primary): the WAL the replica hadn't replayed, in seconds of the primary's writing; without them, pg_replication_lag_seconds on the replica, and its stale share of reads after writes from loadlore_read_after_write_total (the synthetic service): point reads of a key the same request had just written, stale when they didn't see the write; hit rate is from redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter); up is haproxy_backend_active_servers (HAProxy); pools are loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections (peak in use/size, +peak waiting), wait is the mean from loadlore_pool_wait_seconds (time to get a connection); k6 CPU is against its budget.
 
@@ -293,8 +293,8 @@ services:
       resilience:
         timeout_ms: 2000
     pools:   # per replica: 2 x 40 stays under the primary's max_connections
-      db: { size: 40, min: 20 }
-      ro: { size: 40, min: 20 }
+      db: { size: 40, min: 40 }
+      ro: { size: 40, min: 40 }
 
   db:
     kind: postgres

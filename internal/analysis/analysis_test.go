@@ -1075,6 +1075,16 @@ func TestConnectionStorm(t *testing.T) {
 		t.Errorf("evidence %+v", e)
 	}
 
+	// The same burst from a pool already open at its full size is
+	// reconnections after cancelled calls; a minimum isn't the advice.
+	tg := p.Service("api").Synthetic[0].Targets["db"]
+	tg.PoolMin = tg.Pool
+	p.Service("api").Synthetic[0].Targets["db"] = tg
+	d = byRule(t, diagnose(a), "connection-storm")
+	if !strings.Contains(d.Summary, "api's pools reopened 71 connections") || !strings.Contains(d.Summary, "calls that ran past their") || strings.Contains(d.Next, "min:") {
+		t.Errorf("warm pool:\n%s\n%s", d.Summary, d.Next)
+	}
+
 	// Counted by the connect histogram, a warm pool opens none, so no storm.
 	for _, w := range a.Windows {
 		for _, pw := range w.Pools {

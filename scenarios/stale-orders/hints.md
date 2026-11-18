@@ -18,7 +18,7 @@ The primary applies orders from 80 connections at once. The replica replays all 
 
 Replaying also writes. The replica writes the WAL it receives to its own disk, in small pieces as they arrive, and later the pages it changed, against a cap of 3,000 writes a second. The primary's disk isn't capped in this lab.
 
-Compare the replica's memory with the primary's, and the size of the table. Then look at the replica's time per block read as the load rises.
+Compare the replica's memory with the primary's, and the size of the table. Then look at how many blocks the replica reads from outside its memory as the load rises: `loadl report <run> --json` gives ro's `block_reads` a second for each window.
 
 ## What a second replica does
 

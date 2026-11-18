@@ -11,7 +11,7 @@ host:
   cpus: 6
   memory: 4g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 1000
+  speed: 977
 
 # Measured before disk profiles: its designs keep their disks until its
 # next re-measure, so its reference results don't change. Then each
@@ -20,11 +20,11 @@ disk: legacy
 
 # Load generator VUs started before the load, at --scale 1: the peak rate x
 # slo.p99_ms (400 x 0.5 s), above 1.5 x the most busy at once before a break
-# in the check's runs (85, the more-connections solution's slow commits).
+# in the check's runs (62, the more-connections solution's slow commits).
 load:
   prealloc_vus: 200
-  peak_vus: 85
-  from: slow-disk-more-connections-20261112-140159
+  peak_vus: 62
+  from: slow-disk-more-connections-20261118-000514
 
 # What `loadl scenario check` verifies, at --scale 1.
 check:

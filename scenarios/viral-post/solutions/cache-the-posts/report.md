@@ -120,7 +120,7 @@ xychart-beta
 
 ## Diagnosis
 
-No diagnosis rule fired. Rules checked: connection pool exhausted, queueing knee (rules version 19; thresholds below).
+No diagnosis rule fired. Rules checked: connection pool exhausted, queueing knee (rules version 21; thresholds below).
 
 ## Predictions
 
@@ -136,9 +136,9 @@ Loads and request rates depend on this machine: slower cores break the same desi
 
 | Time | Event |
 | --- | --- |
-| 4:10 | stall: p99 reached 521 ms (5.8 ms at low load) for 10 s, then recovered; too short to count as a break |
+| 4:10 | stall: p99 reached 521 ms (5.8 ms at low load) for 10 s, then recovered; too short to count as a break; no diagnosis covers it |
 
-<sub>From events.jsonl: the fault timeline and Docker container events. Stalls are from the per-window numbers below, judged by the thresholds.</sub>
+<sub>From events.jsonl: the fault timeline and Docker container events. Stalls are from the per-window numbers below, judged by the thresholds; each names the diagnoses that cover it, counting one that ends as the stall starts.</sub>
 
 ## Assumptions
 

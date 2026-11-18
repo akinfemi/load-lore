@@ -25,13 +25,13 @@ fulfil:
 
 ## Why it helps
 
-A purchase's write took 2.0 ms at low load, and the shoe's row takes writes one at a time, so it takes about 500 a second: 1 ÷ 2 ms. In the starting design's reference check it broke at 958 rps, when about 550 purchases of the shoe arrived a second (958 × 3/5 × 19/20). The rest waited on the row's lock, up to 67 backends at once, holding their connections and their requests until checkout's p99 passed 4 s.
+A purchase's write took 2.4 ms at low load, and the shoe's row takes writes one at a time, so it takes about 420 a second: 1 ÷ 2.4 ms. In the starting design's reference check it broke at 742 rps, when about 420 purchases of the shoe arrived a second (742 × 3/5 × 19/20). The rest waited on the row's lock, up to 68 backends at once, holding their connections and their requests until checkout's p99 passed 6 s.
 
-With the queue, checkout's only work on a purchase is to add a job. In the reference check it held the whole drop, up to 1,500 rps, with a worst p99 of 1.8 ms. The worker took the purchases off at the row's pace, 497 a second against 904 published at the top, so the queue grew to 30,875 purchases by the time the shoe sold out. Then traffic fell to 200 rps, and the backlog went down by about 380 a second: the row's 500, less the 120 new purchases. The queue was empty about 80 s after the drop ended. The oldest purchase waited 62.8 s, inside the business's two minutes.
+With the queue, checkout's only work on a purchase is to add a job. In the reference check it held the whole drop, up to 1,500 rps, with a worst p99 of 23 ms. The worker took at most 498 purchases a second off the queue, against 903 published at the top, so the queue grew to 34,276 purchases by the time the shoe sold out. Then traffic fell to 200 rps, and the backlog went down by about 380 a second: the worker's 500, less the 120 new purchases. The queue was empty about 90 s after the drop ended. The oldest purchase waited 69.1 s, inside the business's two minutes.
 
 ## What it doesn't do
 
-It doesn't make the row faster. The worker took 497 purchases a second, as many as the row takes, and each write waited 9.7 ms against 2.0 ms at low load, with 3.4 backends waiting on locks: its 5 runners queue for the row too, only fewer of them. What the queue changes is who waits: purchases wait in the queue, where waiting costs a few kilobytes of memory, instead of in checkout, where it costs a connection, a request and a buyer staring at a spinner.
+It doesn't make the row faster. The worker took at most 498 purchases a second, and each write waited 9.3 ms against 2.3 ms at low load, with 3.3 backends waiting on locks: its 5 runners queue for the row too, only fewer of them. What the queue changes is who waits: purchases wait in the queue, where waiting costs a few kilobytes of memory, instead of in checkout, where it costs a connection, a request and a buyer staring at a spinner.
 
 That's why more job runners don't help either. In test runs of a bigger drop (2,000 rps at the top), 8 runners and 50 runners both took about 495 purchases a second; with 50, each write waited 101 ms in line for the row instead of 16 ms, with 45 backends waiting on locks instead of 7. The consumer-lag diagnosis says so and advises against more runners.
 
@@ -45,4 +45,4 @@ Batching is what would make the row faster: one update that takes 50 from the st
 
 ## The reference run
 
-`report.md` is the reference run on a MacBook Air M4 on mains power. In the starting design's run, checkout broke 1:30 into the load, at 958 requests a second offered, on hot rows; with the queue it held, and the oldest purchase waited 62.8 s.
+`report.md` is the reference run on a MacBook Air M4 on mains power. In the starting design's run, checkout broke 1:20 into the load, at 742 requests a second offered, on hot rows; with the queue it held, and the oldest purchase waited 69.1 s.

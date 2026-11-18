@@ -16,7 +16,7 @@ Nothing else changed.
 
 ## Why it helps
 
-A call whose reply lost a packet would wait about 200 ms for TCP's resend. Here it gives up at 150 ms, and the api sends the call again, on a new connection. With 1% of packets lost, the second try loses one too only about 1 time in 100, so a page fails only when the same call is unlucky twice: the error rate falls from about 10% to a fraction of a percent. The page that lost a packet takes about 150 ms more.
+A call whose reply lost a packet would wait about 200 ms for TCP's resend. Here it gives up at 150 ms, and the api sends the call again, on a new connection. With 1% of packets lost, the second try loses one too only about 1 time in 100, so a page fails only when the same call is unlucky twice: the error rate falls from about 9% to a fraction of a percent. The page that lost a packet takes about 150 ms more.
 
 ## What it costs
 
@@ -26,4 +26,4 @@ A call whose reply lost a packet would wait about 200 ms for TCP's resend. Here 
 
 ## Reference run
 
-In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 1008 for the starting design and 985 for this one), between 8.8% and 10.8% of pages failed in each 10 seconds of the loss without the retry. Here at most 0.2% did; p99 was 161 ms, the 150 ms timeout plus a quick second try, against 223–225 ms for a 1 s timeout that waits for TCP's resend instead (`solutions/timeout-for-the-tail`). [`report.md`](report.md) is this run's report. Compare your own pair of runs, not these numbers.
+In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 984 for the starting design and 1009 for this one), between 8.6% and 9.7% of pages failed in each 10 seconds of the loss without the retry. Here at most 0.1% did; p99 was 161 ms, the 150 ms timeout plus a quick second try, against 226–228 ms for a 1 s timeout that waits for TCP's resend instead (`solutions/timeout-for-the-tail`). [`report.md`](report.md) is this run's report. Compare your own pair of runs, not these numbers.

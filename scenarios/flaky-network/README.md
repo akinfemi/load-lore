@@ -4,7 +4,7 @@ Level 2 · about 40 minutes · teaches packet loss and TCP retransmits, how fan-
 
 ## The story
 
-You run a product listing page. Each request asks the inventory service about each of the 10 products on the page, one call after another. Inventory answers in a couple of milliseconds, and the whole page in about 3, so the api gives each call 150 ms, fifty times what it needs.
+You run a product listing page. Each request asks the inventory service about each of the 10 products on the page, one call after another. Inventory answers in a couple of milliseconds, and the whole page in about 5, so the api gives each call 150 ms, thirty times what it needs.
 
 ```mermaid
 flowchart LR

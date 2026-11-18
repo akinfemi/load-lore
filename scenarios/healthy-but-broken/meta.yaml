@@ -11,7 +11,7 @@ host:
   cpus: 6
   memory: 4g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 1000
+  speed: 1005
 
 # Measured before disk profiles: its designs keep their disks until its
 # next re-measure, so its reference results don't change. Then each
@@ -19,12 +19,12 @@ host:
 disk: legacy
 
 # Load generator VUs started before the load, at --scale 1: 1.5 x the most
-# busy at once before a break in the check's runs (125, the shallow check's
-# run while the database was 200 ms slower).
+# busy at once before a break in the check's runs (101, the deep health
+# check's run).
 load:
-  prealloc_vus: 188
-  peak_vus: 125
-  from: healthy-but-broken-shallow-check-slow-db-20261112-133506
+  prealloc_vus: 152
+  peak_vus: 101
+  from: healthy-but-broken-deep-health-check-20261117-232348
 
 # What `loadl scenario check` verifies, at --scale 1.
 check:

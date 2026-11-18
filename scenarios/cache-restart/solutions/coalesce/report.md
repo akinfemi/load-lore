@@ -132,7 +132,7 @@ At 3:00, api's pools opened 788 connections to db within 10 seconds, at 1,500 rp
 
 Evidence:
 
-- 788 new connections to db from 3:00 to 3:10: from 5 open to 23 of 30 <sub>(loadlore_pool_connect_seconds (new connections the pools opened, and how long each took))</sub>
+- 788 new connections to db from 3:00 to 3:10: from 5 open to 24 of 30 <sub>(loadlore_pool_connect_seconds (new connections the pools opened, and how long each took))</sub>
 - p99 1.09 s at 3:00, against 16 ms at low load <sub>(k6_http_req_duration_seconds (k6 histogram, end to end))</sub>
 - each new connection took 102 ms to open at 3:00, against 3.5 ms for the ones opened before <sub>(loadlore_pool_connect_seconds (new connections the pools opened, and how long each took))</sub>
 - up to 218 requests waiting for a connection at 3:00 <sub>(loadlore_pool_pending (callers waiting for a connection))</sub>
@@ -168,7 +168,7 @@ Evidence:
 
 **Try next:** Add capacity or cut per-request work on db, then re-run the ramp.
 
-<sub>Rules version 19. Rules are deterministic and offline; their thresholds are listed below.</sub>
+<sub>Rules version 21. Rules are deterministic and offline; their thresholds are listed below.</sub>
 
 ## Predictions
 
@@ -184,14 +184,14 @@ A broken prediction isn't a wrong answer: it shows where your picture of the sys
 
 | Time | Event |
 | --- | --- |
-| 0:00 | stall: only 90% of the offered rate was served for 10 s, then recovered; too short to count as a break |
+| 0:00 | stall: only 90% of the offered rate was served for 10 s, then recovered; too short to count as a break; no diagnosis covers it |
 | 3:01 | container: cache kill |
 | 3:01 | container: cache die (exit code 0) |
 | 3:01 | fault started: restart cache |
 | 3:01 | container: cache start |
 | 3:01 | container: cache restart |
 
-<sub>From events.jsonl: the fault timeline and Docker container events. Stalls are from the per-window numbers below, judged by the thresholds.</sub>
+<sub>From events.jsonl: the fault timeline and Docker container events. Stalls are from the per-window numbers below, judged by the thresholds; each names the diagnoses that cover it, counting one that ends as the stall starts.</sub>
 
 ## Assumptions
 

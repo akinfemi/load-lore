@@ -114,9 +114,10 @@ func stormDiagnosis(a *Analysis, svc, target string, first, last, episodes int) 
 			worst = i
 		}
 	}
-	size := int(*pw.Max)
+	size, warm, timeout := int(*pw.Max), false, 0
 	if s := a.Plan.Service(svc); s != nil && len(s.Synthetic) > 0 {
-		size = s.Synthetic[0].Targets[target].Pool
+		t := s.Synthetic[0].Targets[target]
+		size, warm, timeout = t.Pool, t.PoolMin >= t.Pool, s.Synthetic[0].Resilience.TimeoutMs
 	}
 	span := "within 10 seconds"
 	if last > first {
@@ -128,6 +129,18 @@ func stormDiagnosis(a *Analysis, svc, target string, first, last, episodes int) 
 		Summary: fmt.Sprintf("At %s, %s's pools opened %s connections to %s %s, at %s rps offered, and p99 reached %s (%s at low load). The pools open connections only when callers need them, so when a short slowdown leaves requests waiting, every replica opens more at once. Each new Postgres connection starts a server process and authenticates, which takes %s's CPU from queries just when it is short of it.",
 			Clock(w.Start), svc, Count(total), target, span, Rate(w.Offered), Ms(*ws[worst].P99), Ms(base), target),
 		Next: fmt.Sprintf("Open the connections before the load arrives: give the pool a minimum (pools: { %s: { size: %d, min: %d } }) and re-run to compare a warm pool with this cold one. PgBouncer in front of %s also keeps server connections open.", target, size, size, target),
+	}
+	// A warm pool had every connection open already: these replaced
+	// connections that cancelled calls closed (pgx closes a connection
+	// whose query it cancels), so a slowdown came first.
+	if warm {
+		limit := "their timeout"
+		if timeout > 0 {
+			limit = fmt.Sprintf("their %d ms timeout", timeout)
+		}
+		d.Summary = fmt.Sprintf("At %s, %s's pools reopened %s connections to %s %s, at %s rps offered, and p99 reached %s (%s at low load). The pools were already open at their full size: calls that ran past %s were cancelled, a cancelled call closes its connection, and the pools opened new ones at once. Each new Postgres connection starts a server process and authenticates, which takes %s's CPU from queries just when it is short of it.",
+			Clock(w.Start), svc, Count(total), target, span, Rate(w.Offered), Ms(*ws[worst].P99), Ms(base), limit, target)
+		d.Next = fmt.Sprintf("The reconnections follow a slowdown, so look for what held %s's calls past %s first. PgBouncer in front of %s keeps its server connections open when a client's call is cancelled.", svc, limit, target)
 	}
 	ev := func(src, format string, args ...any) {
 		d.Evidence = append(d.Evidence, Evidence{Text: fmt.Sprintf(format, args...), Source: src})
