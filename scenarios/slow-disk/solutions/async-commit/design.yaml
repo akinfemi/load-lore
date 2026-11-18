@@ -33,6 +33,7 @@ services:
     resources: { cpu: 1, memory: 1g }
     config: { synchronous_commit: "off" }
     dataset: { rows: 100000, row_bytes: 256 }
+    disk: { profile: gp3 }
 
 workload:
   entry: lb

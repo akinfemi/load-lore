@@ -22,4 +22,4 @@ Each replica's `/readyz` pings the database, the ping now takes over 200 ms, and
 
 A deep check is worth having only with a timeout the dependency meets even on a bad day, and with the load balancer keeping some replicas when every check fails at once: the cause is then more likely shared than in every replica.
 
-In the reference run (host speed index 1012), the load balancer had no replica in rotation from 1:00 to 2:10: every request failed from 1:10 to 2:00, after 68% in the window the slowness started in. Behind the shallow check (`variants/shallow-check-slow-db`, host speed index 1014), the same minute failed none.
+In the reference run (host speed index 1025), the load balancer had no replica in rotation from 1:00 to 2:10: every request failed from 1:10 to 2:00, after 68% in the window the slowness started in. Behind the shallow check (`variants/shallow-check-slow-db`, host speed index 1026), the same minute failed none.

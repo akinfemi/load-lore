@@ -12,12 +12,7 @@ host:
   cpus: 8
   memory: 8g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 988
-
-# Measured before disk profiles: its designs keep their disks until its
-# next re-measure, so its reference results don't change. Then each
-# Postgres names a profile (disk: { profile: gp3 }) and this line goes.
-disk: legacy
+  speed: 965
 
 # Load generator VUs started before the load, at --scale 1, measured: the
 # larger of the peak rate x slo.p99_ms (1,500 x 0.5 s) and 1.5 x the most
@@ -45,9 +40,10 @@ check:
 # What `loadl predict` asks before a run; each answer becomes an expect
 # line in design.yaml. The load holds at 200 rps for a minute, climbs to
 # 1,500 over a minute, holds there for a minute, then drops back to 200.
-# The row takes about 500 purchases a second (a write takes 2.0 ms at low
-# load), which the load reaches at about 880 rps; the reference check broke
-# at 958, both the starting design and variants/smaller-pool.
+# The row takes about 450 to 500 purchases a second (a write takes 2.2 ms at
+# low load; the worker in solutions/ took at most 500 a second), which the
+# load reaches at about 790 to 880 rps; the reference check broke at 958,
+# both the starting design and variants/smaller-pool.
 predict:
   - ask: At what offered load, in requests per second, will checkout break? The load holds at 200 rps, then climbs to 1,500 over a minute and holds there. A rough guess is fine; answer never if you think it holds.
     answer: rps

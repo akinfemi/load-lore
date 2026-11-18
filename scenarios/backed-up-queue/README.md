@@ -11,7 +11,7 @@ flowchart LR
     load(["load<br/>up to 600 rps"])
     lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m"}}
     api["api ×2<br/>0.5 CPU · 256m"]
-    db[("db<br/>postgres 17<br/>1 CPU · 1g")]
+    db[("db<br/>postgres 17<br/>1 CPU · 1g<br/>disk gp3 · 3,000 IOPS")]
     emails[("emails<br/>queue · Redis Streams<br/>0.5 CPU · 64m")]
     sender["sender ×2<br/>worker<br/>0.5 CPU · 128m"]
     provider["provider<br/>0.5 CPU · 256m"]

@@ -41,12 +41,13 @@ services:
     resources: { cpu: 1, memory: 1g }
     config: { max_connections: 100, shared_buffers: 256MB }
     dataset: { rows: 1000, row_bytes: 256 }
+    disk: { profile: gp3 }
 
 workload:
   entry: lb
   profile:
-    - ramp: { from: 200, to: 4500, over: 4m }
-    - hold: { rps: 4500, for: 1m }  # the vote stays open at its peak
+    - ramp: { from: 200, to: 2000, over: 4m }
+    - hold: { rps: 2000, for: 1m }  # the vote stays open at its peak
   mix: { read: 0.2, write: 0.8 }
   keys: { distribution: hotspot, share: 0.9, fraction: 0.1, count: 10 }
 

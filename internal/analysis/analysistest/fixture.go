@@ -124,6 +124,14 @@ type World struct {
 	// says true, db reads nothing and commits only the exporter's own
 	// transactions, with 40 queries waiting on the disk.
 	DiskStall func(t float64) bool
+	// StallReads, with DiskStall, is the blocks db reads a second outside
+	// a stall; 0 means 100.
+	StallReads float64
+	// DBDisk, when set, is db's disk block, such as "{ profile: gp3 }".
+	DBDisk string
+	// Scenario, when set, are the design's scenario lines, such as
+	// "{ at: 50s, inject: disk_slow, target: db, add_ms: 10, for: 30s }".
+	Scenario []string
 }
 
 // Event is an events.jsonl line at At seconds into the load.
@@ -174,6 +182,16 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 	if w.RetryMax > 0 {
 		src = strings.Replace(src, "behavior: { calls: [ { target: db, op: read } ] }",
 			fmt.Sprintf("behavior: { calls: [ { target: db, op: read } ], resilience: { retries: { max: %d } } }", w.RetryMax), 1)
+	}
+	if w.DBDisk != "" {
+		src = strings.Replace(src, "    dataset: { rows: 1000 }\n", "    dataset: { rows: 1000 }\n    disk: "+w.DBDisk+"\n", 1)
+	}
+	if len(w.Scenario) > 0 {
+		sc := "scenario:\n"
+		for _, l := range w.Scenario {
+			sc += "  - " + l + "\n"
+		}
+		src = strings.Replace(src, "expect:\n", sc+"expect:\n", 1)
 	}
 	if w.ReplicaLagS != nil {
 		src = strings.Replace(src, "workload:\n", "  ro:\n    kind: postgres-replica\n    primary: db\nworkload:\n", 1)
@@ -418,7 +436,11 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 					set(ioWaits, 40)
 				} else {
 					add(commits, 30+ok)
-					add(stallReads, 100)
+					reads := w.StallReads
+					if reads == 0 {
+						reads = 100
+					}
+					add(stallReads, reads)
 					set(ioWaits, 1)
 				}
 			}

@@ -1,12 +1,12 @@
 # statement-day-more-memory: run report
 
-_run `statement-day-more-memory-20261118-001747` · completed · 18 Nov 2026 00:18 UTC · scale 1 · seed 1_
+_run `statement-day-more-memory-20261118-073224` · completed · 18 Nov 2026 07:32 UTC · scale 1 · seed 1_
 
 ## Verdict
 
-**Held.** Held the whole profile: up to 3,500 rps offered, 3,398 rps served at best, worst 10-second p99 8.7 ms, at most 0% errors.
+**Held.** Held the whole profile: up to 3,500 rps offered, 3,403 rps served at best, worst 10-second p99 4.9 ms, at most 0% errors.
 
-Caveat: at 2:20 the load generator hit its CPU limit and was stalled in 1.4% of its scheduling periods (container_cpu_cfs_throttled_periods_total ÷ container_cpu_cfs_periods_total (cAdvisor)); work caught in a stall waits for the next 100 ms period, which can show up in p99.
+Caveat: at 2:50 the load generator hit its CPU limit and was stalled in 2.1% of its scheduling periods (container_cpu_cfs_throttled_periods_total ÷ container_cpu_cfs_periods_total (cAdvisor)); work caught in a stall waits for the next 100 ms period, which can show up in p99.
 
 <sub>Sources: offered load: the load profile in plan.json (offered arrival rate); served: k6_http_reqs_total{expected_response="true"} (k6: successful responses); p99: k6_http_req_duration_seconds (k6 histogram, end to end); errors: k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6). Windows are 10 seconds; what counts as broken is under [Thresholds](#thresholds).</sub>
 
@@ -17,12 +17,12 @@ Measured in the 10-second window from 2:50 to 3:00 (the busiest window: the most
 ```mermaid
 flowchart LR
     load(["load<br/>up to 3,500 rps<br/>offered 3,408 rps"])
-    lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m<br/>CPU 25%<br/>2/2 replicas up"}}
-    api["api ×2<br/>1 CPU · 512m<br/>CPU 67%<br/>in flight 7"]
-    db[("db<br/>postgres 17<br/>1 CPU · 4g<br/>disk 1 ms · 3,000 IOPS<br/>CPU 17%<br/>conns 81/100")]
-    load -->|"100% read · 0% write<br/>3,398 rps · p99 3.2 ms"| lb
-    lb -->|"round-robin<br/>checks every 2s, out after 3<br/>3,398 rps · p99 2.2 ms"| api
-    api -->|"read<br/>pool 40, min 40<br/>3,398 calls/s · p99 2.0 ms<br/>in use 3/80, 1 waiting"| db
+    lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m<br/>CPU 28%<br/>2/2 replicas up"}}
+    api["api ×2<br/>1 CPU · 512m<br/>CPU 66%<br/>in flight 5"]
+    db[("db<br/>postgres 17<br/>1 CPU · 4g<br/>disk gp3 · 3,000 IOPS<br/>CPU 17%<br/>conns 81/100")]
+    load -->|"100% read · 0% write<br/>3,403 rps · p99 2.9 ms"| lb
+    lb -->|"round-robin<br/>checks every 2s, out after 3<br/>3,400 rps · p99 2.0 ms"| api
+    api -->|"read<br/>pool 40, min 40<br/>3,369 calls/s · p99 2.0 ms<br/>in use 5/80"| db
     classDef ok fill:#d4edda,stroke:#28a745,color:#000
     classDef warm fill:#fff3cd,stroke:#d39e00,color:#000
     classDef hot fill:#f8d7da,stroke:#dc3545,color:#000
@@ -48,7 +48,7 @@ xychart-beta
     x-axis "seconds" 0 --> 170
     y-axis "requests/s" 0 --> 4000
     line [291.667, 475, 658.333, 841.667, 1025, 1208.333, 1391.667, 1575, 1758.333, 1941.667, 2125, 2308.333, 2491.667, 2675, 2858.333, 3041.667, 3225, 3408.333]
-    line [271.043, 464.911, 648.341, 831.572, 1015.042, 1198.158, 1381.583, 1565.104, 1748.229, 1931.5, 2114.917, 2298.419, 2481.721, 2665.011, 2848.238, 3031.526, 3214.963, 3398.222]
+    line [280.253, 469.527, 653.019, 836.126, 1019.529, 1202.861, 1386.245, 1569.674, 1752.83, 1936.13, 2119.63, 2302.922, 2486.377, 2669.176, 2852.827, 3036.332, 3219.423, 3403.173]
 ```
 
 <sub>Grey: offered load (the load profile in plan.json (offered arrival rate)). Blue: successful responses (k6_http_reqs_total{expected_response="true"} (k6: successful responses)).</sub>
@@ -64,10 +64,10 @@ config:
 xychart-beta
     title "Latency, end to end"
     x-axis "seconds" 0 --> 170
-    y-axis "ms" 0 --> 10
-    line [3.263, 2.845, 2.305, 1.964, 1.96, 1.963, 1.944, 1.935, 1.918, 1.889, 1.851, 1.801, 1.684, 1.53, 1.351, 1.291, 1.273, 1.258]
-    line [4.514, 3.91, 3.456, 2.991, 2.501, 2.429, 2.406, 2.375, 2.36, 2.33, 2.319, 2.344, 2.338, 2.353, 2.362, 2.347, 2.367, 2.372]
-    line [8.748, 6.022, 4.173, 3.5, 3.086, 2.946, 2.984, 2.883, 2.786, 2.806, 2.734, 2.722, 2.728, 2.758, 2.762, 2.738, 2.844, 3.172]
+    y-axis "ms" 0 --> 6
+    line [3.281, 2.702, 2.067, 1.958, 1.963, 1.973, 1.961, 1.956, 1.939, 1.907, 1.853, 1.806, 1.71, 1.568, 1.424, 1.371, 1.356, 1.352]
+    line [3.893, 3.488, 3.14, 2.946, 2.466, 2.412, 2.325, 2.334, 2.325, 2.365, 2.354, 2.412, 2.449, 2.429, 2.428, 2.453, 2.419, 2.427]
+    line [4.935, 3.754, 3.51, 3.265, 2.967, 2.924, 2.705, 2.752, 2.79, 2.797, 2.768, 2.856, 2.975, 2.858, 2.92, 2.985, 2.806, 2.893]
 ```
 
 <sub>Green: p50. Orange: p95. Red: p99 (k6_http_req_duration_seconds (k6 histogram, end to end)).</sub>
@@ -101,16 +101,16 @@ xychart-beta
     title "CPU against each limit"
     x-axis "seconds" 0 --> 170
     y-axis "% of limit" 0 --> 100
-    line [6.528, 10.002, 13.685, 17.375, 20.978, 24.642, 28.263, 31.953, 35.611, 39.358, 42.809, 46.129, 49.564, 53.182, 56.767, 60.367, 63.93, 67.46]
-    line [4.085, 4.929, 5.444, 6.436, 6.629, 7.475, 8.396, 8.848, 9.283, 10.365, 10.821, 11.685, 11.894, 13.474, 14.428, 14.338, 16.324, 16.906]
-    line [5.371, 5.342, 7.127, 8.899, 10.164, 11.416, 12.36, 13.041, 15.025, 16.825, 18.407, 18.183, 20.24, 21.354, 21.473, 24.139, 23.887, 25.34]
+    line [6.692, 10.077, 13.602, 17.299, 20.898, 24.628, 28.04, 31.556, 35.102, 38.729, 42.268, 45.766, 49.567, 53.177, 56.691, 60.565, 63.752, 65.854]
+    line [4.115, 4.995, 5.147, 5.927, 6.44, 7.503, 8.072, 8.507, 9.187, 9.837, 10.544, 11.524, 13.154, 13.705, 14.391, 15.073, 15.468, 16.548]
+    line [5.32, 5.622, 7.177, 8.794, 10, 11.229, 11.769, 13.208, 15.064, 16.861, 18.054, 18.927, 19.282, 22.572, 22.786, 23.317, 24.225, 28.498]
 ```
 
 <sub>Blue: api. Orange: db. Green: lb (container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window).</sub>
 
 ## Diagnosis
 
-No diagnosis rule fired. Rules checked: connection pool exhausted, queueing knee (rules version 22; thresholds below).
+No diagnosis rule fired. Rules checked: connection pool exhausted, queueing knee (rules version 23; thresholds below).
 
 ## Predictions
 
@@ -118,7 +118,7 @@ No diagnosis rule fired. Rules checked: connection pool exhausted, queueing knee
 
 | Prediction | Result | Worst value | Checked over | Notes |
 | --- | --- | --- | --- | --- |
-| `p99_ms < 100 until load_rps >= 1000` | **held** | 8.7 ms | 0:00 to 0:40, when load_rps >= 1,000 rps first held | source: k6_http_req_duration_seconds (k6 histogram, end to end) |
+| `p99_ms < 100 until load_rps >= 1000` | **held** | 4.9 ms | 0:00 to 0:40, when load_rps >= 1,000 rps first held | source: k6_http_req_duration_seconds (k6 histogram, end to end) |
 
 Loads and request rates depend on this machine: slower cores break the same design at a lower load, so a load guess can miss even when the reasoning behind it was right.
 
@@ -142,7 +142,7 @@ Loads and request rates depend on this machine: slower cores break the same desi
 | workload.slo.p99_ms | 500 ms | the default; a break on p99 alone needs p99 at or above this as well as 10x the low-load p99, so latency users would still accept isn't called a break |
 | network.profile | same-zone: 0.3 ms round trip | the default: every service in one availability zone. AWS says a round trip between two instances in the same zone is generally sub-millisecond with enhanced networking, and publishes no exact figure, so the 0.3 ms round trip Loadlore adds between any two containers is its own estimate, inside that bound. Applied between any two of the stack's containers, the load generator and the entry point included, as half the round trip on each side's outgoing packets; Loadlore's own tooling isn't slowed. Not scaled with --scale. Source: AWS Architecture Blog, Improving performance and reducing cost using Availability Zone Affinity: https://aws.amazon.com/blogs/architecture/improving-performance-and-reducing-cost-using-availability-zone-affinity/ |
 | resources.cpu_period_ms | 100 ms for api, db, lb | Docker's default. A container that uses its CPU share early in a period stalls until the next one, which can show up in p99 when a service has a fraction of a CPU |
-| services.db.disk | no profile: 1 ms per read, 3000 IOPS | set in the design: every read that misses db's memory waits this long, and reads and writes are each capped at this rate, as on a cloud volume (unset values default to about a gp3 volume's: 1 ms, 3000 IOPS) |
+| services.db.disk | gp3: 1 ms per read, 1 ms per write, 3000 IOPS, 125 MiB/s | a gp3 volume at its baseline: 3,000 IOPS and 125 MiB/s, included in its price, and up to 80,000 IOPS provisioned. AWS publishes no exact latency, only single-digit milliseconds, so the 1 ms Loadlore adds to every read, write and fsync is its own estimate: the low end of that range, so the disk is flattered rather than handicapped. Reads and writes are capped separately, so a mixed load can reach up to twice the IOPS. Provisioned throughput isn't modelled. Source: AWS, Amazon EBS General Purpose SSD volumes: https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html |
 | services.lb timeouts | connect 5s, server 60s | HAProxy's own timeouts, with its defaults otherwise. A request already sent to a replica that dies waits for the server timeout (or the load generator's); health checks only stop new requests going there |
 | services.api.pools.db.min | 40 | set in the design: each replica opens 40 connections before the load starts and keeps them open |
 | services.api.pools.db.hold | call | the default, as pgxpool's: a request takes a connection for each call and hands it back straight away |
@@ -168,31 +168,31 @@ Loads and request rates depend on this machine: slower cores break the same desi
 - **Hot rows:** for two windows in a row, 2 or more of a Postgres's backends waiting on locks on average, while a caller's writes to it took 3x their low-load time or more (and 2 ms more). Reads of the same rows may slow too, and the summary says when the database's CPU per request reached 3x its low-load value: the contention burning CPU. A queueing knee on that database's CPU at the same time then points at the rows. Windows with a disk_slow fault on the database don't count.
 - **Hot shard:** for two windows in a row, a caller sending calls to shards by key, one shard taking 1.5x the calls of the next busiest shard or more while it was busy (CPU 80% or more, or its calls 3x their low-load time and 1 ms more) and another shard's CPU under 50%. A queueing knee on that shard at the same time then points at its popular keys.
 - **CPU bursts at the limit:** a stall no other rule covers and no fault made, in which a component was CPU-throttled for 3 s or more in a window (summed over its threads) while its average CPU stayed under 90% of its limit: bursts of work used up a CFS period's quota early and waited for the next period.
-- **Host disk stalls:** for 2 seconds or more, a Postgres on the Docker host's own disk read no blocks and committed at most 10% of its median over the 10 s before (50 a second or more), while 5 or more queries waited on disk reads or WAL flushes and its exporter answered. Near the break it makes the run inconclusive; anywhere else it's a caveat, and its windows are flagged and left out of exports.
+- **Host disk stalls:** for 2 seconds or more, a Postgres read no blocks and committed at most 10% of its median over the 10 s before (50 a second or more), while 5 or more queries waited on disk reads or WAL flushes and its exporter answered; on a modelled disk it had also been reading 20 blocks a second or more (median), which its caps can't stop for seconds; not under a disk_slow fault on it. Near the break it makes the run inconclusive; anywhere else it's a caveat, and its windows are flagged and left out of exports.
 
 ## Environment
 
 - loadl dev, profile 3m0s, scale 1, seed 1
 - Host: 8 CPUs, 9.7 GiB memory, Ubuntu 24.04.4 LTS (aarch64, kernel 6.8.0-117-generic), cgroup v2
 - Docker 29.5.2, Compose 5.1.1
-- Host speed index 992 (hash 949, memory 1049, syscalls 983): one CPU's work against the reference machine's 1000 (MacBook Air M4 (4 performance and 6 efficiency cores), Colima VM with 8 vCPUs). CPU limits are fractions of this host's cores, so a lower index means the design breaks at a lower load
-- Cool-down: none needed; the first benchmark (992) was within 5.0% of the run it's compared with (1000)
+- Host speed index 987 (hash 928, memory 1024, syscalls 1011): one CPU's work against the reference machine's 1000 (MacBook Air M4 (4 performance and 6 efficiency cores), Colima VM with 8 vCPUs). CPU limits are fractions of this host's cores, so a lower index means the design breaks at a lower load
+- Cool-down: none needed; the first benchmark (987) was within 5.0% of the run it's compared with (972)
 - Host CPU: Docker runs in a VM on this machine, so other programs' use of the CPU can't be seen
 - Data: a fresh copy of the cached seeded dataset
-- Load generator summary (k6): 332,975 requests, 0 dropped arrivals, 0% failed
+- Load generator summary (k6): 332,974 requests, 0 dropped arrivals, 0% failed
 
 <details><summary>Containers and images</summary>
 
 | Container | Image |
 | --- | --- |
-| loadlore-statement-day-more-memory-20261118-001747-api-0-1 | loadlore/synthetic:dev |
-| loadlore-statement-day-more-memory-20261118-001747-api-1-1 | loadlore/synthetic:dev |
-| loadlore-statement-day-more-memory-20261118-001747-db-1 | postgres:17.11 |
-| loadlore-statement-day-more-memory-20261118-001747-lb-1 | haproxy:3.2.26 |
-| loadlore-statement-day-more-memory-20261118-001747-lore-cadvisor-1 | ghcr.io/google/cadvisor:v0.60.6 |
-| loadlore-statement-day-more-memory-20261118-001747-lore-k6-1 | grafana/k6:2.3.0 |
-| loadlore-statement-day-more-memory-20261118-001747-lore-pgexp-db-1 | quay.io/prometheuscommunity/postgres-exporter:v0.20.1 |
-| loadlore-statement-day-more-memory-20261118-001747-lore-prometheus-1 | prom/prometheus:v3.16.0 |
+| loadlore-statement-day-more-memory-20261118-073224-api-0-1 | loadlore/synthetic:dev |
+| loadlore-statement-day-more-memory-20261118-073224-api-1-1 | loadlore/synthetic:dev |
+| loadlore-statement-day-more-memory-20261118-073224-db-1 | postgres:17.11 |
+| loadlore-statement-day-more-memory-20261118-073224-lb-1 | haproxy:3.2.26 |
+| loadlore-statement-day-more-memory-20261118-073224-lore-cadvisor-1 | ghcr.io/google/cadvisor:v0.60.6 |
+| loadlore-statement-day-more-memory-20261118-073224-lore-k6-1 | grafana/k6:2.3.0 |
+| loadlore-statement-day-more-memory-20261118-073224-lore-pgexp-db-1 | quay.io/prometheuscommunity/postgres-exporter:v0.20.1 |
+| loadlore-statement-day-more-memory-20261118-073224-lore-prometheus-1 | prom/prometheus:v3.16.0 |
 
 </details>
 
@@ -202,24 +202,24 @@ Loads and request rates depend on this machine: slower cores break the same desi
 
 | t | offered | served | dropped | errors | p50 | p99 | api CPU | db CPU | db conns | lb CPU | lb up | api→db pool | wait | k6 CPU | k6 stalled |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0:00 | 292 | 271 | 0 | 0% | 3.3 ms | 8.7 ms | 6.5% | 4.1% | 81 | 5.4% | 2 | 1/80 | 0.0 ms | 6.3% | 2.0% |
-| 0:10 | 475 | 465 | 0 | 0% | 2.8 ms | 6.0 ms | 10% | 4.9% | 81 | 5.3% | 2 | 2/80 | 0.0 ms | 4.5% | 0% |
-| 0:20 | 658 | 648 | 0 | 0% | 2.3 ms | 4.2 ms | 14% | 5.4% | 81 | 7.1% | 2 | 2/80 | 0.0 ms | 5.6% | 0% |
-| 0:30 | 842 | 832 | 0 | 0% | 2.0 ms | 3.5 ms | 17% | 6.4% | 81 | 8.9% | 2 | 2/80 | 0.0 ms | 6.6% | 0% |
-| 0:40 | 1,025 | 1,015 | 0 | 0% | 2.0 ms | 3.1 ms | 21% | 6.6% | 81 | 10% | 2 | 2/80 | 0.0 ms | 6.4% | 0% |
-| 0:50 | 1,208 | 1,198 | 0 | 0% | 2.0 ms | 2.9 ms | 25% | 7.5% | 81 | 11% | 2 | 3/80 | 0.0 ms | 6.7% | 0% |
-| 1:00 | 1,392 | 1,382 | 0 | 0% | 1.9 ms | 3.0 ms | 28% | 8.4% | 81 | 12% | 2 | 2/80 | 0.0 ms | 7.5% | 0% |
-| 1:10 | 1,575 | 1,565 | 0 | 0% | 1.9 ms | 2.9 ms | 32% | 8.8% | 81 | 13% | 2 | 2/80 | 0.0 ms | 9.0% | 0% |
-| 1:20 | 1,758 | 1,748 | 0 | 0% | 1.9 ms | 2.8 ms | 36% | 9.3% | 81 | 15% | 2 | 3/80 | 0.0 ms | 8.9% | 0% |
-| 1:30 | 1,942 | 1,931 | 0 | 0% | 1.9 ms | 2.8 ms | 39% | 10% | 81 | 17% | 2 | 3/80 | 0.0 ms | 11% | 0% |
-| 1:40 | 2,125 | 2,115 | 0 | 0% | 1.9 ms | 2.7 ms | 43% | 11% | 81 | 18% | 2 | 4/80 | 0.0 ms | 12% | 0% |
-| 1:50 | 2,308 | 2,298 | 0 | 0% | 1.8 ms | 2.7 ms | 46% | 12% | 81 | 18% | 2 | 3/80 | 0.0 ms | 13% | 0% |
-| 2:00 | 2,492 | 2,482 | 0 | 0% | 1.7 ms | 2.7 ms | 50% | 12% | 81 | 20% | 2 | 5/80 | 0.0 ms | 15% | 0% |
-| 2:10 | 2,675 | 2,665 | 0 | 0% | 1.5 ms | 2.8 ms | 53% | 13% | 81 | 21% | 2 | 4/80 | 0.0 ms | 16% | 0.6% |
-| 2:20 | 2,858 | 2,848 | 0 | 0% | 1.4 ms | 2.8 ms | 57% | 14% | 81 | 21% | 2 | 3/80 | 0.0 ms | 18% | 1.4% |
-| 2:30 | 3,042 | 3,032 | 0 | 0% | 1.3 ms | 2.7 ms | 60% | 14% | 81 | 24% | 2 | 4/80 | 0.0 ms | 18% | 0% |
-| 2:40 | 3,225 | 3,215 | 0 | 0% | 1.3 ms | 2.8 ms | 64% | 16% | 81 | 24% | 2 | 4/80 | 0.0 ms | 21% | 1.0% |
-| 2:50 | 3,408 | 3,398 | 0 | 0% | 1.3 ms | 3.2 ms | 67% | 17% | 81 | 25% | 2 | 3/80 +1 | 0.0 ms | 19% | 0% |
+| 0:00 | 292 | 280 | 0 | 0% | 3.3 ms | 4.9 ms | 6.7% | 4.1% | 81 | 5.3% | 2 | 2/80 | 0.0 ms | 6.0% | 2.0% |
+| 0:10 | 475 | 470 | 0 | 0% | 2.7 ms | 3.8 ms | 10% | 5.0% | 81 | 5.6% | 2 | 2/80 | 0.0 ms | 4.6% | 0% |
+| 0:20 | 658 | 653 | 0 | 0% | 2.1 ms | 3.5 ms | 14% | 5.1% | 81 | 7.2% | 2 | 2/80 | 0.0 ms | 5.4% | 0% |
+| 0:30 | 842 | 836 | 0 | 0% | 2.0 ms | 3.3 ms | 17% | 5.9% | 81 | 8.8% | 2 | 2/80 | 0.0 ms | 6.3% | 0% |
+| 0:40 | 1,025 | 1,020 | 0 | 0% | 2.0 ms | 3.0 ms | 21% | 6.4% | 81 | 10.0% | 2 | 2/80 | 0.0 ms | 6.2% | 0% |
+| 0:50 | 1,208 | 1,203 | 0 | 0% | 2.0 ms | 2.9 ms | 25% | 7.5% | 81 | 11% | 2 | 2/80 | 0.0 ms | 6.8% | 0% |
+| 1:00 | 1,392 | 1,386 | 0 | 0% | 2.0 ms | 2.7 ms | 28% | 8.1% | 81 | 12% | 2 | 3/80 | 0.0 ms | 7.3% | 0% |
+| 1:10 | 1,575 | 1,570 | 0 | 0% | 2.0 ms | 2.8 ms | 32% | 8.5% | 81 | 13% | 2 | 2/80 | 0.0 ms | 8.7% | 0% |
+| 1:20 | 1,758 | 1,753 | 0 | 0% | 1.9 ms | 2.8 ms | 35% | 9.2% | 81 | 15% | 2 | 2/80 | 0.0 ms | 8.6% | 0% |
+| 1:30 | 1,942 | 1,936 | 0 | 0% | 1.9 ms | 2.8 ms | 39% | 9.8% | 81 | 17% | 2 | 3/80 | 0.0 ms | 11% | 0% |
+| 1:40 | 2,125 | 2,120 | 0 | 0% | 1.9 ms | 2.8 ms | 42% | 11% | 81 | 18% | 2 | 3/80 | 0.0 ms | 11% | 0% |
+| 1:50 | 2,308 | 2,303 | 0 | 0% | 1.8 ms | 2.9 ms | 46% | 12% | 81 | 19% | 2 | 3/80 | 0.0 ms | 13% | 0% |
+| 2:00 | 2,492 | 2,486 | 0 | 0% | 1.7 ms | 3.0 ms | 50% | 13% | 81 | 19% | 2 | 3/80 | 0.0 ms | 14% | 0% |
+| 2:10 | 2,675 | 2,669 | 0 | 0% | 1.6 ms | 2.9 ms | 53% | 14% | 81 | 23% | 2 | 3/80 | 0.0 ms | 17% | 2.0% |
+| 2:20 | 2,858 | 2,853 | 0 | 0% | 1.4 ms | 2.9 ms | 57% | 14% | 81 | 23% | 2 | 4/80 | 0.0 ms | 18% | 0% |
+| 2:30 | 3,042 | 3,036 | 0 | 0% | 1.4 ms | 3.0 ms | 61% | 15% | 81 | 23% | 2 | 4/80 | 0.0 ms | 19% | 0% |
+| 2:40 | 3,225 | 3,219 | 0 | 0% | 1.4 ms | 2.8 ms | 64% | 15% | 81 | 24% | 2 | 5/80 | 0.0 ms | 21% | 0% |
+| 2:50 | 3,408 | 3,403 | 0 | 0% | 1.4 ms | 2.9 ms | 66% | 17% | 81 | 28% | 2 | 5/80 | 0.0 ms | 21% | 2.1% |
 
 Columns: offered is the load profile in plan.json (offered arrival rate); served is k6_http_reqs_total{expected_response="true"} (k6: successful responses); dropped is k6_dropped_iterations_total (k6: arrivals it couldn't start); errors are k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6); p50 and p99 are from k6_http_req_duration_seconds (k6 histogram, end to end); CPU is container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window; conns are pg_stat_activity_count and pg_settings_max_connections (postgres_exporter); hit rate is from redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter); up is haproxy_backend_active_servers (HAProxy); pools are loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections (peak in use/size, +peak waiting), wait is the mean from loadlore_pool_wait_seconds (time to get a connection); k6 CPU is against its budget.
 
@@ -264,7 +264,7 @@ services:
     resources: { cpu: 1, memory: 4g }   # was 512m
     config: { max_connections: 100, shared_buffers: 1GB }   # was 128MB
     dataset: { rows: 5000000, row_bytes: 512 }   # about 2.5 GB with its index
-    disk: {}   # a cloud volume: about 1 ms per read, 3,000 IOPS (gp3's baseline)
+    disk: { profile: gp3 }   # 1 ms per read and write, 3,000 IOPS (AWS gp3 baseline)
 
 workload:
   entry: lb

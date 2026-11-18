@@ -20,13 +20,13 @@ Each query now takes a connection from the pool and hands it back as soon as it'
 
 ## Why it helps
 
-In the starting design, a request holds its database connection for about 80 ms, nearly all of it waiting on the payment provider. 40 connections held 80 ms each can serve at most about 500 requests a second, however idle the database is: the starting design's reference run served at most 492, with its database at 6% CPU.
+In the starting design, a request holds its database connection for about 80 ms, nearly all of it waiting on the payment provider. 40 connections held 80 ms each can serve at most about 500 requests a second, however idle the database is: the starting design's reference run served at most 490, with its database at 5% CPU.
 
-Now a connection is held only while a query runs, about a millisecond. By Little's law, the number held at once is the rate of queries times the time each is held: 1,400 requests a second send about 1,540 queries, which keep one or two connections busy. The reference run showed 1 to 3 of the 40 in use at 1,400 requests a second, and the wait for one was 0.0 ms. The same 40 connections that ran out at about 500 requests a second now have room for many times 1,400. The wait moved to where it costs little: a request still waits 80 ms for the payment provider, but it holds only a connection to the payment provider while it does.
+Now a connection is held only while a query runs, about a millisecond. By Little's law, the number held at once is the rate of queries times the time each is held: 1,400 requests a second send about 1,540 queries, which keep one or two connections busy. The reference run showed 2 to 3 of the 40 in use at 1,400 requests a second, and the wait for one was 0.0 ms. The same 40 connections that ran out at about 500 requests a second now have room for many times 1,400. The wait moved to where it costs little: a request still waits 80 ms for the payment provider, but it holds only a connection to the payment provider while it does.
 
-In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 964 and 988), the most served in any 10-second window went from 492 requests per second to 1,400, the top of the load profile, with p99 at 88 ms at worst, no errors, and the database at 9% CPU. 1,400 is where the profile stops, not where this design does. Compare your own pair of runs, not these numbers.
+In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 986 and 986), the most served in any 10-second window went from 490 requests per second to 1,400, the top of the load profile, with p99 at 88 ms at worst, no errors, and the database at 12% CPU at most. 1,400 is where the profile stops, not where this design does. Compare your own pair of runs, not these numbers.
 
-Postgres still had 13 connections open at the peak, the exporter's among them, while 1 to 3 were in use: the pools keep the connections they've opened, and each one is a Postgres backend process even while it's idle. Here that's cheap; with many services each keeping a pool, it adds up.
+Postgres still had 17 connections open at the peak, the exporter's among them, while 2 to 3 were in use: the pools keep the connections they've opened, and each one is a Postgres backend process even while it's idle. Here that's cheap; with many services each keeping a pool, it adds up.
 
 ## What it costs
 

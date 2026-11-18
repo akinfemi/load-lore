@@ -4,14 +4,14 @@ Level 3 · about 45 minutes · teaches hot rows when every commit waits on the d
 
 ## The story
 
-You run the shop for a sneaker brand. At ten o'clock a limited shoe goes on sale. Each purchase takes one from the shoe's stock, one row in Postgres: an update, then a commit. Product pages read the stock back. Postgres keeps its data on a network-attached cloud volume, so each commit waits about a millisecond longer for the disk than it would on a laptop. Each of the two api replicas keeps a pool of 40 database connections, opened at start.
+You run the shop for a sneaker brand. At ten o'clock a limited shoe goes on sale. Each purchase takes one from the shoe's stock, one row in Postgres: an update, then a commit. Product pages read the stock back. Postgres keeps its data on a network-attached cloud volume, gp3 at its baseline of 3,000 IOPS, which adds 1 ms to every read, write and fsync, so each commit waits about a millisecond longer for the disk than it would on a laptop. Each of the two api replicas keeps a pool of 40 database connections, opened at start.
 
 ```mermaid
 flowchart LR
     load(["load<br/>up to 1,500 rps"])
     lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m"}}
     api["api ×2<br/>1 CPU · 512m"]
-    db[("db<br/>postgres 17<br/>1 CPU · 1g")]
+    db[("db<br/>postgres 17<br/>1 CPU · 1g<br/>disk gp3 · 3,000 IOPS")]
     load -->|"40% read · 60% write"| lb
     lb -->|"round-robin<br/>checks every 2s, out after 3"| api
     api -->|"read on reads, write on writes<br/>pool 40, min 40"| db
@@ -38,7 +38,7 @@ loadl run scenarios/flash-sale/design.yaml
 loadl report latest --print | less
 ```
 
-The run takes about 6 minutes. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 5.3 CPUs (6.4 for the worked answer). On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. The slower commits are a `disk_slow` fault on the database for the whole run. The numbers here come from a MacBook Air M4 on mains power.
+The run takes about 6 minutes. It needs 8 CPUs and 8 GB available to Docker: the design and Loadlore's own containers add up to 5.3 CPUs (6.4 for the worked answer). On a smaller machine, add `--scale` with the largest value that fits; `loadl run` warns you when the host is too small and suggests one. The slower commits come from the database's disk, `disk: { profile: gp3 }`. The numbers here come from a MacBook Air M4 on mains power.
 
 Stuck? `loadl hint flash-sale` reveals one hint at a time.
 

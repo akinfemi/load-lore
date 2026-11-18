@@ -77,3 +77,27 @@ func TestCPUBursts(t *testing.T) {
 		}
 	}
 }
+
+// On a modelled disk the stall counts only if db had been reading, since
+// its caps can hold up flushes but not stop reads for seconds; and never
+// under a disk_slow fault on it.
+func TestHostStallsModelledDisk(t *testing.T) {
+	w := analysistest.Healthy()
+	w.DiskStall = func(el float64) bool { return el > 62 && el <= 65 }
+	w.DBDisk = "{ profile: gp3 }"
+	if a := analyze(t, analysistest.WriteRun(t, w, 1)); len(a.HostStalls) != 1 {
+		t.Errorf("gp3, reading 100 blocks/s: host stalls = %+v, want one", a.HostStalls)
+	}
+	w.StallReads = 5
+	if a := analyze(t, analysistest.WriteRun(t, w, 1)); len(a.HostStalls) != 0 {
+		t.Errorf("gp3, reading 5 blocks/s: host stalls = %+v, want none", a.HostStalls)
+	}
+	w.DBDisk, w.StallReads = "", 5
+	if a := analyze(t, analysistest.WriteRun(t, w, 1)); len(a.HostStalls) != 1 {
+		t.Errorf("host disk, reading 5 blocks/s: host stalls = %+v, want one", a.HostStalls)
+	}
+	w.Scenario = []string{"{ at: 55s, inject: disk_slow, target: db, add_ms: 10, for: 20s }"}
+	if a := analyze(t, analysistest.WriteRun(t, w, 1)); len(a.HostStalls) != 0 {
+		t.Errorf("under disk_slow: host stalls = %+v, want none", a.HostStalls)
+	}
+}

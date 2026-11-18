@@ -39,6 +39,7 @@ services:
     resources: { cpu: 1, memory: 1g }
     config: { max_connections: 100, shared_buffers: 256MB }
     dataset: { rows: 140000, row_bytes: 512 }
+    disk: { profile: gp3 }
 
 workload:
   entry: lb

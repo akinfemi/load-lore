@@ -13,13 +13,13 @@ flowchart LR
     load(["load<br/>up to 3,500 rps"])
     lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m"}}
     api["api ×2<br/>1 CPU · 512m"]
-    db[("db<br/>postgres 17<br/>1 CPU · 512m<br/>disk 1 ms · 3,000 IOPS")]
+    db[("db<br/>postgres 17<br/>1 CPU · 512m<br/>disk gp3 · 3,000 IOPS")]
     load -->|"100% read · 0% write"| lb
     lb -->|"round-robin<br/>checks every 2s, out after 3"| api
     api -->|"read<br/>pool 40, min 40"| db
 ```
 
-The database has 512 MB of memory for a table and index of about 2.5 GB. Its data sits on a general-purpose cloud volume at its baseline: each read from the disk takes about a millisecond, and the volume serves at most 3,000 reads a second. The design file's `disk` block says so. The clicks climb from 200 to 3,500 requests a second over three minutes as the email lands.
+The database has 512 MB of memory for a table and index of about 2.5 GB. Its data sits on an AWS gp3 volume at its baseline: each read, write and fsync on the disk takes about a millisecond, and the volume serves at most 3,000 reads a second. The design file's `disk: { profile: gp3 }` says so. The clicks climb from 200 to 3,500 requests a second over three minutes as the email lands.
 
 ## The question
 

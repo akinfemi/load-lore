@@ -414,7 +414,7 @@ func Analyze(dir string) (*Analysis, error) {
 	}
 	all := a.Windows
 	a.Windows = all[:a.Analyzed]
-	a.HostStalls = hostStalls(st, &p, t0, end)
+	a.HostStalls = hostStalls(st, &p, d.Scenario, t0, end)
 	a.Verdict = verdict(a)
 	markHostStalls(a)
 	a.PeakVUs = peakVUs(a)

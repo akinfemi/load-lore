@@ -8,16 +8,16 @@ You run the voting api for a TV talent show. During the live final, viewers vote
 
 ```mermaid
 flowchart LR
-    load(["load<br/>up to 4,500 rps"])
+    load(["load<br/>up to 2,000 rps"])
     lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m"}}
     api["api ×2<br/>1 CPU · 512m"]
-    db[("db<br/>postgres 17<br/>1 CPU · 1g")]
+    db[("db<br/>postgres 17<br/>1 CPU · 1g<br/>disk gp3 · 3,000 IOPS")]
     load -->|"20% read · 80% write"| lb
     lb -->|"round-robin<br/>checks every 2s, out after 3"| api
     api -->|"read on reads, write on writes<br/>pool 40, min 40"| db
 ```
 
-The vote opens and traffic climbs from 200 to 4,500 requests a second over four minutes, four in five of them votes, and stays at 4,500 for the vote's last minute. The producers want to know the app will take the peak.
+The vote opens and traffic climbs from 200 to 2,000 requests a second over four minutes, four in five of them votes, and stays at 2,000 for the vote's last minute. The producers want to know the app will take the peak.
 
 ## The question
 
@@ -27,7 +27,7 @@ Before you run anything, write down your guesses. Don't work them out: a gut ans
 2. Would a database with twice the CPU take the vote without breaking? This is the guess the lesson turns on.
 3. At what load does it break, if it does? Only a rough guess.
 
-Hot rows tip over unpredictably. When many writes queue for one row, the line can stay short for a while and then collapse within seconds, so where this design breaks moves from run to run on the same machine, by up to a quarter of the load, even when the machine's speed doesn't change. That's part of what's being taught: a hot row gives no warning before it goes. So the load guess scores loosely, right within 35%, and loads also depend on your machine: slower cores break the same design at a lower load. What doesn't move from run to run is what more CPU does, which is why question 2 is the one that counts.
+Hot rows tip over unpredictably. When many writes queue for one row, the line can stay short for a while and then collapse within seconds, so where this design breaks can move from run to run on the same machine: in earlier checks, on a faster disk than this one, it moved by up to a quarter of the load even when the machine's speed didn't change. That's part of what's being taught: a hot row gives no warning before it goes. So the load guess scores loosely, right within 35%, and loads also depend on your machine: slower cores break the same design at a lower load. What doesn't move from run to run is what more CPU does, which is why question 2 is the one that counts.
 
 `loadl predict design.yaml` asks these questions and writes your answers into the `expect` block at the bottom of `design.yaml`, or write them there yourself. Your answer to question 2 goes into `variants/bigger-db/design.yaml`, this design with twice the database's CPU and nothing else changed: run that design after this one, and its report scores the guess. The report scores each line against what the run measured. The line already there is an example; the grammar is in the [design file reference](../../skills/loadlore-designer/references/schema.md).
 

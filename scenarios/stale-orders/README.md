@@ -11,8 +11,8 @@ flowchart LR
     load(["load<br/>up to 1,800 rps"])
     lb{{"lb<br/>load balancer<br/>0.4 CPU · 256m"}}
     api["api ×2<br/>1 CPU · 1g"]
-    ro[("ro<br/>postgres-replica 17<br/>0.75 CPU · 512m<br/>disk 1 ms · 3,000 IOPS")]
-    db[("db<br/>postgres 17<br/>1 CPU · 2g")]
+    ro[("ro<br/>postgres-replica 17<br/>0.75 CPU · 512m<br/>disk gp3 · 3,000 IOPS")]
+    db[("db<br/>postgres 17<br/>1 CPU · 2g<br/>disk laptop")]
     load -->|"50% read · 50% write"| lb
     lb -->|"round-robin<br/>checks every 2s, out after 3"| api
     api -->|"read on reads<br/>pool 40, min 40"| ro
@@ -21,9 +21,9 @@ flowchart LR
     db -.->|"streams WAL"| ro
 ```
 
-The primary has 2 GB of memory for a table and index of about 1.1 GB, so its data sits in memory. The replica has 512 MB, on a general-purpose cloud volume at its baseline: about a millisecond for each read from the disk, and 3,000 reads and 3,000 writes a second.
+The primary has 2 GB of memory for a table and index of about 1.1 GB, so its data sits in memory. The replica has 512 MB, on a gp3 cloud volume at its baseline (`disk: { profile: gp3 }`): a millisecond added to every read, write and fsync, and 3,000 reads and 3,000 writes a second.
 
-One thing to know about this lab: the primary's disk isn't modelled. Its writes go to the Docker host's disk, with no cap, because with a modelled disk on every database they slowed each other down on the one disk underneath, which separate cloud volumes don't. Only the replica's disk is capped, for reads and for writes, and it writes everything the primary writes. So part of what holds the replica back is a disk the primary doesn't have to share its limits with. In production that's often true too: the primary gets the provisioned volume and the replica the baseline one. The confirmation page loads 200 ms after the order (`after_ms: 200`): the request that places the order has already answered by then.
+One thing to know about this lab: the primary's disk isn't modelled. It sits on the Docker host's own disk (`disk: { profile: laptop }`), with no cap and no added wait, because with a modelled disk on every database they slowed each other down on the one disk underneath, which separate cloud volumes don't. Only the replica's disk is modelled, capped for reads and for writes and a millisecond on each, and it writes everything the primary writes. So part of what holds the replica back is a disk the primary doesn't have to share its limits with. In production that's often true too: the primary gets the provisioned volume and the replica the baseline one. The confirmation page loads 200 ms after the order (`after_ms: 200`): the request that places the order has already answered by then.
 
 Today there's a sale. Traffic climbs from 200 to 1,800 requests a second over three minutes, half of them orders. The team wants to know the shop will take it.
 

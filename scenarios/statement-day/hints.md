@@ -14,7 +14,7 @@ The table and its index are about 2.5 GB, and the database has 512 MB. On a norm
 
 ## What the disk can do
 
-The disk is a cloud volume: each read from it takes about a millisecond, and it serves at most 3,000 reads a second. The report's assumptions list both.
+The disk is a gp3 cloud volume at its baseline: each read from it takes about a millisecond, and it serves at most 3,000 reads a second. The report's assumptions list both.
 
 Each statement read touches a page or two of the index and one of the table. At the break, how many reads a second went to the disk? How many requests a second does that cap allow, at the hit rate you found?
 

@@ -11,20 +11,15 @@ host:
   cpus: 6
   memory: 4g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 1005
-
-# Measured before disk profiles: its designs keep their disks until its
-# next re-measure, so its reference results don't change. Then each
-# Postgres names a profile (disk: { profile: gp3 }) and this line goes.
-disk: legacy
+  speed: 973
 
 # Load generator VUs started before the load, at --scale 1: 1.5 x the most
-# busy at once before a break in the check's runs (101, the deep health
-# check's run).
+# busy at once before a break in the check's runs (117, the shallow check
+# with the slow database).
 load:
-  prealloc_vus: 152
-  peak_vus: 101
-  from: healthy-but-broken-deep-health-check-20261117-232348
+  prealloc_vus: 176
+  peak_vus: 117
+  from: healthy-but-broken-shallow-check-slow-db-20261118-095234
 
 # What `loadl scenario check` verifies, at --scale 1.
 check:

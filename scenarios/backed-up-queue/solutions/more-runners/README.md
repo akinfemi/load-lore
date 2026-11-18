@@ -15,7 +15,7 @@ pools: { provider: 25 }                       # was 10
 
 A sender job is mostly waiting: about 1 ms of CPU, then 150 ms for the provider to accept the email. A job runner that waits can't take another job, so the workers' throughput is the jobs they run at once divided by the time each takes, Little's law: 10 runners ÷ 0.15 s is about 66 emails a second. At the peak about 180 orders a second arrive, so the queue grew by more than 100 jobs a second until it was full, and from then on it refused new emails and the checkouts that published them failed.
 
-With 25 runners per replica, 50 in all, the workers can send about 330 emails a second, more than the peak needs, and their CPU stays low because they're still mostly waiting. In the reference check the queue never held more than 40 jobs, the oldest waited at most 147 ms, the workers' CPU stayed under a quarter of its limit, and checkout held the whole sale.
+With 25 runners per replica, 50 in all, the workers can send about 330 emails a second, more than the peak needs, and their CPU stays low because they're still mostly waiting. In the reference check the queue never held more than 39 jobs, the oldest waited at most 147 ms, the workers' CPU stayed under a quarter of its limit, and checkout held the whole sale.
 
 The pool has to grow too. Each runner holds a connection to the provider for its 150 ms; with 25 runners and 10 connections, 15 of them would queue for a connection, and throughput would stop at 10 runners' worth.
 

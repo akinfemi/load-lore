@@ -13,7 +13,7 @@ flowchart LR
     load(["load<br/>up to 1,400 rps"])
     lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m"}}
     api["api ×4<br/>0.6 CPU · 512m"]
-    db[("db<br/>postgres 17<br/>1 CPU · 1g")]
+    db[("db<br/>postgres 17<br/>1 CPU · 1g<br/>disk gp3 · 3,000 IOPS")]
     payments["payments<br/>0.5 CPU · 256m"]
     load -->|"90% read · 10% write"| lb
     lb -->|"round-robin<br/>checks every 2s, out after 3"| api

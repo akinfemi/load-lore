@@ -218,6 +218,14 @@
       "containers": [
         "db"
       ],
+      "slow_disk": true,
+      "disk": {
+        "profile": "gp3",
+        "read_ms": 1,
+        "write_ms": 1,
+        "iops": 1500,
+        "mib_per_s": 62.5
+      },
       "cpu": 0.2,
       "cpu_period_ms": 100,
       "memory": 536870912,
@@ -225,7 +233,8 @@
       "version": "17",
       "config": {
         "max_connections": "100",
-        "shared_buffers": "131072kB"
+        "shared_buffers": "131072kB",
+        "track_io_timing": "on"
       },
       "dataset": {
         "Rows": 2500000,
@@ -389,8 +398,8 @@
     },
     {
       "field": "services.db.disk",
-      "value": "laptop: the Docker host's",
-      "why": "no disk block: a read that misses db's memory goes to the Docker host's disk, which on a laptop mostly answers from the host's own memory, fast and uncapped, and a commit's fsync returns in a fraction of a millisecond. Add disk: { profile: gp3 } for a cloud volume's waits and caps"
+      "value": "gp3: 1 ms per read, 1 ms per write, 1500 IOPS, 62.5 MiB/s",
+      "why": "a gp3 volume at its baseline: 3,000 IOPS and 125 MiB/s, included in its price, and up to 80,000 IOPS provisioned. AWS publishes no exact latency, only single-digit milliseconds, so the 1 ms Loadlore adds to every read, write and fsync is its own estimate: the low end of that range, so the disk is flattered rather than handicapped. Reads and writes are capped separately, so a mixed load can reach up to twice the IOPS. Provisioned throughput isn't modelled. Source: AWS, Amazon EBS General Purpose SSD volumes: https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html; IOPS and throughput scaled with --scale, the waits not"
     },
     {
       "field": "services.lb timeouts",

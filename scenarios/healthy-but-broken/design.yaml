@@ -30,6 +30,7 @@ services:
     version: "17"
     resources: { cpu: 1, memory: 1g }
     dataset: { rows: 100000, row_bytes: 256 }
+    disk: { profile: gp3 }
 
 workload:
   entry: lb

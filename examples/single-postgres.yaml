@@ -24,6 +24,7 @@ services:
     resources: { cpu: 0.4, memory: 1g }   # starting point; tuned by measurement
     config: { max_connections: 100, shared_buffers: 256MB }
     dataset: { rows: 5000000, row_bytes: 512 }
+    disk: { profile: gp3 }
 
 workload:
   entry: lb

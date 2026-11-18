@@ -15,22 +15,16 @@ host:
   cpus: 8
   memory: 8g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 993
-
-# Measured before disk profiles: its designs keep their disks until its
-# next re-measure, so its reference results don't change. Then each
-# Postgres names a profile (disk: { profile: gp3 }) and this line goes.
-disk: legacy
+  speed: 1033
 
 # Load generator VUs started before the load, at --scale 1: the peak rate x
 # slo.p99_ms (3,500 x 0.5 s), more than 1.5 x the most busy at once before a
-# break in the check's runs (956, the one-query-per-page solution near the
-# top of the ramp). k6 peaked at 1.4 GB in the starting design's run, after
-# its break.
+# break in the check's runs (569, the starting design's run). k6 peaked at
+# 1.4 GB in the starting design's run, after its break.
 load:
   prealloc_vus: 1750
-  peak_vus: 481
-  from: when-to-scale-your-database-20261117-212641
+  peak_vus: 569
+  from: when-to-scale-your-database-20261118-071309
 
 # What `loadl scenario check` verifies, at --scale 1. At small scales the
 # 0.25-CPU-or-less Postgres stalls under CPU throttling and breaks early.
@@ -41,9 +35,9 @@ check:
   solutions:
     # helps: holds, or serves min_gain x the starting design's peak
     # throughput or more. At --scale 1 with a 0.4-CPU Postgres and a
-    # 3,500 rps peak it served all 3,500 at the top of the ramp, against
-    # 2,872 rps for the starting design (1.22x), then broke 10 s into the
-    # hold; its best window served 3,656 (1.27x).
+    # 3,500 rps peak it served 3,391 of 3,500 at the top of the ramp,
+    # against a peak of 2,764 rps for the starting design, then broke 10 s
+    # into the hold; its best window served 3,619 (1.31x).
     one-query-per-page: { min_gain: 1.15 }
 
 # What `loadl predict` asks before a run; each answer becomes an expect

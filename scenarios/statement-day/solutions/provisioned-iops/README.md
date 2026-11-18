@@ -4,17 +4,17 @@
 
 ## What changed
 
-The disk serves 10,000 reads a second instead of 3,000. Cloud volumes sell IOPS separately from size: a gp3 volume can be provisioned up to 16,000.
+The disk serves 10,000 reads a second instead of 3,000. Cloud volumes sell IOPS separately from size: a gp3 volume can be provisioned up to 80,000.
 
 ```yaml
-disk: { iops: 10000 }   # was {}: 3,000 IOPS, gp3's baseline
+disk: { profile: gp3, iops: 10000 }   # provisioned IOPS (gp3 baseline 3,000)
 ```
 
 Nothing else changes: the database still has 512 MB, and each read from the disk still waits about a millisecond.
 
 ## Why it helps
 
-The working set still doesn't fit: about 70% of block reads come from `shared_buffers`, as before, and at the top of the ramp the database read about 5,000 blocks a second from outside them. What changed is the disk's limit. In the starting design about 1.4 page reads per request went outside `shared_buffers`, so 3,000 reads a second ran out at about 2,200 requests a second. With 10,000, the same reads per request take the load to about 7,000 requests a second before the disk is full, past the top of the ramp. No diagnosis fires: nothing queued.
+The working set still doesn't fit: about 70% of block reads come from `shared_buffers`, as before, and at the top of the ramp the database read about 4,500 blocks a second from outside them. What changed is the disk's limit. In the starting design about 1.4 page reads per request went outside `shared_buffers`, so 3,000 reads a second ran out at about 2,200 requests a second. With 10,000, the same reads per request take the load to about 7,000 requests a second before the disk is full, past the top of the ramp. No diagnosis fires: nothing queued.
 
 Each request still waits for its disk reads, about a millisecond each, so the page is slower than if its rows were in memory. It just doesn't queue.
 

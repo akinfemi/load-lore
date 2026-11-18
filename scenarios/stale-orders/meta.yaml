@@ -11,20 +11,15 @@ host:
   cpus: 8
   memory: 8g
   reference: MacBook Air M4 on mains power, Colima VM with 8 vCPUs
-  speed: 995
-
-# Measured before disk profiles: its designs keep their disks until its
-# next re-measure, so its reference results don't change. Then each
-# Postgres names a profile (disk: { profile: gp3 }) and this line goes.
-disk: legacy
+  speed: 999
 
 # Load generator VUs started before the load, at --scale 1, measured: the
 # larger of the peak rate x slo.p99_ms (1,800 x 0.5 s) and 1.5 x the most
-# VUs busy at once in any of the check's runs (44).
+# VUs busy at once in any of the check's runs (885).
 load:
-  prealloc_vus: 900
-  peak_vus: 44
-  from: stale-orders-bigger-replica-20261118-010714
+  prealloc_vus: 1328
+  peak_vus: 885
+  from: stale-orders-read-your-writes-20261118-110031
 
 # What `loadl scenario check` verifies, at --scale 1. The starting design
 # holds: its problem is the confirmation pages the replica serves stale.

@@ -13,7 +13,7 @@ autoscale: { min: 4, max: 6, metric: cpu, target: 0.7 }   # was min 2
 
 ## Why it helps
 
-An autoscaler reacts after the load arrives: the next decision, then the new replicas' start-up. Four replicas carry about 1,400 requests a second on their own, so when the surge lands they absorb it while the autoscaler adds the last two. The run holds the whole profile; at the top, p99 rose to 62 ms for the 40 seconds before the new replicas arrived.
+An autoscaler reacts after the load arrives: the next decision, then the new replicas' start-up. Four replicas carry about 1,400 requests a second on their own, so when the surge lands they absorb it while the autoscaler adds the last two. The run holds the whole profile; at the top, p99 rose to 66 ms for the 40 seconds before the new replicas arrived.
 
 ## What it costs
 

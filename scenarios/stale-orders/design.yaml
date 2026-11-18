@@ -36,14 +36,14 @@ services:
     resources: { cpu: 1, memory: 2g }
     config: { max_connections: 100, shared_buffers: 512MB }
     dataset: { rows: 2000000, row_bytes: 512 }   # about 1.1 GB with its index
-    # No disk block: its data fits in its memory, so its disk isn't the point.
+    disk: { profile: laptop }   # its data fits in its memory, so its disk isn't the point
 
   ro:
     kind: postgres-replica
     primary: db
     resources: { cpu: 0.75, memory: 512m }
     config: { max_connections: 100, shared_buffers: 128MB }
-    disk: {}   # a general-purpose volume at its baseline: about 1 ms a read, 3,000 IOPS
+    disk: { profile: gp3 }   # 1 ms per read and write, 3,000 IOPS (AWS gp3 baseline)
 
 workload:
   entry: lb

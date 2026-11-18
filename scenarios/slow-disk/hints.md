@@ -8,7 +8,7 @@ The report names an exhausted connection pool. Look at the database's CPU at the
 
 ## What a commit waits for
 
-By default, Postgres returns from a commit only once its changes are in the write-ahead log on disk: it writes the log and calls fsync, and waits for both. With 30 ms added to every write and every fsync, how long does a commit take? How long does the request that made it hold its connection?
+By default, Postgres returns from a commit only once its changes are in the write-ahead log on disk: it writes the log and calls fsync, and waits for both. With 30 ms added to every write and every fsync, on top of the gp3 volume's 1 ms, how long does a commit take? How long does the request that made it hold its connection?
 
 ## Reads that never touch the disk
 

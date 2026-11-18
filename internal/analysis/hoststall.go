@@ -6,7 +6,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/akinfemi/load-lore/internal/design"
 	"github.com/akinfemi/load-lore/internal/plan"
 )
 
@@ -29,14 +31,22 @@ import (
 //     DiskStallMinCommits a second.
 //
 // DiskStallSeconds such seconds in a row make a stall. A Postgres on a
-// modelled disk (a profile with an IOPS cap) isn't judged: its waits and
-// caps can stop a flush by design.
+// modelled disk (a profile with an IOPS cap) sits on the same virtual disk
+// and is judged too, with one more condition: it had been reading at least
+// DiskStallMinReads blocks a second (median over the lookback) and then read
+// none. Its caps hold reads and writes apart and delay a throttled read by
+// a slice of a second, so a backlog of writes can hold up its flushes by
+// design but can't stop its reads for seconds. In a run on two such disks
+// (replica-disk-probe-20261115-102302, 1:57) both servers stopped together,
+// from 1,300 and 3,400 blocks a second. Seconds under a disk_slow fault on
+// the server aren't judged: that slowness is the design's.
 const (
 	DiskStallWaiters     = 5
 	DiskStallCommitShare = 0.1
 	DiskStallLookback    = 10
 	DiskStallMinCommits  = 50.0
 	DiskStallSeconds     = 2
+	DiskStallMinReads    = 20.0
 	SrcHostStall         = "pg_stat_activity_count by wait_event, pg_stat_database_blks_read and pg_stat_database_xact_commit, per second (postgres_exporter)"
 )
 
@@ -71,7 +81,7 @@ func diskWait(l map[string]string) bool {
 
 // hostStalls finds disk stalls, one per stretch, naming every Postgres
 // they stopped.
-func hostStalls(st *store, p *plan.Plan, t0, end float64) []HostStall {
+func hostStalls(st *store, p *plan.Plan, faults []*design.Fault, t0, end float64) []HostStall {
 	type sec struct {
 		t       int
 		waiting int
@@ -79,10 +89,22 @@ func hostStalls(st *store, p *plan.Plan, t0, end float64) []HostStall {
 	var per [][]sec // per Postgres service, its stalled seconds
 	var names []string
 	for _, s := range p.Services {
-		// A modelled disk (a profile with waits and caps) can stall a
-		// flush by design, so only the host's own disk is judged.
-		if s.Kind != "postgres" || (s.Disk != nil && s.Disk.IOPS > 0) {
+		if s.Kind != "postgres" {
 			continue
+		}
+		modelled := s.Disk != nil && s.Disk.IOPS > 0
+		// When a disk_slow fault on this server is on, from its start to
+		// its end (or the end of the run).
+		var slow [][2]float64
+		for _, f := range faults {
+			if f.Inject != "disk_slow" || f.Target == nil || f.Target.Name != s.Name {
+				continue
+			}
+			from, to := time.Duration(f.At).Seconds(), end
+			if f.For != nil {
+				to = from + time.Duration(*f.For).Seconds()
+			}
+			slow = append(slow, [2]float64{from, to})
 		}
 		svc := eq("service", s.Name)
 		lab := and(svc, eq("datname", plan.DBName))
@@ -99,35 +121,37 @@ func hostStalls(st *store, p *plan.Plan, t0, end float64) []HostStall {
 			break
 		}
 		commits := make([]float64, 0, len(ts))
+		reads := make([]float64, 0, len(ts))
 		var stalled []sec
 		for i := 1; i < len(ts); i++ {
 			a, b := ts[i-1], ts[i]
 			c, ok := st.increase("pg_stat_database_xact_commit", lab, a, b)
+			r, rok := st.increase("pg_stat_database_blks_read", lab, a, b)
 			if !ok {
 				c = -1
 			}
-			commits = append(commits, c)
+			if !rok {
+				r = -1
+			}
+			commits, reads = append(commits, c), append(reads, r)
 			if !ok || len(commits) <= DiskStallLookback {
 				continue
 			}
 			if n, ok := st.increase("pg_exporter_scrapes_total", svc, a, b); !ok || n < 1 {
 				continue
 			}
-			var before []float64
-			for _, x := range commits[len(commits)-1-DiskStallLookback : len(commits)-1] {
-				if x >= 0 {
-					before = append(before, x)
-				}
-			}
-			if len(before) < DiskStallLookback/2 {
+			if slices.ContainsFunc(slow, func(w [2]float64) bool { return a-t0 < w[1] && b-t0 > w[0] }) {
 				continue
 			}
-			sort.Float64s(before)
-			med := median(before)
-			if med < DiskStallMinCommits || c > DiskStallCommitShare*med {
+			lo := len(commits) - 1 - DiskStallLookback
+			med, n := lookbackMedian(commits[lo : len(commits)-1])
+			if n < DiskStallLookback/2 || med < DiskStallMinCommits || c > DiskStallCommitShare*med {
 				continue
 			}
-			if r, ok := st.increase("pg_stat_database_blks_read", lab, a, b); !ok || r > 0 {
+			if !rok || r > 0 {
+				continue
+			}
+			if rmed, _ := lookbackMedian(reads[lo : len(reads)-1]); modelled && rmed < DiskStallMinReads {
 				continue
 			}
 			g := st.gaugeGrid("pg_stat_activity_count", waits, b, b+0.5)
@@ -184,6 +208,22 @@ func hostStalls(st *store, p *plan.Plan, t0, end float64) []HostStall {
 		out = append(out, HostStall{Kind: "disk", At: float64(m.from), Seconds: float64(m.to - m.from), Services: m.svcs, Waiting: m.waiting})
 	}
 	return out
+}
+
+// lookbackMedian is the median of the known values (-1 is unknown), and
+// how many there were.
+func lookbackMedian(xs []float64) (float64, int) {
+	var v []float64
+	for _, x := range xs {
+		if x >= 0 {
+			v = append(v, x)
+		}
+	}
+	if len(v) == 0 {
+		return 0, 0
+	}
+	sort.Float64s(v)
+	return median(v), len(v)
 }
 
 // hostStallText says what stopped, for the timeline and the verdict.

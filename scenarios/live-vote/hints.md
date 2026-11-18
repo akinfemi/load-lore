@@ -4,11 +4,11 @@ Reveal them one at a time with `loadl hint live-vote`. Each one assumes you've r
 
 ## Read the diagnosis
 
-The report names two things from the same moment: hot rows, and a queueing knee on the database's CPU. The CPU really was near its limit. Read the knee's "Try next" and the hot-rows evidence: what was the database's CPU doing?
+The report names two things from the same moment: hot rows, and a queueing knee on the database's CPU. The CPU really was busy. Read the knee's "Try next" and the hot-rows evidence: what was the database's CPU doing?
 
 ## What a vote does
 
-Each vote runs one statement: update the favourite's row, then commit. Postgres locks a row while a transaction updates it and keeps the lock until the commit. A second vote for the same contestant has to wait for the first.
+Each vote runs one statement: update the favourite's row, then commit. Postgres locks a row while a transaction updates it and keeps the lock until the commit has been flushed to disk. A second vote for the same contestant has to wait for the first.
 
 How many votes a second land on the favourite's row at the load where it broke? Take the offered load from the verdict, four in five requests are votes, nine in ten votes are for the favourite.
 

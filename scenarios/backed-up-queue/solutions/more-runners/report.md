@@ -1,37 +1,36 @@
 # backed-up-queue-more-runners: run report
 
-_run `backed-up-queue-more-runners-20261118-003422` · completed · 18 Nov 2026 00:34 UTC · scale 1 · seed 1_
+_run `backed-up-queue-more-runners-20261118-100336` · completed · 18 Nov 2026 10:03 UTC · scale 1 · seed 1_
 
 ## Verdict
 
-**Held.** Held the whole profile: up to 600 rps offered, 600 rps served at best, worst 10-second p99 3.0 ms, at most 0% errors.
+**Held.** Held the whole profile: up to 600 rps offered, 600 rps served at best, worst 10-second p99 7.0 ms, at most 0% errors.
 
 <sub>Sources: offered load: the load profile in plan.json (offered arrival rate); served: k6_http_reqs_total{expected_response="true"} (k6: successful responses); p99: k6_http_req_duration_seconds (k6 histogram, end to end); errors: k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6). Windows are 10 seconds; what counts as broken is under [Thresholds](#thresholds).</sub>
 
-## Diagram at 3:40
+## Diagram at 3:50
 
-Measured in the 10-second window from 3:40 to 3:50 (the busiest window: the most successful responses). Nodes are colored by their most saturated resource, CPU against its limit or a connection pool's connections in use: red at 90% or more, amber from 70%, green below.
+Measured in the 10-second window from 3:50 to 4:00 (the busiest window: the most successful responses). Nodes are colored by their most saturated resource, CPU against its limit or a connection pool's connections in use: red at 90% or more, amber from 70%, green below.
 
 ```mermaid
 flowchart LR
     load(["load<br/>up to 600 rps<br/>offered 600 rps"])
-    lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m<br/>CPU 7.2%<br/>2/2 replicas up"}}
+    lb{{"lb<br/>load balancer<br/>0.5 CPU · 256m<br/>CPU 7.4%<br/>2/2 replicas up"}}
     api["api ×2<br/>0.5 CPU · 256m<br/>CPU 39%<br/>in flight 2"]
-    db[("db<br/>postgres 17<br/>1 CPU · 1g<br/>CPU 4.4%<br/>conns 5/100")]
-    emails[("emails<br/>queue · Redis Streams<br/>0.5 CPU · 64m<br/>CPU 3.9%<br/>36 jobs")]
-    sender["sender ×2<br/>worker<br/>0.5 CPU · 128m<br/>CPU 22%<br/>177 jobs/s, 41/50 busy"]
-    provider["provider<br/>0.5 CPU · 256m<br/>CPU 5.2%<br/>in flight 0"]
-    load -->|"70% read · 30% write<br/>600 rps · p99 2.3 ms"| lb
-    lb -->|"round-robin<br/>checks every 2s, out after 3<br/>600 rps · p99 2.0 ms"| api
-    api -->|"read on reads, write on writes<br/>pool 10<br/>600 calls/s · p99 0.9 ms<br/>in use 1/20"| db
-    api -->|"publish on writes<br/>pool 10<br/>177 calls/s · p99 0.5 ms<br/>in use 2/20"| emails
-    emails -->|"consume, 25 at a time<br/>177 jobs/s"| sender
-    sender -->|"http<br/>pool 25<br/>177 calls/s · p99 200 ms<br/>in use 41/50"| provider
+    db[("db<br/>postgres 17<br/>1 CPU · 1g<br/>disk gp3 · 3,000 IOPS<br/>CPU 4.6%<br/>conns 7/100")]
+    emails[("emails<br/>queue · Redis Streams<br/>0.5 CPU · 64m<br/>CPU 4.1%<br/>38 jobs")]
+    sender["sender ×2<br/>worker<br/>0.5 CPU · 128m<br/>CPU 22%<br/>180 jobs/s, 32/50 busy"]
+    provider["provider<br/>0.5 CPU · 256m<br/>CPU 5.4%<br/>in flight 0"]
+    load -->|"70% read · 30% write<br/>600 rps · p99 5.1 ms"| lb
+    lb -->|"round-robin<br/>checks every 2s, out after 3<br/>600 rps · p99 4.9 ms"| api
+    api -->|"read on reads, write on writes<br/>pool 10<br/>600 calls/s · p99 4.5 ms<br/>in use 2/20"| db
+    api -->|"publish on writes<br/>pool 10<br/>180 calls/s · p99 0.7 ms<br/>in use 0/20"| emails
+    emails -->|"consume, 25 at a time<br/>180 jobs/s"| sender
+    sender -->|"http<br/>pool 25<br/>180 calls/s · p99 200 ms<br/>in use 32/50"| provider
     classDef ok fill:#d4edda,stroke:#28a745,color:#000
     classDef warm fill:#fff3cd,stroke:#d39e00,color:#000
     classDef hot fill:#f8d7da,stroke:#dc3545,color:#000
-    class lb,api,db,emails,provider ok
-    class sender warm
+    class lb,api,db,emails,sender,provider ok
 ```
 
 <sub>Sources: offered from the load profile in plan.json (offered arrival rate); load edge from k6_http_reqs_total (k6: all responses) and k6_http_req_duration_seconds (k6 histogram, end to end); CPU from container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit; calls/s from loadlore_calls_total (the caller's outbound call attempts) and their p99 from loadlore_call_duration_seconds (the caller's histogram, pool wait included); pools from loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections and loadlore_pool_pending (callers waiting for a connection); lb traffic from haproxy_backend_http_requests_total (HAProxy), replicas up from haproxy_backend_active_servers (HAProxy), and the lb edge's p99 from loadlore_request_duration_seconds (the service's own histogram); conns from pg_stat_activity_count and pg_settings_max_connections (postgres_exporter); a queue's jobs from redis_stream_length (redis_exporter): jobs published and not yet finished, waiting or running and its oldest from redis_stream_first_entry_id (redis_exporter): the oldest unfinished job's publish time; a worker's jobs/s from loadlore_jobs_total (the workers' finished jobs, by result) and busy runners from loadlore_job_runner_busy_seconds_total, or loadlore_jobs_running in runs from before it (summed over the worker's replicas).</sub>
@@ -54,7 +53,7 @@ xychart-beta
     y-axis "requests/s" 0 --> 800
     line [800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     line [150, 150, 150, 150, 150, 150, 168.75, 206.25, 243.75, 281.25, 318.75, 356.25, 393.75, 431.25, 468.75, 506.25, 543.75, 581.25, 600, 600, 600, 600, 600, 600, 600, 600, 600, 600, 600, 600]
-    line [149.477, 149.974, 149.92, 150.046, 150.082, 149.925, 168.67, 205.969, 243.604, 281.177, 318.704, 355.85, 393.71, 430.951, 468.68, 506.022, 543.699, 581.014, 600.062, 599.996, 599.997, 600.083, 600.331, 599.531, 600.058, 600.013, 600.127, 599.791, 600.078, 599.973]
+    line [147.794, 150.039, 149.918, 150.078, 149.943, 150.043, 168.213, 205.613, 243.23, 280.694, 318.282, 355.584, 393.143, 430.703, 468.162, 505.699, 543.174, 580.575, 599.986, 600.11, 599.956, 600.077, 600.025, 600.221, 599.69, 599.998, 600.146, 599.889, 599.927, 600.077]
 ```
 
 <sub>Grey: offered load (the load profile in plan.json (offered arrival rate)). Blue: successful responses (k6_http_reqs_total{expected_response="true"} (k6: successful responses)). Pink spikes mark 0:00 latency +150 ms on connections into provider.</sub>
@@ -70,11 +69,11 @@ config:
 xychart-beta
     title "Latency, end to end"
     x-axis "seconds" 0 --> 290
-    y-axis "ms" 0 --> 4
-    line [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    line [1.755, 1.628, 1.634, 1.633, 1.637, 1.625, 1.625, 1.6, 1.596, 1.589, 1.587, 1.578, 1.582, 1.561, 1.565, 1.549, 1.552, 1.532, 1.53, 1.531, 1.534, 1.531, 1.526, 1.532, 1.515, 1.53, 1.553, 1.521, 1.536, 1.533]
-    line [2.464, 2.287, 2.315, 2.304, 2.337, 2.29, 2.261, 2.191, 2.21, 2.177, 2.137, 2.12, 2.116, 2.086, 2.097, 2.081, 2.072, 2.055, 2.049, 2.046, 2.041, 2.035, 2.034, 2.041, 2.019, 2.037, 2.052, 2.013, 2.043, 2.092]
-    line [2.99, 2.627, 2.693, 2.584, 2.73, 2.573, 2.507, 2.437, 2.465, 2.43, 2.32, 2.406, 2.318, 2.373, 2.379, 2.32, 2.32, 2.384, 2.317, 2.407, 2.303, 2.336, 2.294, 2.318, 2.289, 2.309, 2.398, 2.306, 2.373, 2.506]
+    y-axis "ms" 0 --> 8
+    line [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    line [2.663, 2.386, 2.265, 1.669, 1.62, 1.619, 1.618, 1.613, 1.601, 1.599, 1.598, 1.596, 1.589, 1.583, 1.574, 1.572, 1.569, 1.562, 1.555, 1.555, 1.555, 1.56, 1.554, 1.56, 1.559, 1.559, 1.56, 1.555, 1.56, 1.557]
+    line [5.505, 5.039, 5.121, 4.638, 4.326, 4.316, 4.26, 4.237, 4.192, 4.18, 4.17, 4.141, 4.152, 4.138, 4.178, 4.221, 4.278, 4.26, 4.277, 4.255, 4.336, 4.332, 4.318, 4.338, 4.32, 4.233, 4.252, 4.255, 4.254, 4.317]
+    line [7.009, 5.454, 5.58, 5.899, 4.886, 4.928, 4.788, 4.698, 4.586, 4.584, 4.592, 4.642, 4.605, 4.59, 4.781, 4.948, 5.013, 5.054, 5.132, 5.051, 5.186, 5.241, 5.266, 5.113, 5.149, 4.992, 5.278, 5.045, 5.057, 5.267]
 ```
 
 <sub>Green: p50. Orange: p95. Red: p99 (k6_http_req_duration_seconds (k6 histogram, end to end)). Pink spikes mark 0:00 latency +150 ms on connections into provider.</sub>
@@ -110,19 +109,19 @@ xychart-beta
     x-axis "seconds" 0 --> 290
     y-axis "% of limit" 0 --> 100
     line [100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    line [11.604, 11.503, 11.535, 11.368, 11.436, 11.435, 12.43, 14.451, 16.798, 19.029, 21.381, 23.811, 26.179, 28.448, 30.808, 33.212, 35.59, 37.746, 39.078, 39.038, 39.079, 39.109, 38.917, 39.135, 38.964, 39.034, 39.078, 38.982, 39.037, 37.874]
-    line [3.393, 3.624, 3.312, 4.106, 3.692, 3.511, 3.326, 3.296, 3.412, 3.538, 3.625, 3.791, 3.936, 3.949, 4.082, 4.254, 4.327, 4.457, 4.372, 4.623, 4.409, 4.936, 4.43, 4.525, 4.342, 4.52, 4.44, 4.872, 4.561, 4.745]
-    line [2.733, 2.754, 2.761, 2.729, 2.541, 2.592, 2.612, 2.663, 2.661, 2.88, 2.943, 3.156, 3.288, 3.367, 3.576, 3.585, 3.851, 3.942, 3.912, 4.008, 3.978, 4.049, 3.858, 3.979, 3.95, 3.897, 3.988, 3.918, 4.218, 3.882]
-    line [3.311, 3.236, 3.376, 3.355, 3.256, 3.237, 3.237, 3.498, 3.762, 4.107, 4.537, 4.9, 5.275, 5.661, 6.025, 6.538, 6.904, 7.203, 7.368, 7.283, 7.352, 7.206, 7.189, 7.303, 7.251, 7.293, 7.376, 7.271, 7.242, 7.109]
-    line [2.582, 2.476, 2.577, 2.578, 2.519, 2.384, 2.631, 2.754, 2.963, 3.095, 3.443, 3.615, 3.883, 4.033, 4.308, 4.604, 4.876, 5.135, 5.109, 5.169, 5.227, 5.213, 5.223, 5.326, 5.05, 5.263, 5.284, 4.996, 5.354, 5.068]
-    line [6.894, 6.636, 6.791, 7.038, 6.763, 6.634, 7.442, 8.788, 9.568, 10.908, 12.422, 13.613, 15.238, 15.738, 17.307, 18.673, 21.005, 21.488, 21.996, 22.58, 22.213, 22.399, 21.949, 22.382, 21.894, 22.123, 22.633, 21.733, 22.773, 21.157]
+    line [10.601, 10.917, 10.82, 10.965, 10.911, 11.04, 12.121, 14.443, 16.709, 19.078, 21.568, 23.826, 26.052, 28.488, 30.72, 33.04, 35.405, 37.633, 38.906, 38.775, 38.742, 38.931, 38.845, 38.894, 39.113, 38.839, 38.866, 38.804, 39.119, 38.452]
+    line [3.324, 3.428, 3.239, 4.014, 3.142, 3.281, 3.13, 3.276, 3.363, 3.53, 3.743, 3.756, 3.923, 4.026, 4.103, 4.954, 4.414, 4.604, 4.564, 4.804, 4.632, 5.113, 4.787, 4.579, 4.629, 4.671, 4.484, 5.173, 4.561, 4.849]
+    line [2.25, 2.331, 2.187, 2.323, 2.301, 2.314, 2.446, 2.519, 2.673, 2.816, 3.072, 3.23, 3.312, 3.4, 3.516, 3.596, 3.924, 3.963, 4.062, 4.112, 4.07, 4.087, 4.04, 4.135, 4.111, 4.105, 4.075, 4.056, 4.389, 4.249]
+    line [2.795, 2.822, 2.823, 2.897, 2.794, 2.896, 2.976, 3.395, 3.872, 4.242, 4.67, 4.93, 5.266, 5.558, 6.066, 6.369, 6.906, 7.014, 7.364, 7.082, 7.105, 7.175, 7.258, 7.35, 7.224, 7.251, 7.243, 7.431, 7.451, 6.703]
+    line [2.337, 2.333, 2.307, 2.3, 2.345, 2.369, 2.504, 2.801, 2.847, 3.175, 3.386, 3.542, 3.872, 4.033, 4.29, 4.7, 4.968, 5.175, 5.163, 5.345, 5.247, 5.46, 5.187, 5.381, 5.291, 5.237, 5.341, 5.257, 5.689, 5.287]
+    line [7.103, 6.264, 6.424, 6.607, 6.499, 6.337, 7.281, 8.816, 9.597, 10.906, 12.491, 13.453, 15.347, 15.836, 17.066, 18.713, 20.823, 21.604, 21.857, 22.471, 22.192, 22.428, 21.987, 22.396, 21.781, 22.244, 22.701, 21.513, 22.958, 21.358]
 ```
 
 <sub>Blue: api. Orange: db. Green: emails. Purple: lb. Brown: provider. Pink: sender (container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window). Pink spikes mark 0:00 latency +150 ms on connections into provider.</sub>
 
 ## Diagnosis
 
-No diagnosis rule fired. Rules checked: connection pool exhausted, queueing knee (rules version 22; thresholds below).
+No diagnosis rule fired. Rules checked: connection pool exhausted, queueing knee (rules version 23; thresholds below).
 
 ## Predictions
 
@@ -160,7 +159,7 @@ The design has no `expect` lines. Writing a prediction before a run turns it int
 | workload.slo.p99_ms | 500 ms | the default; a break on p99 alone needs p99 at or above this as well as 10x the low-load p99, so latency users would still accept isn't called a break |
 | network.profile | same-zone: 0.3 ms round trip | the default: every service in one availability zone. AWS says a round trip between two instances in the same zone is generally sub-millisecond with enhanced networking, and publishes no exact figure, so the 0.3 ms round trip Loadlore adds between any two containers is its own estimate, inside that bound. Applied between any two of the stack's containers, the load generator and the entry point included, as half the round trip on each side's outgoing packets; Loadlore's own tooling isn't slowed. Not scaled with --scale. Source: AWS Architecture Blog, Improving performance and reducing cost using Availability Zone Affinity: https://aws.amazon.com/blogs/architecture/improving-performance-and-reducing-cost-using-availability-zone-affinity/ |
 | resources.cpu_period_ms | 100 ms for api, db, emails, lb, provider, sender | Docker's default. A container that uses its CPU share early in a period stalls until the next one, which can show up in p99 when a service has a fraction of a CPU |
-| services.db.disk | laptop: the Docker host's | no disk block: a read that misses db's memory goes to the Docker host's disk, which on a laptop mostly answers from the host's own memory, fast and uncapped, and a commit's fsync returns in a fraction of a millisecond. Add disk: { profile: gp3 } for a cloud volume's waits and caps |
+| services.db.disk | gp3: 1 ms per read, 1 ms per write, 3000 IOPS, 125 MiB/s | a gp3 volume at its baseline: 3,000 IOPS and 125 MiB/s, included in its price, and up to 80,000 IOPS provisioned. AWS publishes no exact latency, only single-digit milliseconds, so the 1 ms Loadlore adds to every read, write and fsync is its own estimate: the low end of that range, so the disk is flattered rather than handicapped. Reads and writes are capped separately, so a mixed load can reach up to twice the IOPS. Provisioned throughput isn't modelled. Source: AWS, Amazon EBS General Purpose SSD volumes: https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html |
 | services.lb timeouts | connect 5s, server 60s | HAProxy's own timeouts, with its defaults otherwise. A request already sent to a replica that dies waits for the server timeout (or the load generator's); health checks only stop new requests going there |
 | services.sender.consume.concurrency | 25 | set in the design: each replica runs up to 25 jobs from emails at once |
 | services.sender.consume.retries | none | not set in the design: a job whose calls fail is dropped, not retried. Real job systems retry (Sidekiq up to 25 times), so add retries to see the backlog retries make |
@@ -189,15 +188,15 @@ The design has no `expect` lines. Writing a prediction before a run turns it int
 - **Hot rows:** for two windows in a row, 2 or more of a Postgres's backends waiting on locks on average, while a caller's writes to it took 3x their low-load time or more (and 2 ms more). Reads of the same rows may slow too, and the summary says when the database's CPU per request reached 3x its low-load value: the contention burning CPU. A queueing knee on that database's CPU at the same time then points at the rows. Windows with a disk_slow fault on the database don't count.
 - **Hot shard:** for two windows in a row, a caller sending calls to shards by key, one shard taking 1.5x the calls of the next busiest shard or more while it was busy (CPU 80% or more, or its calls 3x their low-load time and 1 ms more) and another shard's CPU under 50%. A queueing knee on that shard at the same time then points at its popular keys.
 - **CPU bursts at the limit:** a stall no other rule covers and no fault made, in which a component was CPU-throttled for 3 s or more in a window (summed over its threads) while its average CPU stayed under 90% of its limit: bursts of work used up a CFS period's quota early and waited for the next period.
-- **Host disk stalls:** for 2 seconds or more, a Postgres on the Docker host's own disk read no blocks and committed at most 10% of its median over the 10 s before (50 a second or more), while 5 or more queries waited on disk reads or WAL flushes and its exporter answered. Near the break it makes the run inconclusive; anywhere else it's a caveat, and its windows are flagged and left out of exports.
+- **Host disk stalls:** for 2 seconds or more, a Postgres read no blocks and committed at most 10% of its median over the 10 s before (50 a second or more), while 5 or more queries waited on disk reads or WAL flushes and its exporter answered; on a modelled disk it had also been reading 20 blocks a second or more (median), which its caps can't stop for seconds; not under a disk_slow fault on it. Near the break it makes the run inconclusive; anywhere else it's a caveat, and its windows are flagged and left out of exports.
 
 ## Environment
 
 - loadl dev, profile 5m0s, scale 1, seed 1
 - Host: 8 CPUs, 9.7 GiB memory, Ubuntu 24.04.4 LTS (aarch64, kernel 6.8.0-117-generic), cgroup v2
 - Docker 29.5.2, Compose 5.1.1
-- Host speed index 986 (hash 942, memory 1041, syscalls 977): one CPU's work against the reference machine's 1000 (MacBook Air M4 (4 performance and 6 efficiency cores), Colima VM with 8 vCPUs). CPU limits are fractions of this host's cores, so a lower index means the design breaks at a lower load
-- Cool-down: none needed; the first benchmark (986) was within 5.0% of the run it's compared with (981)
+- Host speed index 1000 (hash 961, memory 1054, syscalls 986): one CPU's work against the reference machine's 1000 (MacBook Air M4 (4 performance and 6 efficiency cores), Colima VM with 8 vCPUs). CPU limits are fractions of this host's cores, so a lower index means the design breaks at a lower load
+- Cool-down: none needed; the first benchmark (1000) was within 5.0% of the run it's compared with (994)
 - Host CPU: Docker runs in a VM on this machine, so other programs' use of the CPU can't be seen
 - Data: a fresh copy of the cached seeded dataset
 - Load generator summary (k6): 125,999 requests, 0 dropped arrivals, 0% failed
@@ -206,20 +205,20 @@ The design has no `expect` lines. Writing a prediction before a run turns it int
 
 | Container | Image |
 | --- | --- |
-| loadlore-backed-up-queue-more-runners-20261118-003422-api-0-1 | loadlore/synthetic:dev |
-| loadlore-backed-up-queue-more-runners-20261118-003422-api-1-1 | loadlore/synthetic:dev |
-| loadlore-backed-up-queue-more-runners-20261118-003422-db-1 | postgres:17.11 |
-| loadlore-backed-up-queue-more-runners-20261118-003422-emails-1 | redis:8.2 |
-| loadlore-backed-up-queue-more-runners-20261118-003422-lb-1 | haproxy:3.2.26 |
-| loadlore-backed-up-queue-more-runners-20261118-003422-lore-cadvisor-1 | ghcr.io/google/cadvisor:v0.60.6 |
-| loadlore-backed-up-queue-more-runners-20261118-003422-lore-k6-1 | grafana/k6:2.3.0 |
-| loadlore-backed-up-queue-more-runners-20261118-003422-lore-pgexp-db-1 | quay.io/prometheuscommunity/postgres-exporter:v0.20.1 |
-| loadlore-backed-up-queue-more-runners-20261118-003422-lore-prometheus-1 | prom/prometheus:v3.16.0 |
-| loadlore-backed-up-queue-more-runners-20261118-003422-lore-redisexp-emails-1 | oliver006/redis_exporter:v1.97.0 |
-| loadlore-backed-up-queue-more-runners-20261118-003422-lore-toxiproxy-1 | ghcr.io/shopify/toxiproxy:2.13.0 |
-| loadlore-backed-up-queue-more-runners-20261118-003422-provider-0-1 | loadlore/synthetic:dev |
-| loadlore-backed-up-queue-more-runners-20261118-003422-sender-0-1 | loadlore/synthetic:dev |
-| loadlore-backed-up-queue-more-runners-20261118-003422-sender-1-1 | loadlore/synthetic:dev |
+| loadlore-backed-up-queue-more-runners-20261118-100336-api-0-1 | loadlore/synthetic:dev |
+| loadlore-backed-up-queue-more-runners-20261118-100336-api-1-1 | loadlore/synthetic:dev |
+| loadlore-backed-up-queue-more-runners-20261118-100336-db-1 | postgres:17.11 |
+| loadlore-backed-up-queue-more-runners-20261118-100336-emails-1 | redis:8.2 |
+| loadlore-backed-up-queue-more-runners-20261118-100336-lb-1 | haproxy:3.2.26 |
+| loadlore-backed-up-queue-more-runners-20261118-100336-lore-cadvisor-1 | ghcr.io/google/cadvisor:v0.60.6 |
+| loadlore-backed-up-queue-more-runners-20261118-100336-lore-k6-1 | grafana/k6:2.3.0 |
+| loadlore-backed-up-queue-more-runners-20261118-100336-lore-pgexp-db-1 | quay.io/prometheuscommunity/postgres-exporter:v0.20.1 |
+| loadlore-backed-up-queue-more-runners-20261118-100336-lore-prometheus-1 | prom/prometheus:v3.16.0 |
+| loadlore-backed-up-queue-more-runners-20261118-100336-lore-redisexp-emails-1 | oliver006/redis_exporter:v1.97.0 |
+| loadlore-backed-up-queue-more-runners-20261118-100336-lore-toxiproxy-1 | ghcr.io/shopify/toxiproxy:2.13.0 |
+| loadlore-backed-up-queue-more-runners-20261118-100336-provider-0-1 | loadlore/synthetic:dev |
+| loadlore-backed-up-queue-more-runners-20261118-100336-sender-0-1 | loadlore/synthetic:dev |
+| loadlore-backed-up-queue-more-runners-20261118-100336-sender-1-1 | loadlore/synthetic:dev |
 
 </details>
 
@@ -229,36 +228,36 @@ The design has no `expect` lines. Writing a prediction before a run turns it int
 
 | t | offered | served | dropped | errors | p50 | p99 | api CPU | db CPU | db conns | emails CPU | emails jobs | oldest | published/s | finished/s | lb CPU | lb up | provider CPU | sender CPU | api→db pool | wait | api→emails pool | wait | sender→provider pool | wait | k6 CPU | Toxiproxy CPU | k6 / Toxiproxy stalled |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0:00 | 150 | 149 | 0 | 0% | 1.8 ms | 3.0 ms | 12% | 3.4% | 5 | 2.7% | 4 | 145 ms | 44 | 44 | 3.3% | 2 | 2.6% | 6.9% | 1/20 | 0.0 ms | 0/20 | – | 14/50 | 0.0 ms | 3.1% | 0.9% | 0% / 0% |
-| 0:10 | 150 | 150 | 0 | 0% | 1.6 ms | 2.6 ms | 12% | 3.6% | 5 | 2.8% | 4 | 138 ms | 43 | 43 | 3.2% | 2 | 2.5% | 6.6% | 1/20 | 0.0 ms | 0/20 | – | 9/50 | 0.0 ms | 2.3% | 0.8% | 0% / 0% |
-| 0:20 | 150 | 150 | 0 | 0% | 1.6 ms | 2.7 ms | 12% | 3.3% | 5 | 2.8% | 5 | 145 ms | 44 | 44 | 3.4% | 2 | 2.6% | 6.8% | 1/20 | 0.0 ms | 0/20 | – | 13/50 | 0.0 ms | 2.2% | 0.8% | 0% / 0% |
-| 0:30 | 150 | 150 | 0 | 0% | 1.6 ms | 2.6 ms | 11% | 4.1% | 5 | 2.7% | 7 | 145 ms | 45 | 44 | 3.4% | 2 | 2.6% | 7.0% | 1/20 | 0.0 ms | 0/20 | – | 12/50 | 0.0 ms | 2.2% | 0.8% | 0% / 0% |
-| 0:40 | 150 | 150 | 0 | 0% | 1.6 ms | 2.7 ms | 11% | 3.7% | 5 | 2.5% | 7 | 145 ms | 44 | 44 | 3.3% | 2 | 2.5% | 6.8% | 1/20 | 0.0 ms | 1/20 | – | 13/50 | 0.0 ms | 2.2% | 0.8% | 0% / 0% |
-| 0:50 | 150 | 150 | 0 | 0% | 1.6 ms | 2.6 ms | 11% | 3.5% | 5 | 2.6% | 6 | 145 ms | 43 | 43 | 3.2% | 2 | 2.4% | 6.6% | 1/20 | 0.0 ms | 1/20 | – | 9/50 | 0.0 ms | 2.2% | 0.8% | 0% / 0% |
-| 1:00 | 169 | 169 | 0 | 0% | 1.6 ms | 2.5 ms | 12% | 3.3% | 5 | 2.6% | 9 | 141 ms | 51 | 51 | 3.2% | 2 | 2.6% | 7.4% | 1/20 | 0.0 ms | 1/20 | – | 12/50 | 0.0 ms | 2.3% | 0.9% | 0% / 0% |
-| 1:10 | 206 | 206 | 0 | 0% | 1.6 ms | 2.4 ms | 14% | 3.3% | 5 | 2.7% | 12 | 146 ms | 64 | 64 | 3.5% | 2 | 2.8% | 8.8% | 1/20 | 0.0 ms | 0/20 | – | 17/50 | 0.0 ms | 2.6% | 1.0% | 0% / 0% |
-| 1:20 | 244 | 244 | 0 | 0% | 1.6 ms | 2.5 ms | 17% | 3.4% | 5 | 2.7% | 7 | 145 ms | 70 | 70 | 3.8% | 2 | 3.0% | 9.6% | 0/20 | 0.0 ms | 1/20 | – | 21/50 | 0.0 ms | 2.8% | 1.0% | 0% / 0% |
-| 1:30 | 281 | 281 | 0 | 0% | 1.6 ms | 2.4 ms | 19% | 3.5% | 5 | 2.9% | 13 | 144 ms | 82 | 82 | 4.1% | 2 | 3.1% | 11% | 0/20 | 0.0 ms | 0/20 | – | 29/50 | 0.0 ms | 3.2% | 1.2% | 0% / 0% |
-| 1:40 | 319 | 319 | 0 | 0% | 1.6 ms | 2.3 ms | 21% | 3.6% | 5 | 2.9% | 18 | 144 ms | 96 | 96 | 4.5% | 2 | 3.4% | 12% | 1/20 | 0.0 ms | 1/20 | – | 27/50 | 0.0 ms | 3.5% | 1.4% | 0% / 0% |
-| 1:50 | 356 | 356 | 0 | 0% | 1.6 ms | 2.4 ms | 24% | 3.8% | 5 | 3.2% | 16 | 146 ms | 105 | 105 | 4.9% | 2 | 3.6% | 14% | 1/20 | 0.0 ms | 1/20 | – | 33/50 | 0.0 ms | 3.6% | 1.5% | 0% / 0% |
-| 2:00 | 394 | 394 | 0 | 0% | 1.6 ms | 2.3 ms | 26% | 3.9% | 5 | 3.3% | 15 | 146 ms | 120 | 118 | 5.3% | 2 | 3.9% | 15% | 1/20 | 0.0 ms | 0/20 | – | 37/50 | 0.0 ms | 3.9% | 1.6% | 0% / 0% |
-| 2:10 | 431 | 431 | 0 | 0% | 1.6 ms | 2.4 ms | 28% | 3.9% | 5 | 3.4% | 13 | 146 ms | 125 | 126 | 5.7% | 2 | 4.0% | 16% | 1/20 | 0.0 ms | 0/20 | – | 34/50 | 0.0 ms | 4.0% | 1.7% | 0% / 0% |
-| 2:20 | 469 | 469 | 0 | 0% | 1.6 ms | 2.4 ms | 31% | 4.1% | 5 | 3.6% | 21 | 146 ms | 136 | 136 | 6.0% | 2 | 4.3% | 17% | 1/20 | 0.0 ms | 0/20 | – | 33/50 | 0.0 ms | 4.4% | 1.8% | 0% / 0% |
-| 2:30 | 506 | 506 | 0 | 0% | 1.5 ms | 2.3 ms | 33% | 4.3% | 5 | 3.6% | 24 | 145 ms | 149 | 149 | 6.5% | 2 | 4.6% | 19% | 1/20 | 0.0 ms | 1/20 | – | 39/50 | 0.0 ms | 4.7% | 2.0% | 0% / 0% |
-| 2:40 | 544 | 544 | 0 | 0% | 1.6 ms | 2.3 ms | 36% | 4.3% | 5 | 3.9% | 27 | 147 ms | 168 | 169 | 6.9% | 2 | 4.9% | 21% | 0/20 | 0.0 ms | 1/20 | – | 45/50 | 0.0 ms | 4.9% | 2.2% | 0% / 0% |
-| 2:50 | 581 | 581 | 0 | 0% | 1.5 ms | 2.4 ms | 38% | 4.5% | 5 | 3.9% | 25 | 146 ms | 173 | 172 | 7.2% | 2 | 5.1% | 21% | 1/20 | 0.0 ms | 0/20 | – | 39/50 | 0.0 ms | 5.1% | 2.3% | 0% / 0% |
-| 3:00 | 600 | 600 | 0 | 0% | 1.5 ms | 2.3 ms | 39% | 4.4% | 5 | 3.9% | 28 | 145 ms | 177 | 176 | 7.4% | 2 | 5.1% | 22% | 1/20 | 0.0 ms | 0/20 | – | 44/50 | 0.0 ms | 5.3% | 2.3% | 0% / 0% |
-| 3:10 | 600 | 600 | 0 | 0% | 1.5 ms | 2.4 ms | 39% | 4.6% | 5 | 4.0% | 25 | 147 ms | 181 | 182 | 7.3% | 2 | 5.2% | 23% | 1/20 | 0.0 ms | 0/20 | – | 43/50 | 0.0 ms | 5.2% | 2.4% | 0% / 0% |
-| 3:20 | 600 | 600 | 0 | 0% | 1.5 ms | 2.3 ms | 39% | 4.4% | 5 | 4.0% | 21 | 145 ms | 179 | 180 | 7.4% | 2 | 5.2% | 22% | 1/20 | 0.0 ms | 1/20 | – | 37/50 | 0.0 ms | 5.3% | 2.4% | 0% / 0% |
-| 3:30 | 600 | 600 | 0 | 0% | 1.5 ms | 2.3 ms | 39% | 4.9% | 5 | 4.0% | 27 | 145 ms | 180 | 179 | 7.2% | 2 | 5.2% | 22% | 1/20 | 0.0 ms | 1/20 | – | 44/50 | 0.0 ms | 5.1% | 2.3% | 0% / 0% |
-| 3:40 | 600 | 600 | 0 | 0% | 1.5 ms | 2.3 ms | 39% | 4.4% | 5 | 3.9% | 27 | 145 ms | 177 | 177 | 7.2% | 2 | 5.2% | 22% | 1/20 | 0.0 ms | 2/20 | – | 41/50 | 0.0 ms | 5.2% | 2.3% | 0% / 0% |
-| 3:50 | 600 | 600 | 0 | 0% | 1.5 ms | 2.3 ms | 39% | 4.5% | 5 | 4.0% | 19 | 145 ms | 181 | 180 | 7.3% | 2 | 5.3% | 22% | 2/20 | 0.0 ms | 0/20 | – | 43/50 | 0.0 ms | 5.2% | 2.4% | 0% / 0% |
-| 4:00 | 600 | 600 | 0 | 0% | 1.5 ms | 2.3 ms | 39% | 4.3% | 5 | 3.9% | 27 | 146 ms | 175 | 176 | 7.3% | 2 | 5.1% | 22% | 1/20 | 0.0 ms | 0/20 | – | 41/50 | 0.0 ms | 5.1% | 2.3% | 0% / 0% |
-| 4:10 | 600 | 600 | 0 | 0% | 1.5 ms | 2.3 ms | 39% | 4.5% | 5 | 3.9% | 25 | 146 ms | 179 | 178 | 7.3% | 2 | 5.3% | 22% | 1/20 | 0.0 ms | 1/20 | – | 44/50 | 0.0 ms | 5.2% | 2.4% | 0% / 0% |
-| 4:20 | 600 | 600 | 0 | 0% | 1.6 ms | 2.4 ms | 39% | 4.4% | 5 | 4.0% | 32 | 145 ms | 182 | 183 | 7.4% | 2 | 5.3% | 23% | 1/20 | 0.0 ms | 1/20 | – | 32/50 | 0.0 ms | 5.1% | 2.4% | 0% / 0% |
-| 4:30 | 600 | 600 | 0 | 0% | 1.5 ms | 2.3 ms | 39% | 4.9% | 5 | 3.9% | 28 | 145 ms | 174 | 173 | 7.3% | 2 | 5.0% | 22% | 2/20 | 0.0 ms | 1/20 | – | 43/50 | 0.0 ms | 5.2% | 2.3% | 0% / 0% |
-| 4:40 | 600 | 600 | 0 | 0% | 1.5 ms | 2.4 ms | 39% | 4.6% | 5 | 4.2% | 30 | 147 ms | 185 | 185 | 7.2% | 2 | 5.4% | 23% | 2/20 | 0.0 ms | 0/20 | – | 37/50 | 0.0 ms | 5.2% | 2.4% | 0% / 0% |
-| 4:50 | 600 | 600 | 0 | 0% | 1.5 ms | 2.5 ms | 38% | 4.7% | 8 | 3.9% | 31 | 145 ms | 171 | 171 | 7.1% | 2 | 5.1% | 21% | 2/20 | 0.0 ms | 1/20 | – | 43/50 | 0.0 ms | 4.2% | 2.3% | 0% / 0% |
+| 0:00 | 150 | 148 | 0 | 0% | 2.7 ms | 7.0 ms | 11% | 3.3% | 5 | 2.2% | 7 | 146 ms | 44 | 43 | 2.8% | 2 | 2.3% | 7.1% | 1/20 | 0.0 ms | 1/20 | – | 13/50 | 0.0 ms | 2.9% | 0.7% | 0% / 0% |
+| 0:10 | 150 | 150 | 0 | 0% | 2.4 ms | 5.5 ms | 11% | 3.4% | 5 | 2.3% | 5 | 146 ms | 42 | 43 | 2.8% | 2 | 2.3% | 6.3% | 1/20 | 0.0 ms | 0/20 | – | 10/50 | 0.0 ms | 1.9% | 0.7% | 0% / 0% |
+| 0:20 | 150 | 150 | 0 | 0% | 2.3 ms | 5.6 ms | 11% | 3.2% | 5 | 2.2% | 4 | 146 ms | 44 | 44 | 2.8% | 2 | 2.3% | 6.4% | 0/20 | 0.0 ms | 0/20 | – | 12/50 | 0.0 ms | 1.9% | 0.7% | 0% / 0% |
+| 0:30 | 150 | 150 | 0 | 0% | 1.7 ms | 5.9 ms | 11% | 4.0% | 6 | 2.3% | 7 | 146 ms | 45 | 45 | 2.9% | 2 | 2.3% | 6.6% | 1/20 | 0.0 ms | 0/20 | – | 14/50 | 0.0 ms | 2.0% | 0.7% | 0% / 0% |
+| 0:40 | 150 | 150 | 0 | 0% | 1.6 ms | 4.9 ms | 11% | 3.1% | 5 | 2.3% | 5 | 146 ms | 44 | 44 | 2.8% | 2 | 2.3% | 6.5% | 0/20 | 0.0 ms | 0/20 | – | 10/50 | 0.0 ms | 2.0% | 0.7% | 0% / 0% |
+| 0:50 | 150 | 150 | 0 | 0% | 1.6 ms | 4.9 ms | 11% | 3.3% | 5 | 2.3% | 6 | 140 ms | 43 | 43 | 2.9% | 2 | 2.4% | 6.3% | 1/20 | 0.0 ms | 0/20 | – | 11/50 | 0.0 ms | 1.9% | 0.7% | 0% / 0% |
+| 1:00 | 169 | 168 | 0 | 0% | 1.6 ms | 4.8 ms | 12% | 3.1% | 5 | 2.4% | 7 | 147 ms | 51 | 51 | 3.0% | 2 | 2.5% | 7.3% | 1/20 | 0.0 ms | 0/20 | – | 12/50 | 0.0 ms | 2.2% | 0.8% | 0% / 0% |
+| 1:10 | 206 | 206 | 0 | 0% | 1.6 ms | 4.7 ms | 14% | 3.3% | 5 | 2.5% | 14 | 141 ms | 63 | 63 | 3.4% | 2 | 2.8% | 8.8% | 1/20 | 0.0 ms | 0/20 | – | 13/50 | 0.0 ms | 2.4% | 1.0% | 0% / 0% |
+| 1:20 | 244 | 243 | 0 | 0% | 1.6 ms | 4.6 ms | 17% | 3.4% | 5 | 2.7% | 9 | 145 ms | 70 | 70 | 3.9% | 2 | 2.8% | 9.6% | 1/20 | 0.0 ms | 0/20 | – | 16/50 | 0.0 ms | 2.7% | 1.0% | 0% / 0% |
+| 1:30 | 281 | 281 | 0 | 0% | 1.6 ms | 4.6 ms | 19% | 3.5% | 5 | 2.8% | 12 | 147 ms | 82 | 82 | 4.2% | 2 | 3.2% | 11% | 1/20 | 0.0 ms | 0/20 | – | 17/50 | 0.0 ms | 3.1% | 1.1% | 0% / 0% |
+| 1:40 | 319 | 318 | 0 | 0% | 1.6 ms | 4.6 ms | 22% | 3.7% | 5 | 3.1% | 16 | 145 ms | 96 | 96 | 4.7% | 2 | 3.4% | 12% | 1/20 | 0.0 ms | 1/20 | – | 16/50 | 0.0 ms | 3.5% | 1.3% | 0% / 0% |
+| 1:50 | 356 | 356 | 0 | 0% | 1.6 ms | 4.6 ms | 24% | 3.8% | 5 | 3.2% | 15 | 146 ms | 104 | 104 | 4.9% | 2 | 3.5% | 13% | 1/20 | 0.0 ms | 0/20 | – | 21/50 | 0.0 ms | 3.7% | 1.4% | 0% / 0% |
+| 2:00 | 394 | 393 | 0 | 0% | 1.6 ms | 4.6 ms | 26% | 3.9% | 6 | 3.3% | 19 | 144 ms | 119 | 118 | 5.3% | 2 | 3.9% | 15% | 1/20 | 0.0 ms | 0/20 | – | 27/50 | 0.0 ms | 3.9% | 1.6% | 0% / 0% |
+| 2:10 | 431 | 431 | 0 | 0% | 1.6 ms | 4.6 ms | 28% | 4.0% | 6 | 3.4% | 20 | 145 ms | 125 | 126 | 5.6% | 2 | 4.0% | 16% | 2/20 | 0.0 ms | 0/20 | – | 27/50 | 0.0 ms | 4.1% | 1.7% | 0% / 0% |
+| 2:20 | 469 | 468 | 0 | 0% | 1.6 ms | 4.8 ms | 31% | 4.1% | 6 | 3.5% | 27 | 147 ms | 136 | 135 | 6.1% | 2 | 4.3% | 17% | 2/20 | 0.0 ms | 1/20 | – | 24/50 | 0.0 ms | 4.4% | 1.8% | 0% / 0% |
+| 2:30 | 506 | 506 | 0 | 0% | 1.6 ms | 4.9 ms | 33% | 5.0% | 6 | 3.6% | 29 | 145 ms | 149 | 150 | 6.4% | 2 | 4.7% | 19% | 1/20 | 0.0 ms | 0/20 | – | 29/50 | 0.0 ms | 4.9% | 2.0% | 0% / 0% |
+| 2:40 | 544 | 543 | 0 | 0% | 1.6 ms | 5.0 ms | 35% | 4.4% | 6 | 3.9% | 29 | 145 ms | 168 | 167 | 6.9% | 2 | 5.0% | 21% | 2/20 | 0.0 ms | 0/20 | – | 38/50 | 0.0 ms | 5.0% | 2.2% | 0% / 0% |
+| 2:50 | 581 | 581 | 0 | 0% | 1.6 ms | 5.1 ms | 38% | 4.6% | 7 | 4.0% | 19 | 147 ms | 173 | 173 | 7.0% | 2 | 5.2% | 22% | 1/20 | 0.0 ms | 1/20 | – | 42/50 | 0.0 ms | 5.3% | 2.3% | 0% / 0% |
+| 3:00 | 600 | 600 | 0 | 0% | 1.6 ms | 5.1 ms | 39% | 4.6% | 7 | 4.1% | 19 | 146 ms | 177 | 176 | 7.4% | 2 | 5.2% | 22% | 1/20 | 0.0 ms | 0/20 | – | 32/50 | 0.0 ms | 5.4% | 2.3% | 0% / 0% |
+| 3:10 | 600 | 600 | 0 | 0% | 1.6 ms | 5.1 ms | 39% | 4.8% | 7 | 4.1% | 25 | 146 ms | 182 | 182 | 7.1% | 2 | 5.3% | 22% | 1/20 | 0.0 ms | 1/20 | – | 35/50 | 0.0 ms | 5.3% | 2.3% | 0% / 0% |
+| 3:20 | 600 | 600 | 0 | 0% | 1.6 ms | 5.2 ms | 39% | 4.6% | 7 | 4.1% | 29 | 146 ms | 180 | 180 | 7.1% | 2 | 5.2% | 22% | 1/20 | 0.0 ms | 1/20 | – | 33/50 | 0.0 ms | 5.4% | 2.3% | 0% / 0% |
+| 3:30 | 600 | 600 | 0 | 0% | 1.6 ms | 5.2 ms | 39% | 5.1% | 7 | 4.1% | 29 | 145 ms | 179 | 179 | 7.2% | 2 | 5.5% | 22% | 1/20 | 0.0 ms | 0/20 | – | 35/50 | 0.0 ms | 5.4% | 2.4% | 0% / 0% |
+| 3:40 | 600 | 600 | 0 | 0% | 1.6 ms | 5.3 ms | 39% | 4.8% | 7 | 4.0% | 36 | 146 ms | 177 | 178 | 7.3% | 2 | 5.2% | 22% | 1/20 | 0.0 ms | 0/20 | – | 35/50 | 0.0 ms | 5.3% | 2.3% | 0% / 0% |
+| 3:50 | 600 | 600 | 0 | 0% | 1.6 ms | 5.1 ms | 39% | 4.6% | 7 | 4.1% | 31 | 147 ms | 181 | 180 | 7.4% | 2 | 5.4% | 22% | 2/20 | 0.0 ms | 0/20 | – | 32/50 | 0.0 ms | 5.4% | 2.4% | 0% / 0% |
+| 4:00 | 600 | 600 | 0 | 0% | 1.6 ms | 5.1 ms | 39% | 4.6% | 7 | 4.1% | 36 | 145 ms | 175 | 176 | 7.2% | 2 | 5.3% | 22% | 2/20 | 0.0 ms | 1/20 | – | 44/50 | 0.0 ms | 5.4% | 2.3% | 0% / 0% |
+| 4:10 | 600 | 600 | 0 | 0% | 1.6 ms | 5.0 ms | 39% | 4.7% | 7 | 4.1% | 18 | 147 ms | 178 | 178 | 7.3% | 2 | 5.2% | 22% | 1/20 | 0.0 ms | 1/20 | – | 38/50 | 0.0 ms | 5.4% | 2.4% | 0% / 0% |
+| 4:20 | 600 | 600 | 0 | 0% | 1.6 ms | 5.3 ms | 39% | 4.5% | 7 | 4.1% | 32 | 147 ms | 183 | 182 | 7.2% | 2 | 5.3% | 23% | 1/20 | 0.0 ms | 1/20 | – | 36/50 | 0.0 ms | 5.3% | 2.4% | 0% / 0% |
+| 4:30 | 600 | 600 | 0 | 0% | 1.6 ms | 5.0 ms | 39% | 5.2% | 7 | 4.1% | 22 | 145 ms | 174 | 174 | 7.4% | 2 | 5.3% | 22% | 1/20 | 0.0 ms | 1/20 | – | 32/50 | 0.0 ms | 5.3% | 2.3% | 0% / 0% |
+| 4:40 | 600 | 600 | 0 | 0% | 1.6 ms | 5.1 ms | 39% | 4.6% | 7 | 4.4% | 32 | 146 ms | 185 | 185 | 7.5% | 2 | 5.7% | 23% | 1/20 | 0.0 ms | 0/20 | – | 34/50 | 0.0 ms | 5.3% | 2.4% | 0% / 0% |
+| 4:50 | 600 | 600 | 0 | 0% | 1.6 ms | 5.3 ms | 38% | 4.8% | 16 | 4.2% | 24 | 146 ms | 170 | 171 | 6.7% | 2 | 5.3% | 21% | 1/20 | 0.0 ms | 0/20 | – | 33/50 | 0.0 ms | 4.4% | 2.2% | 0% / 0% |
 
 Columns: offered is the load profile in plan.json (offered arrival rate); served is k6_http_reqs_total{expected_response="true"} (k6: successful responses); dropped is k6_dropped_iterations_total (k6: arrivals it couldn't start); errors are k6_http_reqs_total{expected_response="false"} ÷ k6_http_reqs_total (k6); p50 and p99 are from k6_http_req_duration_seconds (k6 histogram, end to end); CPU is container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit, mean over the window; conns are pg_stat_activity_count and pg_settings_max_connections (postgres_exporter); hit rate is from redis_keyspace_hits_total and redis_keyspace_misses_total (redis_exporter); up is haproxy_backend_active_servers (HAProxy); pools are loadlore_pool_connections{state="in_use"} and loadlore_pool_max_connections (peak in use/size, +peak waiting), wait is the mean from loadlore_pool_wait_seconds (time to get a connection); k6 and Toxiproxy CPU are against their budgets. A queue's jobs are redis_stream_length (redis_exporter): jobs published and not yet finished, waiting or running, at the window's end; oldest is redis_stream_first_entry_id (redis_exporter): the oldest unfinished job's publish time, at most over the window; published is redis_stream_entries_added_total (redis_exporter), less loadlore_jobs_requeued_total (retries put back) and finished loadlore_jobs_total (the workers' finished jobs, by result).
 
@@ -322,6 +321,7 @@ services:
     version: "17"
     resources: { cpu: 1, memory: 1g }
     dataset: { rows: 100000, row_bytes: 512 }
+    disk: { profile: gp3 }
 
 workload:
   entry: lb

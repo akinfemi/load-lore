@@ -24,11 +24,11 @@ The api still holds a connection for the whole request, through the call to the 
 
 ## Why it helps
 
-In the starting design, a request holds its database connection for about 80 ms, nearly all of it waiting on the payment provider. 40 connections held 80 ms each can serve at most about 500 requests a second, however idle the database is: the starting design's reference run served at most 492, with its database at 6% CPU.
+In the starting design, a request holds its database connection for about 80 ms, nearly all of it waiting on the payment provider. 40 connections held 80 ms each can serve at most about 500 requests a second, however idle the database is: the starting design's reference run served at most 490, with its database at 5% CPU.
 
-With PgBouncer, the api still holds a connection for the whole request, but now it's one of up to 400 client connections. By Little's law, the number held at once is the arrival rate times the time each is held: at 1,400 requests a second and about 82 ms each, about 115. The reference run showed 115 of the 400 in use. PgBouncer, in transaction mode, lends one of its 20 server connections only while a query runs, about a millisecond, so at the same 1,400 requests a second it had 1 to 3 of them busy. Postgres saw 21 connections in all, and its CPU stayed at 7%.
+With PgBouncer, the api still holds a connection for the whole request, but now it's one of up to 400 client connections. By Little's law, the number held at once is the arrival rate times the time each is held: at 1,400 requests a second and about 82 ms each, about 115. The reference run showed 115 of the 400 in use. PgBouncer, in transaction mode, lends one of its 20 server connections only while a query runs, about a millisecond, so at the same 1,400 requests a second it had 2 to 4 of them busy. Postgres saw 10 connections in all, and its CPU stayed under 10%.
 
-In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 964 and 1015), the most served in any 10-second window went from 492 requests per second to 1,400, the top of the load profile: p99 was 88 ms in most windows, with a burst to 393 ms at 3:10 to 3:30, and there were no errors. 1,400 is where the profile stops, not where this design does. Compare your own pair of runs, not these numbers.
+In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 986 and 1017), the most served in any 10-second window went from 490 requests per second to 1,400, the top of the load profile: p99 was 88 ms in every window but the first, at 90 ms, and there were no errors. 1,400 is where the profile stops, not where this design does. Compare your own pair of runs, not these numbers.
 
 ## What it costs
 

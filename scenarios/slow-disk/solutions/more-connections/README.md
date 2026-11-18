@@ -22,9 +22,9 @@ More connections let more commits wait at once, and Postgres makes waiting toget
 ## What it costs
 
 - Every connection is a Postgres backend process with its own memory: 80 cost more than 16, and this database's `max_connections` of 100 leaves little room for more replicas.
-- It's slower: p99 goes from 2 ms to about 120 ms while the disk is slow, because every commit still waits on it.
+- It's slower: p99 goes from 2 ms to about 130 ms while the disk is slow, because every commit still waits on it.
 - It works because the waits are on the disk. When the database is busy instead, more connections just queue more work on its CPU, as in the connection pool trap.
 
 ## Reference run
 
-In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 977 for the starting design and 1001 for this one), 18–25% of requests failed in each 10 seconds of the slow disk in the starting design. Here none failed; p99 was 123 to 270 ms while the disk was slow, against 2 ms with `synchronous_commit` off (`solutions/async-commit`), and the database's CPU stayed at most 5%. [`report.md`](report.md) is this run's report. Compare your own pair of runs, not these numbers.
+In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 997 for the starting design and 1007 for this one), 21–28% of requests failed in each 10 seconds of the slow disk in the starting design. Here none failed; p99 was 126 to 302 ms while the disk was slow, against 2 ms with `synchronous_commit` off (`solutions/async-commit`), and the database's CPU stayed at most 6% after a jump to 19% in the first 10 seconds. [`report.md`](report.md) is this run's report. Compare your own pair of runs, not these numbers.

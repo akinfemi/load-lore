@@ -244,7 +244,7 @@ The report is made from the run folder alone, so `loadl report <run>` can rewrit
   Two diagnoses can both be true, one causing the other; the report says when it sees that.
 - **Why requests failed**, under the diagnosis: failed requests counted by cause (timeouts, refused connections, `max_connections`, an open circuit breaker…).
 - **Predictions**: each `expect` line, held or broken, with the measured value.
-- **Timeline**: faults, container deaths, stalls and the break, in order. A stall of the Docker host's own disk (a Postgres read nothing and committed almost nothing while its queries waited on the disk) is listed as the machine, not the design; its windows are flagged in `analysis.json` (`host_stall_s`), and near the break it makes the run inconclusive.
+- **Timeline**: faults, container deaths, stalls and the break, in order. A stall of the Docker host's disk (a Postgres read nothing and committed almost nothing while its queries waited on the disk; on a gp3 or io2 disk, only after it had been reading at least 20 blocks a second, since a cap can hold up flushes but not stop reads for seconds; never under a `disk_slow` fault on it) is listed as the machine, not the design; its windows are flagged in `analysis.json` (`host_stall_s`), and near the break it makes the run inconclusive.
 - **Assumptions**: what came from your design, what Loadlore chose for you, and how it sized the run.
 - **Thresholds**: every number the verdict and the rules use.
 - **Environment**, **per-window data** and the exact **design file**.

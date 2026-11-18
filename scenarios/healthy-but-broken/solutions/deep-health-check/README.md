@@ -26,4 +26,4 @@ Nothing else changed. `/readyz` answers only once the replica has pinged each of
 
 ## Reference run
 
-In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 1005 for the starting design and 1024 for this one), the starting design's load balancer kept all three replicas in rotation through the partition, and 33.3% of requests failed in every 10 seconds of it, at the 1-second timeout. Here it was down to two replicas within the window the partition started in: 11.8% of requests failed in that window, and none after. [`report.md`](report.md) is this run's report. Compare your own pair of runs, not these numbers.
+In the reference runs (8-vCPU machine, `--scale 1`, seed 1, host speed index 973 for the starting design and 1015 for this one), the starting design's load balancer kept all three replicas in rotation through the partition, and 33.3% of requests failed in every 10 seconds of it, at the 1-second timeout. Here it was down to two replicas within the window the partition started in: 11.9% of requests failed in that window, and none after. [`report.md`](report.md) is this run's report. Compare your own pair of runs, not these numbers.

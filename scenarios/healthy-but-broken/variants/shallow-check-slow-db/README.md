@@ -12,4 +12,4 @@ It holds: every request is served, about 200 ms slower while the database is slo
 
 Put next to the starting design, it's the trade-off of health checks: the shallow check missed a replica that couldn't do its job at all, and it rode out a dependency that was only slow. The deep check catches the first, and with a timeout too tight for the second, turns it into an outage.
 
-In the reference run (host speed index 1014), no request failed; p99 was 210 ms while the database was slow, against 2 ms before, and all three replicas stayed in rotation. With the tight deep check (`variants/deep-check-slow-db`), the same minute failed every request.
+In the reference run (host speed index 1026), no request failed; p99 was 210 ms while the database was slow, against 2 ms before, and all three replicas stayed in rotation. With the tight deep check (`variants/deep-check-slow-db`), the same minute failed every request.
