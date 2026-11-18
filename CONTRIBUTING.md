@@ -1,6 +1,6 @@
 # Contributing
 
-The [spec](https://claude.ai/artifact/TEkM1GHG5mpmKXTcH3jJ6m) is the source of truth for scope and behavior. Discuss spec changes there, as comments on the section they affect.
+Scope and behavior follow the maintainer's product spec, which isn't public. To propose a change to either, open an issue first.
 
 ## Setup
 

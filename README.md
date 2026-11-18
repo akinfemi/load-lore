@@ -94,7 +94,6 @@ Every command accepts `--json`.
 - **[Using Loadlore on your own](docs/how-to.md)**: setup, working through a scenario, writing your own design, run options, predictions, reading the report, comparing runs, and getting numbers you can trust.
 - **[Design file reference](skills/loadlore-designer/references/schema.md)**: every field, with defaults and the sources of the disk and network numbers.
 - **[Designer skill](skills/loadlore-designer/)**: lets an AI agent turn a plain-language description into a validated design file. Its eval set runs with `go run ./cmd/skilleval` and makes paid model calls.
-- **[Product spec](https://claude.ai/artifact/TEkM1GHG5mpmKXTcH3jJ6m)**: the source of truth for scope and behavior; its Build status section says what's built.
 
 ## Status
 
