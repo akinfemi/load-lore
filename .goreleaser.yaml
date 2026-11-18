@@ -19,6 +19,22 @@ builds:
       # The synthetic image the release workflow pushes for this version.
       - -X github.com/akinfemi/load-lore/internal/version.Image=ghcr.io/akinfemi/loadlore-synthetic:{{ .Version }}
 
+# Sign and notarize the macOS binaries with Apple, on the Linux runner
+# (quill). On only when the MACOS_* secrets are set; see CONTRIBUTING.md.
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+      ids: [loadl]
+      sign:
+        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
+        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
+      notarize:
+        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+        key: "{{ .Env.MACOS_NOTARY_KEY }}"
+        wait: true
+        timeout: 20m
+
 archives:
   - id: loadl
     formats: [tar.gz]
@@ -49,10 +65,13 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     # Pre-release tags (v0.2.0-rc.1) don't update the tap.
     skip_upload: auto
-    # loadl isn't signed or notarized, so macOS would refuse to open it.
+    # Only when the release isn't signed and notarized: macOS would refuse
+    # to open an unsigned loadl, so the cask clears its quarantine flag.
     hooks:
       post:
         install_steps: |
+          {{- if not (isEnvSet "MACOS_SIGN_P12") }}
           on_macos do
             run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/loadl"]
           end
+          {{- end }}

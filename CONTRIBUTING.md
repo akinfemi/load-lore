@@ -59,4 +59,21 @@ Push a tag such as `v0.1.0` from `main`. The `release` workflow runs the tests, 
 
 The tap update uses the `HOMEBREW_TAP_GITHUB_TOKEN` secret, a fine-grained token with write access to the tap's contents only. A new GHCR package starts private, so after the first release set `loadlore-synthetic` to public in its package settings.
 
+The macOS binaries are signed and notarized with Apple when five secrets are set, so Gatekeeper opens them whether they came from Homebrew or a browser download. Without the secrets the release still works, unsigned: the cask then clears macOS's quarantine flag on install, and a browser download needs `xattr -d com.apple.quarantine loadl`. Setting them up takes a paid Apple Developer Program membership, once:
+
+1. **A Developer ID Application certificate.** In Keychain Access, Certificate Assistant → Request a Certificate From a Certificate Authority, saved to disk. Upload it at [developer.apple.com → Certificates → +](https://developer.apple.com/account/resources/certificates/add) as Developer ID Application (only the account holder can), download the `.cer`, open it to add it to the keychain, then export the certificate with its private key as a `.p12` with a password.
+2. **An App Store Connect API key** for notarization: [App Store Connect → Users and Access → Integrations → Team Keys](https://appstoreconnect.apple.com/access/integrations/api), with Developer access. Download the `.p8` (it's offered once) and note its key ID and the issuer ID above the list.
+3. **The secrets:**
+
+   ```sh
+   R=akinfemi/load-lore
+   base64 -i Certificates.p12 | gh secret set MACOS_SIGN_P12 -R $R
+   gh secret set MACOS_SIGN_PASSWORD -R $R          # paste the .p12 password
+   base64 -i AuthKey_ABC123.p8 | gh secret set MACOS_NOTARY_KEY -R $R
+   gh secret set MACOS_NOTARY_KEY_ID -R $R --body ABC123
+   gh secret set MACOS_NOTARY_ISSUER_ID -R $R       # paste the issuer ID
+   ```
+
+The certificate lasts five years; the API key doesn't expire until revoked.
+
 To check the config without publishing anything: `goreleaser check`, then `goreleaser release --snapshot --clean`, which builds everything into `dist/`.
