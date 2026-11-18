@@ -239,11 +239,12 @@ The report is made from the run folder alone, so `loadl report <run>` can rewrit
   | Consumer lag | Jobs waited in a queue because its workers finished them more slowly than they arrived; a full queue, when it ran out of memory and refused new jobs. A run can hold while jobs back up: the requests that published them were answered fast. It says whether the workers ran out of CPU, were waiting on their calls, or were queuing for the same hot rows, where more job runners don't help. |
   | Hot rows | Writes queued on row locks for the same few rows. Reads of those rows can slow too, and past a point the contention burns the database's CPU. A slow disk under the whole run, which makes every commit hold its lock longer, still counts; one that starts mid-run doesn't, since it slows writes by itself. |
   | Hot shard | One shard took far more than its share of a caller's calls by key and was busy while another shard idled: the popular keys live on it, and more shards leave them there. |
+  | CPU bursts at the limit | A stall no other rule or fault explains, in which a component was throttled at its CPU limit for seconds while its average CPU stayed below it: work came in bursts that used up each 100 ms period's share early and waited for the next. Container limits behave this way; `resources.cpu_period_ms` shortens the period. |
 
   Two diagnoses can both be true, one causing the other; the report says when it sees that.
 - **Why requests failed**, under the diagnosis: failed requests counted by cause (timeouts, refused connections, `max_connections`, an open circuit breaker…).
 - **Predictions**: each `expect` line, held or broken, with the measured value.
-- **Timeline**: faults, container deaths, stalls and the break, in order.
+- **Timeline**: faults, container deaths, stalls and the break, in order. A stall of the Docker host's own disk (a Postgres read nothing and committed almost nothing while its queries waited on the disk) is listed as the machine, not the design; its windows are flagged in `analysis.json` (`host_stall_s`), and near the break it makes the run inconclusive.
 - **Assumptions**: what came from your design, what Loadlore chose for you, and how it sized the run.
 - **Thresholds**: every number the verdict and the rules use.
 - **Environment**, **per-window data** and the exact **design file**.

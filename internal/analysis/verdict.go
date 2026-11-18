@@ -149,6 +149,7 @@ func verdict(a *Analysis) Verdict {
 		v.Inconclusive = append(v.Inconclusive, stallText(stallsBefore)+
 			", by the end of the break's first window: a connection queue on one edge that a real network doesn't have, which may have made the break")
 	}
+	hostStallVerdict(a, &v, breakAt)
 	if a.Cutoff != "" && breakAt < 0 {
 		v.Inconclusive = append([]string{"before the system broke, " + a.Cutoff}, v.Inconclusive...)
 	}
@@ -396,6 +397,12 @@ func nameStalls(a *Analysis) {
 			continue
 		}
 		var titles []string
+		for _, h := range a.HostStalls {
+			if h.At < e.To && e.At <= h.To() && !slices.Contains(e.Rules, "host-stall") {
+				titles = append(titles, "a stall of the Docker host's disk (the machine, not the design)")
+				e.Rules = append(e.Rules, "host-stall")
+			}
+		}
 		for _, d := range a.Diagnoses {
 			if d.From < e.To && e.At <= d.To && !slices.Contains(titles, d.Title) {
 				titles = append(titles, d.Title)

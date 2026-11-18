@@ -120,7 +120,18 @@ xychart-beta
 
 ## Diagnosis
 
-No diagnosis rule fired. Rules checked: connection pool exhausted, queueing knee (rules version 21; thresholds below).
+### 1. CPU bursts at the limit (db0), from 4:10
+
+At 4:10, db0 was CPU-throttled for 10.8 s (summed over its threads) in 10 seconds while its average CPU was 50% of its 0.4-CPU limit. Docker enforces the limit as 40 ms of CPU in every 100 ms period: work that came in a burst used up a period's share early and waited for the next one, and requests piled up behind it until the burst cleared.
+
+Evidence:
+
+- db0 throttled 10.8 s in the window from 4:10, at 50% of its CPU limit on average <sub>(container_cpu_cfs_throttled_seconds_total (cAdvisor); container_cpu_usage_seconds_total (cAdvisor) ÷ the container's CPU limit)</sub>
+- 4:10: p99 reached 521 ms (5.8 ms at low load) for 10 s, then recovered; too short to count as a break <sub>(k6_http_req_duration_seconds (k6 histogram, end to end))</sub>
+
+**Try next:** This is how a container's CPU limit behaves (Kubernetes throttles the same way); a VM with a small CPU slows down evenly instead. A bigger CPU limit leaves each period more room; resources.cpu_period_ms on db0 shortens the period, which spreads the wait but runs the CPU closer to its limit.
+
+<sub>Rules version 22. Rules are deterministic and offline; their thresholds are listed below.</sub>
 
 ## Predictions
 
@@ -136,7 +147,7 @@ Loads and request rates depend on this machine: slower cores break the same desi
 
 | Time | Event |
 | --- | --- |
-| 4:10 | stall: p99 reached 521 ms (5.8 ms at low load) for 10 s, then recovered; too short to count as a break; no diagnosis covers it |
+| 4:10 | stall: p99 reached 521 ms (5.8 ms at low load) for 10 s, then recovered; too short to count as a break; diagnosed as CPU bursts at the limit (db0) |
 
 <sub>From events.jsonl: the fault timeline and Docker container events. Stalls are from the per-window numbers below, judged by the thresholds; each names the diagnoses that cover it, counting one that ends as the stall starts.</sub>
 
@@ -191,6 +202,8 @@ Loads and request rates depend on this machine: slower cores break the same desi
 - **Autoscale lag:** the run broke while an autoscaled service's replicas were at 90% or more of their CPU limit: below its max, the autoscaler hadn't caught up; at its max (autoscale ceiling), it had nothing left to add.
 - **Hot rows:** for two windows in a row, 2 or more of a Postgres's backends waiting on locks on average, while a caller's writes to it took 3x their low-load time or more (and 2 ms more). Reads of the same rows may slow too, and the summary says when the database's CPU per request reached 3x its low-load value: the contention burning CPU. A queueing knee on that database's CPU at the same time then points at the rows. Windows with a disk_slow fault on the database don't count.
 - **Hot shard:** for two windows in a row, a caller sending calls to shards by key, one shard taking 1.5x the calls of the next busiest shard or more while it was busy (CPU 80% or more, or its calls 3x their low-load time and 1 ms more) and another shard's CPU under 50%. A queueing knee on that shard at the same time then points at its popular keys.
+- **CPU bursts at the limit:** a stall no other rule covers and no fault made, in which a component was CPU-throttled for 3 s or more in a window (summed over its threads) while its average CPU stayed under 90% of its limit: bursts of work used up a CFS period's quota early and waited for the next period.
+- **Host disk stalls:** for 2 seconds or more, a Postgres on the Docker host's own disk read no blocks and committed at most 10% of its median over the 10 s before (50 a second or more), while 5 or more queries waited on disk reads or WAL flushes and its exporter answered. Near the break it makes the run inconclusive; anywhere else it's a caveat, and its windows are flagged and left out of exports.
 
 ## Environment
 

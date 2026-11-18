@@ -68,6 +68,9 @@ type Analysis struct {
 	// AcceptStalls are where Toxiproxy held up new connections on an
 	// edge (see accepts.go), over the whole load.
 	AcceptStalls []AcceptStall `json:"accept_stalls,omitempty"`
+	// HostStalls are stretches in which the Docker host's disk stopped
+	// answering: the machine, not the design.
+	HostStalls []HostStall `json:"host_stalls,omitempty"`
 
 	Verdict     Verdict        `json:"verdict"`
 	Diagnoses   []*Diagnosis   `json:"diagnoses"`
@@ -129,6 +132,9 @@ type Window struct {
 	// containers.
 	HostSteal  *float64 `json:"host_steal,omitempty"`
 	HostOthers *float64 `json:"host_other_cpus,omitempty"`
+	// HostStallS is how many of the window's seconds a host stall
+	// covered (HostStalls): the machine, not the design.
+	HostStallS float64 `json:"host_stall_s,omitempty"`
 }
 
 // ServiceWindow is one design service in one window.
@@ -408,7 +414,9 @@ func Analyze(dir string) (*Analysis, error) {
 	}
 	all := a.Windows
 	a.Windows = all[:a.Analyzed]
+	a.HostStalls = hostStalls(st, &p, t0, end)
 	a.Verdict = verdict(a)
+	markHostStalls(a)
 	a.PeakVUs = peakVUs(a)
 	for _, w := range a.Windows {
 		a.PeakVUsAll = maxPtr(a.PeakVUsAll, w.VUs)

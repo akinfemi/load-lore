@@ -118,6 +118,12 @@ type World struct {
 	// seconds behind it; StaleShare, with it, is the share of api's reads
 	// after a write from ro, 100 a second, that miss the write.
 	ReplicaLagS, StaleShare func(t float64) float64
+
+	// DiskStall, when set, writes db's commits, block reads, exporter
+	// scrapes and queries waiting on disk reads once a second: while it
+	// says true, db reads nothing and commits only the exporter's own
+	// transactions, with 40 queries waiting on the disk.
+	DiskStall func(t float64) bool
 }
 
 // Event is an events.jsonl line at At seconds into the load.
@@ -264,6 +270,13 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 		blksRead = newC(counters, "pg_stat_database_blks_read", map[string]string{"service": "db", "datname": plan.DBName})
 		blkReadTime = newC(counters, "pg_stat_database_blk_read_time", map[string]string{"service": "db", "datname": plan.DBName})
 	}
+	var commits, stallReads, scrapes, ioWaits *counter
+	if w.DiskStall != nil {
+		commits = newC(counters, "pg_stat_database_xact_commit", map[string]string{"service": "db", "datname": plan.DBName})
+		stallReads = newC(counters, "pg_stat_database_blks_read", map[string]string{"service": "db", "datname": plan.DBName})
+		scrapes = newC(counters, "pg_exporter_scrapes_total", map[string]string{"service": "db"})
+		ioWaits = newC(gauges, "pg_stat_activity_count", map[string]string{"service": "db", "datname": plan.DBName, "state": "active", "wait_event_type": "IO", "wait_event": "DataFileRead"})
+	}
 	var lockWaits *counter
 	if w.LockWaits != nil {
 		lockWaits = newC(gauges, "pg_lock_waits_waiting", map[string]string{"service": "db"})
@@ -397,6 +410,18 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			if lockWaits != nil {
 				set(lockWaits, w.LockWaits(el))
 			}
+			if commits != nil {
+				add(scrapes, 1)
+				if w.DiskStall(el) {
+					add(commits, 30)
+					add(stallReads, 0)
+					set(ioWaits, 40)
+				} else {
+					add(commits, 30+ok)
+					add(stallReads, 100)
+					set(ioWaits, 1)
+				}
+			}
 			if lag != nil {
 				set(lag, w.ReplicaLagS(el))
 				share := 0.0
@@ -441,6 +466,12 @@ func WriteRun(t testing.TB, w World, scale float64) string {
 			set(inUse, 0)
 			if lockWaits != nil {
 				set(lockWaits, 0)
+			}
+			if commits != nil {
+				add(scrapes, 1)
+				add(commits, 0)
+				add(stallReads, 0)
+				set(ioWaits, 0)
 			}
 			set(pending, 0)
 		}

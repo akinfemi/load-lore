@@ -64,7 +64,7 @@ const (
 )
 
 // RuleVersion changes whenever a rule's logic or thresholds change.
-const RuleVersion = "21"
+const RuleVersion = "22"
 
 func diagnose(a *Analysis) []*Diagnosis {
 	out := []*Diagnosis{}
@@ -109,6 +109,7 @@ func diagnose(a *Analysis) []*Diagnosis {
 		}
 		out = append(out, d)
 	}
+	out = append(out, cpuBursts(a, out)...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].From < out[j].From })
 	return out
 }
