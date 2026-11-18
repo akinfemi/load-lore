@@ -80,6 +80,8 @@ func newRootCmd() *cobra.Command {
 		newPredictCmd(g),
 		newStatusCmd(g),
 		newWatchCmd(g),
+		newExportCmd(g),
+		newSweepCmd(g),
 		newVersionCmd(g),
 	)
 	return root

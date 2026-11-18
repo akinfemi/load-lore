@@ -28,6 +28,8 @@ loadl hint                                     # the next hint for the scenario 
 loadl scenario check scenarios/<name>          # run a scenario and its solutions; check its claims
 loadl down                                     # remove anything a run left behind
 loadl doctor                                   # check Docker, capacity, image, host speed and power, with fixes
+loadl export                                   # write runs to a corpus for the simulator, one record each; --to <dir>
+loadl sweep                                    # stress one operation per component at several CPU sizes; --list, --resume
 ```
 
 Every command accepts `--json`.

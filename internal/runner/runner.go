@@ -52,6 +52,8 @@ type Options struct {
 	CoolTo int
 	// Series places the run in a run --repeat series; nil for one run.
 	Series *analysis.SeriesRef
+	// Sweep places the run in a loadl sweep; nil otherwise.
+	Sweep *SweepRef
 	// Full runs the whole profile. Otherwise the load stops
 	// EarlyStopAfter after the live check confirms a break.
 	Full bool
@@ -112,6 +114,7 @@ type Result struct {
 	Kept        bool                `json:"kept"`
 	Loadl       string              `json:"loadl_version"`
 	Series      *analysis.SeriesRef `json:"series,omitempty"`
+	Sweep       *SweepRef           `json:"sweep,omitempty"`
 	// StoppedEarly is set when the load stopped after a break instead of
 	// finishing the profile.
 	StoppedEarly *analysis.EarlyStop `json:"stopped_early,omitempty"`
@@ -120,6 +123,17 @@ type Result struct {
 	Verdict        string `json:"verdict,omitempty"`
 	VerdictSummary string `json:"verdict_summary,omitempty"`
 	Report         string `json:"report,omitempty"`
+}
+
+// SweepRef places a run in a loadl sweep: which case, at which CPU size
+// of the component under test, and which of its repeats.
+type SweepRef struct {
+	ID     string  `json:"id"`
+	Case   string  `json:"case"`
+	Target string  `json:"target"` // the component under test
+	CPU    float64 `json:"cpu"`
+	Peak   float64 `json:"peak_rps"` // the top of the ramp
+	Index  int     `json:"index"`    // the repeat, from 1
 }
 
 // setupAllowance covers seeding, copying data and starting the stack.
@@ -196,7 +210,7 @@ func Run(parent context.Context, opt Options, newDriver func(context.Context) (d
 	}
 	defer dir.Close()
 	designPath, _ := filepath.Abs(opt.DesignPath)
-	res := &Result{RunID: id, Dir: dir.Path, Design: d.Name, DesignPath: designPath, Started: started.UTC(), Seed: opt.Seed, ReuseData: opt.ReuseData, Loadl: version.Version, Warnings: []string{}, Series: opt.Series}
+	res := &Result{RunID: id, Dir: dir.Path, Design: d.Name, DesignPath: designPath, Started: started.UTC(), Seed: opt.Seed, ReuseData: opt.ReuseData, Loadl: version.Version, Warnings: []string{}, Series: opt.Series, Sweep: opt.Sweep}
 	if err := dir.Write("design.yaml", raw); err != nil {
 		return nil, err
 	}

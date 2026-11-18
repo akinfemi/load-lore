@@ -271,7 +271,14 @@ Loadlore measures real containers on your machine, so the machine is part of the
 - **Compare runs from the same machine, at the same scale and seed.** CPU limits are fractions of your cores, so a faster machine breaks at a higher load. Before a run, Loadlore measures a host speed index (the reference Mac is 1000) and warns when yours is much lower than a scenario's reference.
 - **Expect some spread.** Two runs of the same design differ. For a decision that matters, use `--repeat 3`.
 
-## 9. Files and cleanup
+## 9. Export runs and sweep components
+
+These feed the simulator (Phase 3); you don't need them to use the lab.
+
+- **`loadl export`** writes every run under `.loadlore/runs` (or the runs you name) to a corpus folder, `.loadlore/corpus` unless `--to` names another, such as a checkout of a corpus repository. Each run becomes `runs/<run-id>.json`: its design, plan and analysis, analyzed again with this loadl's rules, and the conditions it ran under: the network profile (round trip asked for and measured), connections through Toxiproxy, each Postgres's disk profile, each service's CPU period, a `--quick` start, the host and its speed index. `index.json` lists every record. A record says whether fitting may use the run: not when it was inconclusive, didn't complete, or came before the speed index. Windows that a stall of the Docker host's disk touched are left out and listed under `excluded_windows`. Windows a diagnosis covers, such as CPU bursts at the limit, stay in and are labelled under `window_labels`. Export writes files only; it never commits or pushes.
+- **`loadl sweep`** runs small designs that each stress one operation on one component, the target, at several CPU sizes (`--cpus`, default 0.25 to 2), three times each (`--repeat`). The cases are Postgres point, range and batch reads and flushed writes, Redis gets and sets, a service-to-service hop, a load balancer hop, replica reads, queue publishes, and a fan-out read over two shards. `--list` prints them, and naming cases runs only those. Each ramp tops out at twice a guess of the target's capacity and doubles when a run holds. A run whose break names a component other than the target is kept but not counted. The sweep keeps its designs, state and `summary.md` in `.loadlore/sweeps/<id>/`, saves after every run, and `--resume <id>` continues it. The defaults make about 135 runs, a night on an 8-CPU Docker host.
+
+## 10. Files and cleanup
 
 Each run gets a folder, `.loadlore/runs/<run-id>/`, in the directory you ran it from:
 
@@ -293,7 +300,7 @@ loadl down        # remove every container, network and volume Loadlore made
 loadl down --all  # and the cached seeded datasets
 ```
 
-## 10. When something goes wrong
+## 11. When something goes wrong
 
 | Symptom | What to do |
 | --- | --- |
