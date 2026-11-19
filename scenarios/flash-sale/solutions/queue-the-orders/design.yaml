@@ -48,7 +48,7 @@ services:
     resources: { cpu: 1, memory: 1g }
     config: { max_connections: 100, shared_buffers: 256MB }
     dataset: { rows: 1000, row_bytes: 256 }
-    disk: { profile: gp3 }   # a network-attached cloud volume: each commit waits about 1 ms longer for its WAL
+    disk: { profile: gp3 }   # a network-attached cloud volume: each commit waits about 1.4 ms per write and per flush of its WAL
 
 workload:
   entry: lb

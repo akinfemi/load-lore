@@ -586,11 +586,11 @@ func TestDiskProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := p.Service("db")
-	if db.Disk == nil || *db.Disk != (Disk{Profile: "gp3", ReadMs: 1, WriteMs: 1, IOPS: 1500, MiBps: 62.5}) || !db.SlowDisk || db.Config["track_io_timing"] != "on" {
+	if db.Disk == nil || *db.Disk != (Disk{Profile: "gp3", ReadMs: 2, WriteMs: 2, IOPS: 1500, MiBps: 62.5}) || !db.SlowDisk || db.Config["track_io_timing"] != "on" {
 		t.Fatalf("gp3 at 0.5: disk %+v, slow disk %v", db.Disk, db.SlowDisk)
 	}
 	a := findAssumption(p, "services.db.disk")
-	if a == nil || a.Value != "gp3: 1 ms per read, 1 ms per write, 1500 IOPS, 62.5 MiB/s" ||
+	if a == nil || a.Value != "gp3: 2 ms per read, 2 ms per write, 1500 IOPS, 62.5 MiB/s" ||
 		!strings.Contains(a.Why, "Source: AWS, Amazon EBS General Purpose SSD volumes: https://docs.aws.amazon.com/") || !strings.Contains(a.Why, "the waits not") {
 		t.Errorf("gp3 assumption %+v", a)
 	}
@@ -600,7 +600,7 @@ func TestDiskProfiles(t *testing.T) {
 	if p, err = Build(d, Options{RunID: "r", Scale: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if db := p.Service("db"); db.Disk == nil || *db.Disk != (Disk{Profile: "io2", IOPS: 20000, MiBps: 4000}) {
+	if db := p.Service("db"); db.Disk == nil || *db.Disk != (Disk{Profile: "io2", ReadMs: 1, WriteMs: 1, IOPS: 20000, MiBps: 4000}) {
 		t.Errorf("io2: disk %+v", db.Disk)
 	}
 	if a := findAssumption(p, "services.db.disk"); a == nil || !strings.Contains(a.Why, "provisioned in the design: 20000") {
@@ -696,7 +696,7 @@ func TestReplicaDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	ro, db := p.Service("ro"), p.Service("db")
-	if ro.Disk == nil || *ro.Disk != (Disk{ReadMs: 1, IOPS: 1000}) || !ro.SlowDisk || ro.Config["track_io_timing"] != "on" {
+	if ro.Disk == nil || *ro.Disk != (Disk{ReadMs: 2, IOPS: 1000}) || !ro.SlowDisk || ro.Config["track_io_timing"] != "on" {
 		t.Errorf("replica disk %+v, slow %v, config %v", ro.Disk, ro.SlowDisk, ro.Config)
 	}
 	if db.Disk != nil || db.SlowDisk {

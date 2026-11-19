@@ -95,7 +95,7 @@ type Disk struct {
 
 // Default disk: about a gp3 volume's read latency and baseline IOPS.
 const (
-	DefaultDiskReadMs = 1
+	DefaultDiskReadMs = 2
 	DefaultDiskIOPS   = 3000
 )
 

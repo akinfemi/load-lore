@@ -8,16 +8,21 @@ type Case struct {
 	Name   string
 	What   string
 	Target string
+	// Also are other components a run may break at and still measure the
+	// operation: the fan-out's second shard, loaded the same as the first.
+	Also []string
 	// PerCPU is an estimate of the requests a second one CPU of the target
-	// serves at its break; the ramp climbs to twice that times the CPU,
-	// and doubles when a run holds. Point reads and Redis gets are from
-	// the first sweep runs (18 Nov: 2,140 rps at 0.5 CPU, 6,520 at 0.25,
-	// and the lb about 7,500 at 0.25); the rest scale from those or are
-	// guesses the doubling corrects.
+	// serves at its break, at Calls calls a request; the ramp climbs to
+	// twice that times the CPU, and doubles when a run holds. They are the
+	// medians of the 18-19 Nov full sweep, except writes, which held at
+	// every size it tried (12,000 a second at 1 CPU, 94% busy).
 	PerCPU float64
-	// Calls is how many calls to the target each request makes, for the
-	// rate per call in the summary.
+	// Calls is how many calls to the target each request makes at least.
+	// A point whose ramp would need the load generator past MaxRPS makes
+	// more calls a request instead, unless Fixed: one request is one call
+	// by nature (a hop through the load balancer).
 	Calls int
+	Fixed bool
 	// MaxCPU caps the sizes worth running: Redis runs commands on one
 	// thread. 0 for none.
 	MaxCPU float64
@@ -29,6 +34,7 @@ type Case struct {
 type Params struct {
 	Name      string
 	CPU       float64
+	Calls     int // calls to the target a request
 	Low, Peak int // requests a second at the bottom and top of the ramp
 }
 
@@ -72,16 +78,16 @@ workload:
 // Cases is the sweep's catalogue, in the order it runs.
 var Cases = []Case{
 	{Name: "pg-point-read", What: "Postgres reads of one row by key", Target: "db", PerCPU: 4300, Calls: 10,
-		Design: apiHead + `        - { target: db, op: read, count: 10 }
+		Design: apiHead + `        - { target: db, op: read, count: {{.Calls}} }
 ` + dbPool + pgTarget + ramp},
-	{Name: "pg-range-read", What: "Postgres reads of 50 rows in key order", Target: "db", PerCPU: 1200, Calls: 5,
-		Design: apiHead + `        - { target: db, op: read, query: range, rows: 50, count: 5 }
+	{Name: "pg-range-read", What: "Postgres reads of 50 rows in key order", Target: "db", PerCPU: 3900, Calls: 5,
+		Design: apiHead + `        - { target: db, op: read, query: range, rows: 50, count: {{.Calls}} }
 ` + dbPool + pgTarget + ramp},
-	{Name: "pg-batch-read", What: "Postgres reads of 20 rows by key in one statement", Target: "db", PerCPU: 1600, Calls: 5,
-		Design: apiHead + `        - { target: db, op: read, query: batch, rows: 20, count: 5 }
+	{Name: "pg-batch-read", What: "Postgres reads of 20 rows by key in one statement", Target: "db", PerCPU: 6000, Calls: 5,
+		Design: apiHead + `        - { target: db, op: read, query: batch, rows: 20, count: {{.Calls}} }
 ` + dbPool + pgTarget + ramp},
-	{Name: "pg-write", What: "Postgres single-row updates, each committed and flushed to the WAL", Target: "db", PerCPU: 3000, Calls: 1,
-		Design: apiHead + `        - { target: db, op: write }
+	{Name: "pg-write", What: "Postgres single-row updates, each committed and flushed to the WAL", Target: "db", PerCPU: 12000, Calls: 1,
+		Design: apiHead + `        - { target: db, op: write, count: {{.Calls}} }
 ` + dbPool + pgTarget + `
 workload:
   entry: api
@@ -92,23 +98,23 @@ workload:
     - hold: { rps: {{.Peak}}, for: 30s }
 `},
 	{Name: "redis-get", What: "Redis gets", Target: "cache", PerCPU: 26000, Calls: 10, MaxCPU: 1,
-		Design: apiHead + `        - { target: cache, op: get, count: 10 }
+		Design: apiHead + `        - { target: cache, op: get, count: {{.Calls}} }
     pools: { cache: 64 }
 
   cache:
     kind: redis
     resources: { cpu: {{.CPU}}, memory: 512m }
 ` + ramp},
-	{Name: "redis-set", What: "Redis sets", Target: "cache", PerCPU: 22000, Calls: 10, MaxCPU: 1,
-		Design: apiHead + `        - { target: cache, op: set, count: 10 }
+	{Name: "redis-set", What: "Redis sets", Target: "cache", PerCPU: 25000, Calls: 10, MaxCPU: 1,
+		Design: apiHead + `        - { target: cache, op: set, count: {{.Calls}} }
     pools: { cache: 64 }
 
   cache:
     kind: redis
     resources: { cpu: {{.CPU}}, memory: 512m }
 ` + ramp},
-	{Name: "app-hop", What: "HTTP calls from one service to another that does no work", Target: "backend", PerCPU: 2500, Calls: 10,
-		Design: apiHead + `        - { target: backend, op: http, count: 10 }
+	{Name: "app-hop", What: "HTTP calls from one service to another that does no work", Target: "backend", PerCPU: 6600, Calls: 10,
+		Design: apiHead + `        - { target: backend, op: http, count: {{.Calls}} }
     pools: { backend: 64 }
 
   backend:
@@ -117,7 +123,7 @@ workload:
     behavior:
       cpu_ms: 0
 ` + ramp},
-	{Name: "lb-hop", What: "requests through the load balancer to services that do no work", Target: "lb", PerCPU: 30000, Calls: 1, MaxCPU: 0.5,
+	{Name: "lb-hop", What: "requests through the load balancer to services that do no work", Target: "lb", PerCPU: 29000, Calls: 1, Fixed: true, MaxCPU: 0.5,
 		Design: `version: 1
 name: {{.Name}}
 
@@ -143,7 +149,7 @@ workload:
     - hold: { rps: {{.Peak}}, for: 30s }
 `},
 	{Name: "pg-replica-read", What: "reads of one row by key from a streaming read replica", Target: "ro", PerCPU: 4300, Calls: 10,
-		Design: apiHead + `        - { target: ro, op: read, count: 10 }
+		Design: apiHead + `        - { target: ro, op: read, count: {{.Calls}} }
     pools: { ro: { size: 64, min: 64 } }
 
   db:
@@ -161,8 +167,8 @@ workload:
     config: { max_connections: 100, shared_buffers: 256MB }
     disk: { profile: laptop }
 ` + ramp},
-	{Name: "queue-publish", What: "jobs published to a queue (Redis Streams), taken by a worker that does no work", Target: "jobs", PerCPU: 6000, Calls: 5, MaxCPU: 1,
-		Design: apiHead + `        - { target: jobs, op: publish, count: 5 }
+	{Name: "queue-publish", What: "jobs published to a queue (Redis Streams), taken by a worker that does no work", Target: "jobs", PerCPU: 19000, Calls: 5, MaxCPU: 1,
+		Design: apiHead + `        - { target: jobs, op: publish, count: {{.Calls}} }
     pools: { jobs: 64 }
 
   jobs:
@@ -172,13 +178,13 @@ workload:
   worker:
     image: loadlore/synthetic
     role: worker
-    resources: { cpu: 1, memory: 256m }
+    resources: { cpu: 2, memory: 256m }
     consume: { from: jobs, concurrency: 50 }
     behavior:
       cpu_ms: 0
 ` + ramp},
-	{Name: "pg-shard-fanout", What: "reads of one row from every one of two Postgres shards at once", Target: "db0", PerCPU: 8600, Calls: 5,
-		Design: apiHead + `        - { shards: [db0, db1], shard_by: all, op: read, count: 5 }
+	{Name: "pg-shard-fanout", What: "reads of one row from every one of two Postgres shards at once", Target: "db0", Also: []string{"db1"}, PerCPU: 6700, Calls: 5,
+		Design: apiHead + `        - { shards: [db0, db1], shard_by: all, op: read, count: {{.Calls}} }
     pools: { db0: { size: 48, min: 48 }, db1: { size: 48, min: 48 } }
 
   db0:

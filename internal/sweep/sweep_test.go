@@ -24,7 +24,14 @@ func TestCasesValidate(t *testing.T) {
 			if c.MaxCPU > 0 && cpu > c.MaxCPU {
 				continue
 			}
-			raw, err := Render(c, cpu, Peak(c, cpu))
+			if ok, _ := Fits(c, cpu); !ok {
+				continue
+			}
+			calls, peak := Shape(c, cpu, MaxDoublings)
+			if peak > MaxRPS && !c.Fixed {
+				t.Errorf("%s at %g CPU: the top doubled ramp is %d rps", c.Name, cpu, peak)
+			}
+			raw, err := Render(c, cpu, calls, peak)
 			if err != nil {
 				t.Fatalf("%s: %v", c.Name, err)
 			}
@@ -83,8 +90,9 @@ func TestDo(t *testing.T) {
 	if err == nil {
 		t.Fatal("the stopped sweep didn't say so")
 	}
+	_, peak1 := Shape(c[0], 0.5, 1)
 	p := st.Points[0]
-	if p.Peak != 2*Peak(c[0], 0.5) || len(p.Runs) != 3 || counted(p) != 2 {
+	if p.Peak != peak1 || len(p.Runs) != 3 || counted(p) != 2 {
 		t.Fatalf("after the stop: peak %d, %d runs, %d counted", p.Peak, len(p.Runs), counted(p))
 	}
 	if p.Runs[2].Counts || !p.Runs[1].Counts || p.Runs[2].LimitedBy != "api" {
@@ -102,7 +110,7 @@ func TestDo(t *testing.T) {
 		t.Errorf("after resuming: %d runs, %d counted, done %v", len(p.Runs), counted(p), st.Done)
 	}
 	sum, err := os.ReadFile(filepath.Join(dir, "summary.md"))
-	if err != nil || !strings.Contains(string(sum), fmt.Sprintf("| 0.5 | %d rps | held, broke, broke, broke | 2 of 3 |", 2*Peak(c[0], 0.5))) {
+	if err != nil || !strings.Contains(string(sum), fmt.Sprintf("| 0.5 | 10 | %d rps | held, broke, broke, broke | 2 of 3 |", peak1)) {
 		t.Errorf("summary:\n%s", sum)
 	}
 }
@@ -117,5 +125,47 @@ func TestLimitedBy(t *testing.T) {
 	ss = []analysis.Saturation{{Component: "db", What: "connections"}, {Component: "api", What: "CPU"}}
 	if got := limitedBy(ss); got != "api" {
 		t.Errorf("limited by %q", got)
+	}
+}
+
+// A ramp past MaxRPS makes more calls a request instead, keeping the calls
+// a second; a one-call case past it is skipped as not fitting.
+func TestShapeAndFits(t *testing.T) {
+	c := Case{Name: "w", Target: "db", PerCPU: 12000, Calls: 1}
+	if calls, peak := Shape(c, 0.25, 0); calls != 1 || peak != 6000 {
+		t.Errorf("0.25: %d calls, %d rps", calls, peak)
+	}
+	if calls, peak := Shape(c, 2, 0); calls != 5 || peak != 9600 {
+		t.Errorf("2: %d calls, %d rps", calls, peak)
+	}
+	if calls, peak := Shape(c, 2, 2); calls != 20 || peak != 9600 {
+		t.Errorf("2, doubled twice: %d calls, %d rps", calls, peak)
+	}
+	lb := Case{Name: "lb", Target: "lb", PerCPU: 29000, Calls: 1, Fixed: true}
+	if ok, _ := Fits(lb, 0.25); !ok {
+		t.Error("the lb at 0.25 should fit")
+	}
+	if ok, why := Fits(lb, 0.5); ok || !strings.Contains(why, "14,500") {
+		t.Errorf("the lb at 0.5: %v %q", ok, why)
+	}
+	if calls, peak := Shape(lb, 0.25, 0); calls != 1 || peak != 14500 {
+		t.Errorf("lb: %d calls, %d rps", calls, peak)
+	}
+}
+
+// The fan-out's second shard counts for the first; resuming a sweep counts
+// its runs again by today's rules.
+func TestCountsAlso(t *testing.T) {
+	c, _ := Find([]string{"pg-shard-fanout"})
+	off := 1000.0
+	p := &Point{Case: c[0].Name, Target: "db0", Calls: 5}
+	for who, want := range map[string]bool{"db0": true, "db1": true, "api": false} {
+		r := &Run{Verdict: "broke", BreakRPS: &off, LimitedBy: who}
+		if got := counts(c[0], p, r); got != want {
+			t.Errorf("limited by %s: counts %v", who, got)
+		}
+	}
+	if counts(c[0], p, &Run{Verdict: "inconclusive", BreakRPS: &off, LimitedBy: "db0"}) {
+		t.Error("an inconclusive run counted")
 	}
 }

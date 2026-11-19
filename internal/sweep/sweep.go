@@ -40,6 +40,13 @@ const DefaultRepeat = 3
 // holds, before the point is left as held.
 const MaxDoublings = 2
 
+// MaxRPS is the highest ramp top the load generator is given: on the
+// reference Mac, k6 with its 1.5 CPU dropped arrivals from about 12,000
+// requests a second. A point that would need more makes more calls to the
+// target per request instead; one whose case can't (Fixed) and whose
+// break is estimated past MaxRPS is skipped, for a bigger machine.
+const MaxRPS = 10000
+
 // Find returns the named cases, every case for none.
 func Find(names []string) ([]Case, error) {
 	if len(names) == 0 {
@@ -60,21 +67,39 @@ func Find(names []string) ([]Case, error) {
 	return out, nil
 }
 
-// Render fills a case's design at a CPU size and ramp top.
-func Render(c Case, cpu float64, peak int) ([]byte, error) {
+// Render fills a case's design at a CPU size, calls a request and ramp top.
+func Render(c Case, cpu float64, calls, peak int) ([]byte, error) {
 	t, err := template.New(c.Name).Parse(c.Design)
 	if err != nil {
 		return nil, err
 	}
 	var b bytes.Buffer
 	low := max(10, peak/20)
-	err = t.Execute(&b, Params{Name: fmt.Sprintf("sweep-%s-cpu%s", c.Name, cpuName(cpu)), CPU: cpu, Low: low, Peak: peak})
+	err = t.Execute(&b, Params{Name: fmt.Sprintf("sweep-%s-cpu%s", c.Name, cpuName(cpu)), CPU: cpu, Calls: calls, Low: low, Peak: peak})
 	return b.Bytes(), err
 }
 
-// Peak is the first ramp top for a case at a CPU size: twice the guess.
-func Peak(c Case, cpu float64) int {
-	return int(math.Round(2*c.PerCPU*cpu/10) * 10)
+// Shape is a point's calls a request and ramp top after some doublings:
+// the top is twice the estimate, in calls a second, doubled each time; the
+// calls a request rise from the case's own until the top fits under
+// MaxRPS, unless the case is Fixed.
+func Shape(c Case, cpu float64, doublings int) (calls, peak int) {
+	top := 2 * c.PerCPU * float64(c.Calls) * cpu * math.Pow(2, float64(doublings)) // calls a second
+	calls = c.Calls
+	if !c.Fixed {
+		calls = max(c.Calls, int(math.Ceil(top/MaxRPS)))
+	}
+	return calls, int(math.Round(top/float64(calls)/10) * 10)
+}
+
+// Fits says whether the load generator can drive a point on this machine,
+// and why not: a Fixed case's estimated break past MaxRPS can't be.
+func Fits(c Case, cpu float64) (bool, string) {
+	if est := c.PerCPU * cpu; c.Fixed && est > MaxRPS {
+		return false, fmt.Sprintf("its break is estimated at %s requests a second, past the %s the load generator drives cleanly here, and each request is one call to %s: it waits for a bigger machine",
+			analysis.Count(est), analysis.Count(MaxRPS), c.Target)
+	}
+	return true, ""
 }
 
 func cpuLabel(cpu float64) string { return strconv.FormatFloat(cpu, 'f', -1, 64) }
@@ -87,8 +112,8 @@ type Point struct {
 	Case   string  `json:"case"`
 	Target string  `json:"target"`
 	CPU    float64 `json:"cpu"`
-	Calls  int     `json:"calls_per_request"`
-	Peak   int     `json:"peak_rps"` // the ramp top the repeats use
+	Calls  int     `json:"calls_per_request"` // what the repeats use
+	Peak   int     `json:"peak_rps"`          // the ramp top the repeats use
 	Runs   []*Run  `json:"runs"`
 	Held   bool    `json:"held,omitempty"` // every ramp top tried held
 }
@@ -97,6 +122,7 @@ type Point struct {
 type Run struct {
 	RunID   string   `json:"run_id"`
 	Peak    int      `json:"peak_rps"`
+	Calls   int      `json:"calls_per_request,omitempty"` // 0 in sweeps from before it varied
 	Verdict string   `json:"verdict"`
 	BreakAt *float64 `json:"break_at_s,omitempty"`
 	// BreakRPS is the offered rate at the break, and PerCall the calls a
@@ -120,7 +146,16 @@ type State struct {
 	Repeat  int       `json:"repeat"`
 	CPUs    []float64 `json:"cpus"`
 	Points  []*Point  `json:"points"`
-	Done    bool      `json:"done"`
+	// Skipped are the points this machine can't drive, and why.
+	Skipped []Skip `json:"skipped,omitempty"`
+	Done    bool   `json:"done"`
+}
+
+// Skip is a point the sweep didn't run.
+type Skip struct {
+	Case string  `json:"case"`
+	CPU  float64 `json:"cpu"`
+	Why  string  `json:"why"`
 }
 
 // Options are a sweep's settings.
@@ -177,6 +212,9 @@ func Do(ctx context.Context, o Options) (*State, string, error) {
 		done += counted(p)
 	}
 	fmt.Fprintf(out, "sweep %s: %d points, %d runs (%d done)\n  folder %s\n", st.ID, len(st.Points), total, done, dir)
+	for _, k := range st.Skipped {
+		fmt.Fprintf(out, "  not run here: %s at %s CPU: %s\n", k.Case, cpuLabel(k.CPU), k.Why)
+	}
 	coolTo := 0
 	for _, p := range st.Points {
 		for _, r := range p.Runs {
@@ -192,12 +230,12 @@ func Do(ctx context.Context, o Options) (*State, string, error) {
 				return st, dir, err
 			}
 			idx := counted(p) + 1
-			fmt.Fprintf(out, "\n== %s at %s CPU, ramp to %d rps, run %d of %d\n", p.Case, cpuLabel(p.CPU), p.Peak, idx, st.Repeat)
-			raw, err := Render(c, p.CPU, p.Peak)
+			fmt.Fprintf(out, "\n== %s at %s CPU, %d calls a request, ramp to %d rps, run %d of %d\n", p.Case, cpuLabel(p.CPU), p.Calls, p.Peak, idx, st.Repeat)
+			raw, err := Render(c, p.CPU, p.Calls, p.Peak)
 			if err != nil {
 				return st, dir, err
 			}
-			path := filepath.Join(dir, "designs", fmt.Sprintf("%s-cpu%s-peak%d.yaml", p.Case, cpuName(p.CPU), p.Peak))
+			path := filepath.Join(dir, "designs", fmt.Sprintf("%s-cpu%s-calls%d-peak%d.yaml", p.Case, cpuName(p.CPU), p.Calls, p.Peak))
 			if err := os.WriteFile(path, raw, 0o644); err != nil {
 				return st, dir, err
 			}
@@ -205,7 +243,7 @@ func Do(ctx context.Context, o Options) (*State, string, error) {
 			ro.DesignPath, ro.Seed, ro.Progress, ro.CoolTo = path, st.Seed, out, coolTo
 			ro.Sweep = &runner.SweepRef{ID: st.ID, Case: p.Case, Target: p.Target, CPU: p.CPU, Peak: float64(p.Peak), Index: idx}
 			res, err := o.RunOne(ctx, ro, o.NewDriver)
-			r := &Run{Peak: p.Peak}
+			r := &Run{Peak: p.Peak, Calls: p.Calls}
 			if res != nil {
 				r.RunID = res.RunID
 				if res.Host != nil && res.Host.Speed != nil {
@@ -228,9 +266,9 @@ func Do(ctx context.Context, o Options) (*State, string, error) {
 			// A run that held climbed too low: double the top and run the
 			// point again, up to MaxDoublings times.
 			if r.Verdict == string(analysis.VerdictHeld) {
-				if doublings(p) < MaxDoublings {
-					p.Peak *= 2
-					fmt.Fprintf(out, "  held: the ramp's top doubles to %d rps\n", p.Peak)
+				if n := doublings(p); n <= MaxDoublings {
+					p.Calls, p.Peak = Shape(c, p.CPU, n)
+					fmt.Fprintf(out, "  held: the ramp's top doubles, to %d rps at %d calls a request\n", p.Peak, p.Calls)
 				} else {
 					p.Held = true
 					fmt.Fprintf(out, "  held at every top tried; the point is left as held\n")
@@ -265,10 +303,28 @@ func judge(o Options, dir string, p *Point, r *Run) {
 		at, off := b.At, b.Offered
 		r.BreakAt, r.BreakRPS = &at, &off
 		r.LimitedBy = limitedBy(b.Saturation)
-		per := off * float64(p.Calls) / p.CPU
+		per := off * float64(runCalls(p, r)) / p.CPU
 		r.PerCall = &per
-		r.Counts = v.Kind == analysis.VerdictBroke && r.LimitedBy == p.Target
+		r.Counts = counts(caseNamed(o.Cases, p.Case), p, r)
 	}
+}
+
+// counts is whether a run measures its point: it broke, conclusively, at
+// the target or a component that stands for it.
+func counts(c Case, p *Point, r *Run) bool {
+	if r.Verdict != string(analysis.VerdictBroke) || r.BreakRPS == nil {
+		return false
+	}
+	return r.LimitedBy == p.Target || slices.Contains(c.Also, r.LimitedBy)
+}
+
+// runCalls is the calls a request a run made: its own record, or for a
+// sweep from before calls varied, the point's.
+func runCalls(p *Point, r *Run) int {
+	if r.Calls > 0 {
+		return r.Calls
+	}
+	return p.Calls
 }
 
 // limitedBy is the component that gave out: the most saturated, where a
@@ -291,7 +347,7 @@ func limitedBy(ss []analysis.Saturation) string {
 func counted(p *Point) int {
 	n := 0
 	for _, r := range p.Runs {
-		if r.Peak == p.Peak && r.Error == "" && r.Verdict != string(analysis.VerdictHeld) {
+		if r.Peak == p.Peak && runCalls(p, r) == p.Calls && r.Error == "" && r.Verdict != string(analysis.VerdictHeld) {
 			n++
 		}
 	}
@@ -345,6 +401,14 @@ func open(o Options) (*State, string, error) {
 			return nil, "", err
 		}
 		st.Done = false
+		// Count again with today's rules, such as a second shard standing
+		// for the first.
+		for _, p := range st.Points {
+			c := caseNamed(o.Cases, p.Case)
+			for _, r := range p.Runs {
+				r.Counts = counts(c, p, r)
+			}
+		}
 		return &st, dir, nil
 	}
 	if o.Repeat < 1 {
@@ -360,14 +424,19 @@ func open(o Options) (*State, string, error) {
 			if c.MaxCPU > 0 && cpu > c.MaxCPU {
 				continue
 			}
-			raw, err := Render(c, cpu, Peak(c, cpu))
+			if ok, why := Fits(c, cpu); !ok {
+				st.Skipped = append(st.Skipped, Skip{Case: c.Name, CPU: cpu, Why: why})
+				continue
+			}
+			calls, peak := Shape(c, cpu, 0)
+			raw, err := Render(c, cpu, calls, peak)
 			if err != nil {
 				return nil, "", err
 			}
 			if _, diags := design.Load(raw); diags.HasErrors() {
 				return nil, "", fmt.Errorf("sweep case %s at %s CPU doesn't validate: %v", c.Name, cpuLabel(cpu), diags.Errors())
 			}
-			st.Points = append(st.Points, &Point{Case: c.Name, Target: c.Target, CPU: cpu, Calls: c.Calls, Peak: Peak(c, cpu), Runs: []*Run{}})
+			st.Points = append(st.Points, &Point{Case: c.Name, Target: c.Target, CPU: cpu, Calls: calls, Peak: peak, Runs: []*Run{}})
 		}
 	}
 	dir := filepath.Join(Root, st.ID)

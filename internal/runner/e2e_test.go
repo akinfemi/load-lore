@@ -2,8 +2,9 @@
 
 package runner
 
-// End-to-end: runs examples/smoke.yaml on the local Docker engine and checks
-// the run folder and that nothing is left behind. Needs Docker and the
+// End-to-end: runs examples/smoke.yaml, its database on a gp3 disk, on the
+// local Docker engine and checks the run folder and that nothing is left
+// behind. Needs Docker and the
 // loadlore/synthetic:dev image (make image). Run with make e2e.
 
 import (
@@ -23,7 +24,19 @@ import (
 func TestE2ESmoke(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "runs")
-	res, err := Run(ctx, Options{DesignPath: "../../examples/smoke.yaml", Seed: 7, Root: root, Progress: testWriter{t}},
+	src, err := os.ReadFile("../../examples/smoke.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	withDisk := strings.Replace(string(src), "    dataset: { rows: 20000, row_bytes: 256 }\n", "    dataset: { rows: 20000, row_bytes: 256 }\n    disk: { profile: gp3 }\n", 1)
+	if withDisk == string(src) {
+		t.Fatal("smoke.yaml's database changed; give it the disk another way")
+	}
+	designPath := filepath.Join(t.TempDir(), "smoke.yaml")
+	if err := os.WriteFile(designPath, []byte(withDisk), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Run(ctx, Options{DesignPath: designPath, Seed: 7, Root: root, Progress: testWriter{t}},
 		func(ctx context.Context) (driver.Driver, error) { return local.New(ctx) })
 	if err != nil {
 		t.Fatal(err)
@@ -94,6 +107,14 @@ func TestE2ESmoke(t *testing.T) {
 	}
 	if !stack || !k6 {
 		t.Errorf("network profile applied to the stack %v, to k6 %v:\n%s", stack, k6, evs)
+	}
+
+	// The gp3 disk was measured: dm-delay's 2 ms ticks come out at 1 to 2 ms.
+	if len(res.Disks) != 1 || res.Disks[0].Unmeasured != "" || res.Disks[0].AddedReadMs < 0.8 || res.Disks[0].AddedReadMs > 2.2 {
+		t.Errorf("disks: %+v", res.Disks)
+	}
+	if b, _ := os.ReadFile(filepath.Join(res.Dir, "report.md")); !strings.Contains(string(b), "measured +") {
+		t.Error("the report doesn't give the disk's measured wait")
 	}
 
 	// The killed replica shows in container state.

@@ -11,8 +11,11 @@ import (
 // rather than on waits and caps picked until a result shows.
 type DiskProfile struct {
 	Name string
-	// ReadMs and WriteMs are added to every read, and every write and
-	// fsync, in whole milliseconds (the kernel's dm-delay step).
+	// ReadMs and WriteMs are asked of the kernel's dm-delay for every
+	// read, and every write and flush, in whole milliseconds, its step.
+	// dm-delay counts in 1 ms ticks, so a request waits between one tick
+	// less than asked and what was asked: about half a millisecond less on
+	// average. Each run measures the wait it stood on.
 	ReadMs, WriteMs int
 	// IOPS is the default when the design sets none; 0 means it must be
 	// set (the volume type is bought by its provisioned IOPS). MinIOPS and
@@ -47,20 +50,22 @@ var DiskProfiles = map[string]DiskProfile{
 			"and reads that miss the database's memory mostly come back from the host's own page cache, with no cap",
 	},
 	DiskGP3: {
-		Name: DiskGP3, ReadMs: 1, WriteMs: 1,
+		Name: DiskGP3, ReadMs: 2, WriteMs: 2,
 		IOPS: 3000, MinIOPS: 3000, MaxIOPS: 80000,
 		MiBps:  func(int) float64 { return 125 },
 		Source: "AWS, Amazon EBS General Purpose SSD volumes: https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html",
 		Basis: "a gp3 volume at its baseline: 3,000 IOPS and 125 MiB/s, included in its price, and up to 80,000 IOPS provisioned. " +
-			"AWS publishes no exact latency, only single-digit milliseconds, so the 1 ms Loadlore adds to every read, write and fsync is its own estimate: the low end of that range, so the disk is flattered rather than handicapped. " +
+			"AWS publishes no exact latency, only single-digit milliseconds, so the wait is Loadlore's own estimate, at the low end of that range, so the disk is flattered rather than handicapped. " +
+			"Loadlore asks dm-delay for 2 ms on every read, write and flush; it counts in the kernel's 1 ms ticks, so a request waits 1 to 2 ms, about 1.4 ms on average (measured 19 Nov; 1 ms asked gave about 0.45 ms, under AWS's range). " +
+			"A WAL fsync is a write and a flush, each waiting, so a commit waits about twice that. Each run measures the waits it stood on, given below. " +
 			"Reads and writes are capped separately, so a mixed load can reach up to twice the IOPS. Provisioned throughput isn't modelled",
 	},
 	DiskIO2: {
-		Name: DiskIO2, MinIOPS: 100, MaxIOPS: 256000,
+		Name: DiskIO2, ReadMs: 1, WriteMs: 1, MinIOPS: 100, MaxIOPS: 256000,
 		MiBps:  func(iops int) float64 { return math.Min(4000, 0.256*float64(iops)) },
 		Source: "AWS, Amazon EBS Provisioned IOPS SSD volumes: https://docs.aws.amazon.com/ebs/latest/userguide/provisioned-iops.html",
 		Basis: "an io2 Block Express volume at its provisioned IOPS (100 to 256,000), with 0.256 MiB/s of throughput per provisioned IOPS, up to 4,000. " +
-			"AWS states an average latency under 500 microseconds, below dm-delay's 1 ms step, so nothing is added and the Docker host's own disk sets the latency. " +
+			"AWS states an average latency under 500 microseconds. Loadlore asks dm-delay for 1 ms on every read, write and flush, which its 1 ms ticks make 0 to 1 ms, about 0.45 ms on average (measured 19 Nov), on top of the Docker host's own disk. Each run measures the waits it stood on, given below. " +
 			"Reads and writes are capped separately, so a mixed load can reach up to twice the IOPS",
 	},
 }

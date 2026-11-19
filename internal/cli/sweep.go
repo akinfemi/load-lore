@@ -30,16 +30,21 @@ gets and sets, a service-to-service hop, a load balancer hop, reads from
 a replica, queue publishes and a fan-out read over two shards. Each runs
 at several CPU sizes of the target, a few times each, on a 3-minute ramp
 that stops a minute after the break. A point whose run holds doubles its
-ramp's top, up to twice. Everything but the target is sized to give out
-later; a run whose break names another component is kept but not counted.
+ramp's top, up to twice. A ramp that would need the load generator past
+10,000 requests a second makes more calls to the target per request
+instead; a point that can't (a load balancer hop is one call a request)
+is listed in the summary as not run here. Everything but the target is
+sized to give out later; a run whose break names another component is
+kept but not counted.
 
 The sweep's designs, state and summary.md go to .loadlore/sweeps/<id>/;
 the runs to .loadlore/runs, each tagged with its sweep, case and CPU size,
 for loadl export. --resume <id> continues a stopped sweep. Runs after the
 first wait for the host speed index to get back near the first's.
 
-The defaults (11 cases, 5 sizes, 3 runs; Redis and queues up to 1 CPU, the lb 0.5)
-make about 135 runs, overnight on an 8-CPU Docker host. --list prints the cases.`,
+The defaults (11 cases, 5 sizes, 3 runs; Redis and queues up to 1 CPU, the lb
+0.25 on an 8-CPU host) make about 130 runs, overnight on an 8-CPU Docker host.
+--list prints the cases.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cases, err := sweep.Find(args)
 			if err != nil {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/akinfemi/load-lore/internal/bench"
+	"github.com/akinfemi/load-lore/internal/diskprobe"
 	"github.com/akinfemi/load-lore/internal/plan"
 	"github.com/akinfemi/load-lore/internal/rundir"
 )
@@ -70,6 +71,31 @@ type NetworkResult struct {
 	Factor       float64 `json:"factor,omitempty"`
 	DelayUs      int     `json:"delay_us"`
 	Uncalibrated string  `json:"uncalibrated,omitempty"` // why it wasn't measured
+}
+
+// DiskResult is a modelled disk as a run applied it: the waits asked of
+// dm-delay and what a probe measured on the device before the stack
+// started, with the wait off (Base) and on (Measured). dm-delay counts in
+// the kernel's 1 ms ticks, so a request waits between one tick less than
+// asked and what was asked. A WAL flush is a write and a flush, each
+// delayed, so it waits about twice.
+type DiskResult struct {
+	Service     string            `json:"service"`
+	Container   string            `json:"container"`
+	Profile     string            `json:"profile,omitempty"` // empty for waits set by hand
+	ReadMs      int               `json:"asked_read_ms"`
+	WriteMs     int               `json:"asked_write_ms"`
+	Base        *diskprobe.Result `json:"base,omitempty"`
+	Measured    *diskprobe.Result `json:"measured,omitempty"`
+	AddedReadMs float64           `json:"added_read_ms,omitempty"` // mean, measured minus base
+	AddedSyncMs float64           `json:"added_sync_ms,omitempty"`
+	Unmeasured  string            `json:"unmeasured,omitempty"` // why the probe didn't run
+}
+
+// DiskReporter is a driver that says how it applied modelled disks, once
+// Up has returned.
+type DiskReporter interface {
+	DisksApplied() []DiskResult
 }
 
 // NetworkReporter is a driver that says how it applied the network

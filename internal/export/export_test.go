@@ -27,7 +27,7 @@ func TestBuild(t *testing.T) {
 	if r.Fit.Usable || len(r.Fit.Why) != 1 {
 		t.Errorf("old run fit = %+v", r.Fit)
 	}
-	if d := c.Disks["db"]; d.Profile != "host" {
+	if d := c.Disks["db"]; d.Profile != "host" || d.WriteCost != "cpu" || d.WriteCostWhy != HostDiskWriteCost {
 		t.Errorf("db disk = %+v", d)
 	}
 	if c.CPUPeriods["db"] != 100 {
@@ -59,6 +59,33 @@ func TestBuild(t *testing.T) {
 		if x.Index == 6 {
 			t.Error("the stalled window is still in the analysis")
 		}
+	}
+}
+
+// A run on a modelled disk isn't fitted while its cgroup cap stalls
+// fsyncs, and carries the disk's measured waits; its write isn't a CPU
+// cost.
+func TestModelledDiskUnusable(t *testing.T) {
+	w := analysistest.Healthy()
+	w.DBDisk = "{ profile: gp3 }"
+	w.RunJSON = map[string]any{
+		"network": map[string]any{"profile": "same-zone", "rtt_ms": 0.3}, "proxied_connections": 0,
+		"host":  map[string]any{"cpus": 8, "speed": bench.Speed{Index: 1000}},
+		"disks": []map[string]any{{"service": "db", "container": "db", "asked_read_ms": 2, "asked_write_ms": 2, "added_read_ms": 1.4, "added_sync_ms": 2.9}},
+	}
+	r, err := Build(analysistest.WriteRun(t, w, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Fit.Usable || len(r.Fit.Why) != 1 || r.Fit.Why[0] != "db's gp3 disk: "+ModelledDiskStalls {
+		t.Errorf("fit = %+v", r.Fit)
+	}
+	d := r.Conditions.Disks["db"]
+	if d.Profile != "gp3" || d.Model == nil || d.WriteCost != "" {
+		t.Errorf("db disk = %+v", d)
+	}
+	if ws := r.Conditions.DiskWaits; len(ws) != 1 || ws[0].AddedReadMs != 1.4 || ws[0].ReadMs != 2 {
+		t.Errorf("disk waits = %+v", ws)
 	}
 }
 

@@ -3,9 +3,13 @@ package local
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/akinfemi/load-lore/internal/diskprobe"
+	"github.com/akinfemi/load-lore/internal/driver"
 	"github.com/akinfemi/load-lore/internal/plan"
 )
 
@@ -164,4 +168,73 @@ func hasSlowDisk(p *plan.Plan) bool {
 		}
 	}
 	return false
+}
+
+// How many requests each disk probe makes: enough for a steady mean and
+// 5th to 95th percentiles, in a second or two at the waits modelled.
+const (
+	probeReads = 400
+	probeSyncs = 150
+)
+
+var _ driver.DiskReporter = (*Driver)(nil)
+
+// measureDisk measures container's modelled disk, under volume vol, with
+// its waits off and then on, and leaves them on. The probe runs as root:
+// the synthetic image's own user can't write the database's files. dm-delay's waits come out
+// shorter than asked (it counts in the kernel's 1 ms ticks), so each run
+// records what it stood on. A probe that fails is recorded, not fatal;
+// failing to set the waits is.
+func (d *Driver) measureDisk(ctx context.Context, s *plan.Service, container, vol string) (driver.DiskResult, error) {
+	name := d.slowDiskName(container)
+	r := driver.DiskResult{Service: s.Name, Container: container, Profile: s.Disk.Profile, ReadMs: s.Disk.ReadMs, WriteMs: s.Disk.WriteMs}
+	probe := func() (*diskprobe.Result, error) {
+		out, err := d.docker(ctx, "run", "--rm", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID, "-v", vol+":/d",
+			"--user", "0", d.plan.Infra.SyntheticImg, "diskprobe", "/d", strconv.Itoa(probeReads), strconv.Itoa(probeSyncs))
+		if err != nil {
+			return nil, err
+		}
+		var pr diskprobe.Result
+		if err := json.Unmarshal(bytes.TrimSpace(out), &pr); err != nil {
+			return nil, fmt.Errorf("diskprobe printed %q", out)
+		}
+		return &pr, nil
+	}
+	var err error
+	set := false
+	if err = d.diskDelay(ctx, name, 0, 0); err == nil {
+		if r.Base, err = probe(); err == nil {
+			if err = d.diskDelay(ctx, name, s.Disk.ReadMs, s.Disk.WriteMs); err != nil {
+				return r, err
+			}
+			set = true
+			if r.Measured, err = probe(); err == nil {
+				r.AddedReadMs = round3((r.Measured.Read.MeanUs - r.Base.Read.MeanUs) / 1000)
+				r.AddedSyncMs = round3((r.Measured.Sync.MeanUs - r.Base.Sync.MeanUs) / 1000)
+			}
+		}
+	}
+	if err != nil {
+		r.Base, r.Measured, r.Unmeasured = nil, nil, err.Error()
+	}
+	if _, cerr := d.docker(ctx, "run", "--rm", "--label", LabelOwner+"=1", "--label", LabelRun+"="+d.runID, "-v", vol+":/d",
+		"--user", "0", d.plan.Infra.SyntheticImg, "diskprobe", "clean", "/d"); cerr != nil && r.Unmeasured == "" {
+		r.Unmeasured = "removing the probe's files: " + cerr.Error()
+	}
+	// Whatever the probe did, the disk runs with its own waits.
+	if !set {
+		if err := d.diskDelay(ctx, name, s.Disk.ReadMs, s.Disk.WriteMs); err != nil {
+			return r, err
+		}
+	}
+	d.event("disk_measured", map[string]any{"service": r.Service, "container": container, "asked_read_ms": r.ReadMs, "asked_write_ms": r.WriteMs,
+		"added_read_ms": r.AddedReadMs, "added_sync_ms": r.AddedSyncMs, "unmeasured": r.Unmeasured})
+	return r, nil
+}
+
+// DisksApplied says how Up applied each modelled disk.
+func (d *Driver) DisksApplied() []driver.DiskResult {
+	d.diskMu.Lock()
+	defer d.diskMu.Unlock()
+	return append([]driver.DiskResult(nil), d.disks...)
 }

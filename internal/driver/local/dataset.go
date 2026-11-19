@@ -78,15 +78,17 @@ func (d *Driver) prepareData(ctx context.Context, s *plan.Service, container str
 		return "", err
 	}
 	if s.Disk != nil {
+		// The disk's write wait starts once the data is in, so the copy
+		// doesn't pay it; measuring the disk sets it.
+		r, err := d.measureDisk(ctx, s, container, run)
+		if err != nil {
+			return "", fmt.Errorf("%s's disk: setting its waits: %w", s.Name, err)
+		}
+		d.diskMu.Lock()
+		d.disks = append(d.disks, r)
+		d.diskMu.Unlock()
 		if err := d.dropPageCache(ctx); err != nil {
 			return "", fmt.Errorf("%s's disk: emptying the page cache: %w", s.Name, err)
-		}
-		// The disk's write wait starts once the data is in, so the copy
-		// doesn't pay it.
-		if s.Disk.WriteMs > 0 {
-			if err := d.diskDelay(ctx, d.slowDiskName(container), s.Disk.ReadMs, s.Disk.WriteMs); err != nil {
-				return "", fmt.Errorf("%s's disk: setting its write wait: %w", s.Name, err)
-			}
 		}
 	}
 	d.event("data_copy", map[string]any{"service": s.Name, "container": container, "volume": run, "seconds": time.Since(start).Seconds()})

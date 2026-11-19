@@ -59,6 +59,10 @@ type Driver struct {
 	netReady bool
 	net      *driver.NetworkResult
 
+	// disks is each modelled disk's waits, asked and measured.
+	diskMu sync.Mutex
+	disks  []driver.DiskResult
+
 	stopEvents func()
 	eventsDone chan struct{}
 	downOnce   sync.Once

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -76,6 +77,9 @@ type Conditions struct {
 	// Docker host's own disk, named), "host" for that disk with no profile
 	// named, or "custom" for waits and caps set by hand.
 	Disks map[string]Disk `json:"disks"`
+	// DiskWaits is each modelled disk's waits, asked and measured by the
+	// run; nil before runs measured them.
+	DiskWaits []driver.DiskResult `json:"disk_waits,omitempty"`
 	// CPUPeriods is each service's CFS period, in ms.
 	CPUPeriods map[string]int `json:"cpu_period_ms"`
 	Scale      float64        `json:"scale"`
@@ -88,7 +92,23 @@ type Conditions struct {
 type Disk struct {
 	Profile string     `json:"profile"`
 	Model   *plan.Disk `json:"model,omitempty"` // waits and caps, when modelled
+	// WriteCost says what a flushed write on this disk stands for in
+	// fitting: "cpu" on the Docker host's own disk, where a commit's
+	// flush is cheap enough that its cost is the database's CPU, not a
+	// disk speed. WriteCostWhy says why.
+	WriteCost    string `json:"write_cost,omitempty"`
+	WriteCostWhy string `json:"write_cost_why,omitempty"`
 }
+
+// Fitting reasons that depend on the disk.
+const (
+	// HostDiskWriteCost is why a write on the Docker host's own disk is a
+	// CPU cost: in the 19 Nov sweep a Postgres with 1 CPU flushed 12,000
+	// commits a second at 94% CPU, about 80 µs of CPU each.
+	HostDiskWriteCost = "the Docker host's own disk: a flushed commit costs about 80 µs, nearly all of it the database's CPU, because the reference Mac's VM flushes cheaply. Fit it as CPU per write, not as a disk speed"
+	// ModelledDiskStalls is why a run on a modelled disk isn't fitted yet.
+	ModelledDiskStalls = "the cgroup I/O cap that models its IOPS stalls a WAL fsync for up to 3 s about once a minute, and holds about 1 read in 1,000 for about 100 ms, which a real volume wouldn't; runs on a modelled disk aren't fitted until that throttle is replaced"
+)
 
 // Fit says whether fitting may use the run, and why not.
 type Fit struct {
@@ -156,7 +176,7 @@ func Build(dir string) (*Record, error) {
 		Rules: analysis.RuleVersion, Series: res.Series, Sweep: res.Sweep,
 		DesignYAML: a.DesignYAML, Plan: a.Plan, Excluded: []Excluded{}, Labels: []Label{},
 	}
-	c := Conditions{Era: EraAllProxied, Network: res.Network, Quick: res.Quick, Scale: res.Scale, Seed: res.Seed, Host: res.Host,
+	c := Conditions{Era: EraAllProxied, Network: res.Network, Quick: res.Quick, DiskWaits: res.Disks, Scale: res.Scale, Seed: res.Seed, Host: res.Host,
 		Disks: map[string]Disk{}, CPUPeriods: map[string]int{}}
 	if res.Network != nil {
 		c.Era = EraFaultedProxied
@@ -180,9 +200,9 @@ func Build(dir string) (*Record, error) {
 		}
 		switch {
 		case s.Disk == nil && named != "":
-			c.Disks[s.Name] = Disk{Profile: named}
+			c.Disks[s.Name] = Disk{Profile: named, WriteCost: "cpu", WriteCostWhy: HostDiskWriteCost}
 		case s.Disk == nil:
-			c.Disks[s.Name] = Disk{Profile: "host"}
+			c.Disks[s.Name] = Disk{Profile: "host", WriteCost: "cpu", WriteCostWhy: HostDiskWriteCost}
 		case s.Disk.Profile != "":
 			c.Disks[s.Name] = Disk{Profile: s.Disk.Profile, Model: s.Disk}
 		default:
@@ -225,6 +245,11 @@ func Build(dir string) (*Record, error) {
 	}
 	if c.SpeedIndex == nil {
 		r.Fit.Why = append(r.Fit.Why, "no host speed index: from before it was measured")
+	}
+	for _, name := range slices.Sorted(maps.Keys(c.Disks)) {
+		if dk := c.Disks[name]; dk.Model != nil {
+			r.Fit.Why = append(r.Fit.Why, fmt.Sprintf("%s's %s disk: %s", name, dk.Profile, ModelledDiskStalls))
+		}
 	}
 	r.Fit.Usable = len(r.Fit.Why) == 0
 	return r, nil

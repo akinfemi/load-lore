@@ -25,8 +25,12 @@ func Summary(st *State) string {
 	}
 	for _, name := range names {
 		c := caseNamed(nil, name)
-		fmt.Fprintf(&b, "## %s\n\n%s, on %s (%d calls a request).\n\n", name, c.What, c.Target, c.Calls)
-		b.WriteString("| CPU | Ramp to | Runs | Counted | Break (median) | Calls/s per CPU (median) | Limited by |\n| --- | --- | --- | --- | --- | --- | --- |\n")
+		on := c.Target
+		if len(c.Also) > 0 {
+			on += " (or " + strings.Join(c.Also, ", ") + ")"
+		}
+		fmt.Fprintf(&b, "## %s\n\n%s, on %s (at least %d calls a request).\n\n", name, c.What, on, c.Calls)
+		b.WriteString("| CPU | Calls a request | Ramp to | Runs | Counted | Break (median) | Calls/s per CPU (median) | Limited by |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n")
 		for _, p := range st.Points {
 			if p.Case != name {
 				continue
@@ -53,8 +57,15 @@ func Summary(st *State) string {
 			if p.Held {
 				peak += " (held)"
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s | %d of %d | %s | %s | %s |\n", cpuLabel(p.CPU), peak, orDash(strings.Join(verdicts, ", ")), n, st.Repeat,
+			fmt.Fprintf(&b, "| %s | %d | %s | %s | %d of %d | %s | %s | %s |\n", cpuLabel(p.CPU), p.Calls, peak, orDash(strings.Join(verdicts, ", ")), n, st.Repeat,
 				medianText(breaks, "%s rps"), medianText(per, "%s"), orDash(strings.Join(limits, ", ")))
+		}
+		b.WriteString("\n")
+	}
+	if len(st.Skipped) > 0 {
+		b.WriteString("## Not run here\n\n")
+		for _, k := range st.Skipped {
+			fmt.Fprintf(&b, "- %s at %s CPU: %s.\n", k.Case, cpuLabel(k.CPU), k.Why)
 		}
 		b.WriteString("\n")
 	}

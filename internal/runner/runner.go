@@ -101,6 +101,9 @@ type Result struct {
 	// through Toxiproxy for faults.
 	Network *driver.NetworkResult `json:"network,omitempty"`
 	Proxied int                   `json:"proxied_connections"`
+	// Disks is each modelled disk's waits, asked and as measured on the
+	// device before the stack started.
+	Disks []driver.DiskResult `json:"disks,omitempty"`
 	// Quick is set on a run whose profile was shortened (--quick).
 	Quick       *plan.Quick         `json:"quick,omitempty"`
 	Started     time.Time           `json:"started"`
@@ -388,6 +391,17 @@ func runStack(ctx context.Context, drv driver.Driver, p *plan.Plan, dir *rundir.
 		defer cancel()
 		_ = drv.Collect(cctx, dir, time.Time{}, time.Time{})
 		return fmt.Errorf("starting the stack: %w", err)
+	}
+	if dr, ok := drv.(driver.DiskReporter); ok {
+		res.Disks = dr.DisksApplied()
+		for _, dk := range res.Disks {
+			switch {
+			case dk.Unmeasured != "":
+				res.Warnings = append(res.Warnings, fmt.Sprintf("%s's disk: its waits couldn't be measured (%s), so they are dm-delay's own, which come out shorter than asked", dk.Container, dk.Unmeasured))
+			default:
+				progress(fmt.Sprintf("%s's disk: %d ms per read and %d per write asked, reads %s ms and flushed writes %s ms slower measured", dk.Container, dk.ReadMs, dk.WriteMs, fmtF(dk.AddedReadMs), fmtF(dk.AddedSyncMs)))
+			}
+		}
 	}
 	if nr, ok := drv.(driver.NetworkReporter); ok {
 		if n := nr.NetworkApplied(); n != nil {

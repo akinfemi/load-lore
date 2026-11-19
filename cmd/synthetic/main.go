@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/akinfemi/load-lore/internal/bench"
+	"github.com/akinfemi/load-lore/internal/diskprobe"
 	"github.com/akinfemi/load-lore/internal/netem"
 	"github.com/akinfemi/load-lore/internal/synthetic"
 )
@@ -46,6 +47,16 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "netprobe" {
 		if err := netprobeCmd(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "synthetic netprobe:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	// diskprobe measures the wait of the disk under a directory, for a
+	// modelled disk: diskprobe <dir> <reads> <syncs> prints the reads' and
+	// fdatasyncs' latencies as JSON; diskprobe clean <dir> removes its files.
+	if len(os.Args) > 1 && os.Args[1] == "diskprobe" {
+		if err := diskprobeCmd(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synthetic diskprobe:", err)
 			os.Exit(1)
 		}
 		return
@@ -80,6 +91,25 @@ func netprobeCmd(args []string) error {
 		return nil
 	}
 	return errors.New("usage: netprobe echo | netprobe rtt <host:port> <n>")
+}
+
+func diskprobeCmd(args []string) error {
+	switch {
+	case len(args) == 2 && args[0] == "clean":
+		return diskprobe.Clean(args[1])
+	case len(args) == 3:
+		reads, err1 := strconv.Atoi(args[1])
+		syncs, err2 := strconv.Atoi(args[2])
+		if err1 != nil || err2 != nil || reads < 1 || syncs < 1 {
+			return fmt.Errorf("bad counts %q %q", args[1], args[2])
+		}
+		r, err := diskprobe.Probe(args[0], reads, syncs)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(r)
+	}
+	return errors.New("usage: diskprobe <dir> <reads> <syncs> | diskprobe clean <dir>")
 }
 
 func netemCmd(args []string) error {

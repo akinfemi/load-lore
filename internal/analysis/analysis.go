@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -308,21 +309,22 @@ type DataReuse struct {
 
 // runRecord is what analysis needs from run.json.
 type runRecord struct {
-	RunID        string             `json:"run_id"`
-	Status       string             `json:"status"`
-	Error        string             `json:"error"`
-	Scale        float64            `json:"scale"`
-	Seed         int64              `json:"seed"`
-	ReuseData    bool               `json:"reuse_data"`
-	LoadStarted  *time.Time         `json:"load_started"`
-	LoadEnded    *time.Time         `json:"load_ended"`
-	Host         *driver.Host       `json:"host"`
-	Warnings     []string           `json:"warnings"`
-	Notes        []string           `json:"notes"`
-	Load         *driver.LoadResult `json:"load"`
-	Loadl        string             `json:"loadl_version"`
-	Series       *SeriesRef         `json:"series"`
-	StoppedEarly *EarlyStop         `json:"stopped_early"`
+	RunID        string              `json:"run_id"`
+	Status       string              `json:"status"`
+	Error        string              `json:"error"`
+	Scale        float64             `json:"scale"`
+	Seed         int64               `json:"seed"`
+	ReuseData    bool                `json:"reuse_data"`
+	LoadStarted  *time.Time          `json:"load_started"`
+	LoadEnded    *time.Time          `json:"load_ended"`
+	Host         *driver.Host        `json:"host"`
+	Warnings     []string            `json:"warnings"`
+	Notes        []string            `json:"notes"`
+	Load         *driver.LoadResult  `json:"load"`
+	Loadl        string              `json:"loadl_version"`
+	Series       *SeriesRef          `json:"series"`
+	StoppedEarly *EarlyStop          `json:"stopped_early"`
+	Disks        []driver.DiskResult `json:"disks"`
 }
 
 // Analyze reads a run folder and analyzes it.
@@ -359,6 +361,7 @@ func Analyze(dir string) (*Analysis, error) {
 	if a.Assumptions.Loadlore == nil {
 		a.Assumptions.Loadlore = []plan.Assumption{}
 	}
+	a.Assumptions.Loadlore = withMeasuredDisks(a.Assumptions.Loadlore, rec.Disks)
 	a.SeriesRef = rec.Series
 	if a.Series, err = loadSeries(rec.Series); err != nil {
 		a.Warnings = append(a.Warnings, "the run's series: "+err.Error())
@@ -1230,3 +1233,51 @@ func maxOf(m map[string]float64) float64 {
 	}
 	return mx
 }
+
+// withMeasuredDisks adds to each modelled disk's assumption what the run
+// measured on it: dm-delay's waits come out shorter than asked.
+func withMeasuredDisks(as []plan.Assumption, disks []driver.DiskResult) []plan.Assumption {
+	if len(disks) == 0 {
+		return as
+	}
+	out := slices.Clone(as)
+	for i := range out {
+		svc, ok := strings.CutPrefix(out[i].Field, "services.")
+		if !ok {
+			continue
+		}
+		svc, ok = strings.CutSuffix(svc, ".disk")
+		if !ok {
+			continue
+		}
+		var parts, why []string
+		for _, dk := range disks {
+			if dk.Service != svc {
+				continue
+			}
+			who := ""
+			if dk.Container != dk.Service {
+				who = dk.Container + ": "
+			}
+			if dk.Unmeasured != "" || dk.Measured == nil || dk.Base == nil {
+				parts = append(parts, who+"not measured")
+				continue
+			}
+			m, b := dk.Measured, dk.Base
+			parts = append(parts, fmt.Sprintf("%smeasured +%s ms per read, +%s ms per flushed write", who, ms2(dk.AddedReadMs), ms2(dk.AddedSyncMs)))
+			why = append(why, fmt.Sprintf("%smeasured before the stack started, %d reads and %d flushed 8 KiB writes one at a time: a read took %s ms on average (%s to %s ms, 5th to 95th percentile) against %s ms with no wait, and a write with its fdatasync %s ms (%s to %s ms) against %s ms",
+				who, m.Read.N, m.Sync.N, ms2(m.Read.MeanUs/1000), ms2(m.Read.P5Us/1000), ms2(m.Read.P95Us/1000), ms2(b.Read.MeanUs/1000),
+				ms2(m.Sync.MeanUs/1000), ms2(m.Sync.P5Us/1000), ms2(m.Sync.P95Us/1000), ms2(b.Sync.MeanUs/1000)))
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		out[i].Value += "; " + strings.Join(parts, "; ")
+		if len(why) > 0 {
+			out[i].Why += ". Waits " + strings.Join(why, "; ")
+		}
+	}
+	return out
+}
+
+func ms2(v float64) string { return strconv.FormatFloat(math.Round(v*100)/100, 'f', -1, 64) }
