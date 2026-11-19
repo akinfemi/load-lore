@@ -16,8 +16,13 @@ import (
 const block = 4096
 
 // Probe runs reads 4 KiB reads at random offsets with O_DIRECT, then
-// syncs 8 KiB writes each followed by fdatasync, one at a time, in dir.
-// The files stay for a second probe; Clean removes them.
+// overwrites syncs 8 KiB blocks each followed by fdatasync, one at a time,
+// in dir.
+// Each request starts after a random pause of up to 2 ms: dm-delay
+// releases requests on the kernel's 1 ms ticks, so one sent the moment
+// the last returned lands just after a tick and waits the whole of it,
+// where requests arriving at random times, as a database's do, wait half
+// on average. The files stay for a second probe; Clean removes them.
 func Probe(dir string, reads, syncs int) (*Result, error) {
 	rp := filepath.Join(dir, ReadFile)
 	if err := ensureReadFile(rp); err != nil {
@@ -32,6 +37,7 @@ func Probe(dir string, reads, syncs int) (*Result, error) {
 	rnd := rand.New(rand.NewPCG(1, 2))
 	rd := make([]time.Duration, 0, reads)
 	for range reads {
+		pause(rnd)
 		off := int64(rnd.IntN(ReadFileBytes/block)) * block
 		t := time.Now()
 		if _, err := f.ReadAt(buf, off); err != nil {
@@ -40,6 +46,9 @@ func Probe(dir string, reads, syncs int) (*Result, error) {
 		rd = append(rd, time.Since(t))
 	}
 
+	// Writes overwrite a file written and flushed first, as Postgres
+	// overwrites its pre-zeroed WAL segments: fdatasync then flushes the
+	// data alone, with no journal commit for a growing file.
 	sp := filepath.Join(dir, SyncFile)
 	w, err := os.OpenFile(sp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -47,8 +56,15 @@ func Probe(dir string, reads, syncs int) (*Result, error) {
 	}
 	defer w.Close()
 	page := make([]byte, 8192)
+	if _, err := w.Write(make([]byte, syncs*len(page))); err != nil {
+		return nil, err
+	}
+	if err := w.Sync(); err != nil {
+		return nil, err
+	}
 	sd := make([]time.Duration, 0, syncs)
 	for i := range syncs {
+		pause(rnd)
 		t := time.Now()
 		if _, err := w.WriteAt(page, int64(i)*int64(len(page))); err != nil {
 			return nil, err
@@ -60,6 +76,9 @@ func Probe(dir string, reads, syncs int) (*Result, error) {
 	}
 	return &Result{Read: Summarize(rd), Sync: Summarize(sd)}, nil
 }
+
+// pause waits a random 0 to 2 ms, two of dm-delay's ticks.
+func pause(rnd *rand.Rand) { time.Sleep(time.Duration(rnd.IntN(2000)) * time.Microsecond) }
 
 // Clean removes the probe's files from dir.
 func Clean(dir string) error {

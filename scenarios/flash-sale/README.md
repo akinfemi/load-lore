@@ -4,7 +4,7 @@ Level 3 · about 45 minutes · teaches hot rows when every commit waits on the d
 
 ## The story
 
-You run the shop for a sneaker brand. At ten o'clock a limited shoe goes on sale. Each purchase takes one from the shoe's stock, one row in Postgres: an update, then a commit. Product pages read the stock back. Postgres keeps its data on a network-attached cloud volume, gp3 at its baseline of 3,000 IOPS, which adds 1 ms to every read, write and fsync, so each commit waits about a millisecond longer for the disk than it would on a laptop. Each of the two api replicas keeps a pool of 40 database connections, opened at start.
+You run the shop for a sneaker brand. At ten o'clock a limited shoe goes on sale. Each purchase takes one from the shoe's stock, one row in Postgres: an update, then a commit. Product pages read the stock back. Postgres keeps its data on a network-attached cloud volume, gp3 at its baseline of 3,000 IOPS, which adds about half a millisecond to every read, write and flush (1 ms asked of the kernel's dm-delay), so each commit, a write and a flush, waits about a millisecond longer for the disk than it would on a laptop. Each of the two api replicas keeps a pool of 40 database connections, opened at start.
 
 ```mermaid
 flowchart LR

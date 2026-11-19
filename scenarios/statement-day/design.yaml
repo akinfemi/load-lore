@@ -32,7 +32,7 @@ services:
     resources: { cpu: 1, memory: 512m }
     config: { max_connections: 100, shared_buffers: 128MB }
     dataset: { rows: 5000000, row_bytes: 512 }   # about 2.5 GB with its index
-    disk: { profile: gp3 }   # about 1.4 ms per read and write (2 ms asked), 3,000 IOPS (AWS gp3 baseline)
+    disk: { profile: gp3 }   # 1 ms asked per read and write (about 0.45 ms measured), 3,000 IOPS (AWS gp3 baseline)
 
 workload:
   entry: lb

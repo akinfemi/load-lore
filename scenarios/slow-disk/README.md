@@ -4,7 +4,7 @@ Level 3 · about 45 minutes · teaches commits waiting on fsync, slow writes hol
 
 ## The story
 
-You run the orders api. Every request reads the customer's recent orders, and half of them also place an order: a write, committed to Postgres. Each of the two api replicas keeps a pool of 8 database connections, opened at start, and a request holds one for each call. Postgres commits the usual way: a commit returns once its changes are flushed to disk. Its data sits on an AWS gp3 volume at its baseline, `disk: { profile: gp3 }`, which adds 1 ms to every read, write and fsync and serves 3,000 IOPS.
+You run the orders api. Every request reads the customer's recent orders, and half of them also place an order: a write, committed to Postgres. Each of the two api replicas keeps a pool of 8 database connections, opened at start, and a request holds one for each call. Postgres commits the usual way: a commit returns once its changes are flushed to disk. Its data sits on an AWS gp3 volume at its baseline, `disk: { profile: gp3 }`, which adds about half a millisecond to every read, write and flush (1 ms asked of the kernel's dm-delay) and serves 3,000 IOPS.
 
 ```mermaid
 flowchart LR

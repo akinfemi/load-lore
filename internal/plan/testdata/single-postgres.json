@@ -221,8 +221,8 @@
       "slow_disk": true,
       "disk": {
         "profile": "gp3",
-        "read_ms": 2,
-        "write_ms": 2,
+        "read_ms": 1,
+        "write_ms": 1,
         "iops": 3000,
         "mib_per_s": 125
       },
@@ -395,8 +395,8 @@
     },
     {
       "field": "services.db.disk",
-      "value": "gp3: 2 ms per read, 2 ms per write, 3000 IOPS, 125 MiB/s",
-      "why": "a gp3 volume at its baseline: 3,000 IOPS and 125 MiB/s, included in its price, and up to 80,000 IOPS provisioned. AWS publishes no exact latency, only single-digit milliseconds, so the wait is Loadlore's own estimate, at the low end of that range, so the disk is flattered rather than handicapped. Loadlore asks dm-delay for 2 ms on every read, write and flush; it counts in the kernel's 1 ms ticks, so a request waits 1 to 2 ms, about 1.4 ms on average (measured 19 Nov; 1 ms asked gave about 0.45 ms, under AWS's range). A WAL fsync is a write and a flush, each waiting, so a commit waits about twice that. Each run measures the waits it stood on, given below. Reads and writes are capped separately, so a mixed load can reach up to twice the IOPS. Provisioned throughput isn't modelled. Source: AWS, Amazon EBS General Purpose SSD volumes: https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html"
+      "value": "gp3: 1 ms per read, 1 ms per write, 3000 IOPS, 125 MiB/s",
+      "why": "a gp3 volume at its baseline: 3,000 IOPS and 125 MiB/s, included in its price, and up to 80,000 IOPS provisioned. AWS publishes no exact latency, only single-digit milliseconds. Loadlore asks dm-delay for 1 ms on every read, write and flush, but dm-delay counts in the kernel's 1 ms ticks, so a request waits 0 to 1 ms, about 0.45 ms on average (measured 19 Nov): below AWS's range, so the disk is flattered rather than handicapped. A WAL flush is a write and a flush, each waiting, so a commit waits about 1.2 ms longer (measured the same day). Each run measures the waits it stood on, given below. Reads and writes are capped separately, so a mixed load can reach up to twice the IOPS. Provisioned throughput isn't modelled. Source: AWS, Amazon EBS General Purpose SSD volumes: https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html"
     },
     {
       "field": "services.lb timeouts",

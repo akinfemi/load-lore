@@ -109,8 +109,8 @@ func TestE2ESmoke(t *testing.T) {
 		t.Errorf("network profile applied to the stack %v, to k6 %v:\n%s", stack, k6, evs)
 	}
 
-	// The gp3 disk was measured: dm-delay's 2 ms ticks come out at 1 to 2 ms.
-	if len(res.Disks) != 1 || res.Disks[0].Unmeasured != "" || res.Disks[0].AddedReadMs < 0.8 || res.Disks[0].AddedReadMs > 2.2 {
+	// The gp3 disk was measured: dm-delay's 1 ms comes out at 0 to 1 ms.
+	if len(res.Disks) != 1 || res.Disks[0].Unmeasured != "" || res.Disks[0].AddedReadMs < 0.15 || res.Disks[0].AddedReadMs > 1.2 {
 		t.Errorf("disks: %+v", res.Disks)
 	}
 	if b, _ := os.ReadFile(filepath.Join(res.Dir, "report.md")); !strings.Contains(string(b), "measured +") {
